@@ -4,10 +4,22 @@ import uuid
 from aiohttp import web
 from server import PromptServer
 
+from .nodes import PromptWeaverPromptToggleGrid
+
 
 WEB_DIRECTORY = "./web"
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+NODE_CLASS_MAPPINGS = {
+    "PromptWeaverPromptToggleGrid": PromptWeaverPromptToggleGrid,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "PromptWeaverPromptToggleGrid": "提示词开关网格",
+}
+
+__all__ = [
+    "NODE_CLASS_MAPPINGS",
+    "NODE_DISPLAY_NAME_MAPPINGS",
+    "WEB_DIRECTORY",
+]
 
 _pending_workflows = {}
 _frontend_heartbeats = {}
