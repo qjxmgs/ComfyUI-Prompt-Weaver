@@ -1,10 +1,90 @@
-# ComfyUI Prompt Weaver bridge
+# ComfyUI Prompt Weaver
 
-Copy the `ComfyUI-Prompt-Weaver` directory into ComfyUI's `custom_nodes` directory,
-then restart ComfyUI. The desktop application can then send an image's embedded UI
-workflow to `/prompt-weaver/open-workflow`; the bundled frontend extension opens it
-with ComfyUI's `app.loadGraphData()` API.
+该插件包含两个能力：
 
-An already-open ComfyUI frontend registers itself using a heartbeat. Workflows are
-sent directly to the most recently active registered frontend without opening a new
-browser tab. A browser page is opened only when no frontend instance is available.
+- Prompt Weaver 桌面端与 ComfyUI 之间的 Workflow 打开桥接。
+- `提示词开关网格` 节点，用网格卡片快速启用、停用和组合提示词。
+
+插件不需要额外 Python 或 JavaScript 依赖。
+
+## 安装与升级
+
+将整个 `ComfyUI-Prompt-Weaver` 目录复制到 ComfyUI 的 `custom_nodes` 目录，然后重启 ComfyUI，并在浏览器中按 `Ctrl+F5` 强制刷新页面。
+
+桌面端目前只会在目标目录不存在时安装插件，不会覆盖已经安装的旧版本。升级时必须手动覆盖原目录；如果节点未出现，请确认下面这些新文件已经复制：
+
+- `nodes.py`
+- `__init__.py`
+- `web/prompt_toggle_grid.js`
+- `web/prompt_toggle_grid.css`
+
+## 提示词开关网格
+
+在节点菜单的 `Prompt Weaver/提示词` 分类中添加“提示词开关网格”。节点输出标准 `STRING`，可直接连接到 `CLIPTextEncode.text` 或其他字符串输入。
+
+每张卡片包含：
+
+- 启用开关。
+- 可编辑标题；标题只用于界面识别，不参与输出。
+- 固定单行、不可拉伸的提示词输入框。
+- 拖拽排序和删除按钮。
+
+工具栏支持新增提示词、全开、全关，以及固定选择 1–6 列。新节点默认 2 列、4 张已启用的空卡片。数组/视觉顺序就是最终汇总顺序；改变列数不会改变顺序。
+
+## 汇总规则
+
+节点按顺序处理所有启用卡片：
+
+1. 去除 Prompt 外围空白。
+2. 去除连续的首尾英文逗号 `,`，再去除一次外围空白。
+3. 跳过清理后为空的 Prompt。
+4. 使用英文逗号加空格 `, ` 连接剩余内容。
+
+Prompt 内部的逗号、换行和全角逗号不会被修改。全部关闭或全部为空时输出空字符串。
+
+## 配置与 API Workflow
+
+网格使用唯一的 `config` widget 保存版本化 JSON 字符串。示例：
+
+```json
+{
+  "version": 1,
+  "columns": 2,
+  "items": [
+    {
+      "id": "prompt-1",
+      "enabled": true,
+      "title": "画质",
+      "prompt": "masterpiece, best quality"
+    }
+  ]
+}
+```
+
+API-format Prompt 的 `inputs.config` 必须是 JSON 编码后的**字符串**，不是直接嵌套的对象。例如：
+
+```json
+{
+  "1": {
+    "class_type": "PromptWeaverPromptToggleGrid",
+    "inputs": {
+      "config": "{\"version\":1,\"columns\":2,\"items\":[{\"id\":\"prompt-1\",\"enabled\":true,\"title\":\"画质\",\"prompt\":\"masterpiece, best quality\"}]}"
+    }
+  }
+}
+```
+
+非空但无法解析、根结构错误、`version`/`items`/`enabled`/`prompt` 类型错误或版本不受支持的配置会阻止 Python 节点执行。前端还会校验卡片 ID 和标题；遇到损坏配置时保留原始值，并显示“重置为默认”入口。无效列数只影响布局，前端会恢复为 2 列。
+
+## 持久化与兼容范围
+
+- 网格状态随 Workflow 保存，支持普通画布中的保存重开和复制粘贴。
+- 桌面端解析器可以从图片中的 API Prompt 或仅有 UI Workflow 的元数据恢复实际启用的提示词。
+- 已经入库且曾解析为空的旧图片不会自动全量重扫；请在桌面端使用“重新解析此图片”。该操作会绕过旧元数据缓存。
+- v1 只承诺普通画布节点。Subgraph 参数提升、App Mode、预设导入导出、可配置分隔符、前后缀和卡片权重不在当前兼容范围内。
+
+已验证基线：ComfyUI 0.31.1、frontend 1.48.7、Python 3.13.11。
+
+## Workflow 打开桥接
+
+已经打开的 ComfyUI 前端会通过心跳向插件注册。桌面端发送 `/prompt-weaver/open-workflow` 后，插件优先把 Workflow 投递给最近活跃的页面并调用 `app.loadGraphData()`；只有没有可用前端时才打开新的浏览器页面。
