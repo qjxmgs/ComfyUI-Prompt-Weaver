@@ -1,4 +1,12 @@
 import { app } from "../../scripts/app.js";
+import {
+    clientPointToContent,
+    clientRectToContent,
+    computeInsertionIndex,
+    edgeScrollVelocity,
+    findDropTarget,
+    resolveImmediateInsertionSide,
+} from "./prompt_grid_reorder.js";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -7,6 +15,10 @@ const DEFAULT_CARD_COUNT = 4;
 const MIN_COLUMNS = 1;
 const MAX_COLUMNS = 6;
 const DEFAULT_NODE_SIZE = [600, 420];
+const GRID_GAP = 8;
+const EDGE_SCROLL_ZONE = 24;
+const EDGE_SCROLL_MAX_SPEED = 12;
+const REORDER_ANIMATION_DURATION = 120;
 
 let fallbackId = 0;
 
@@ -182,9 +194,12 @@ function createPromptGridWidget(node, inputName, inputData) {
     let state;
     let serializedValue = "";
     let parseError = null;
-    let draggedId = null;
+    let dragSession = null;
+    let dragFrame = 0;
     let disposed = false;
     let widget;
+    const cardElements = new Map();
+    const reorderAnimations = new WeakMap();
 
     function readValue(value) {
         try {
@@ -226,25 +241,392 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function clearDropState() {
-        for (const card of grid.querySelectorAll(".cpw-prompt-grid__card--drop")) {
-            card.classList.remove("cpw-prompt-grid__card--drop");
+        for (const card of cardElements.values()) {
+            card.classList.remove(
+                "cpw-prompt-grid__card--drop",
+                "cpw-prompt-grid__card--insert-before",
+                "cpw-prompt-grid__card--insert-after",
+            );
+        }
+        if (dragSession) {
+            dragSession.renderedTargetId = null;
+            dragSession.renderedSide = null;
         }
     }
 
     function applyGridColumns() {
         if (!state) return;
         grid.style.setProperty("--cpw-columns", String(state.columns));
-        grid.style.minWidth = `${state.columns * 180 + (state.columns - 1) * 8}px`;
+        grid.style.minWidth = `${state.columns * 180 + (state.columns - 1) * GRID_GAP}px`;
+        grid.classList.toggle("cpw-prompt-grid__cards--single-column", state.columns === 1);
+    }
+
+    function getViewportMetrics() {
+        const rect = scroll.getBoundingClientRect();
+        const scaleX = scroll.offsetWidth > 0 ? rect.width / scroll.offsetWidth : 1;
+        const scaleY = scroll.offsetHeight > 0 ? rect.height / scroll.offsetHeight : scaleX;
+        return {
+            rect,
+            scaleX: Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1,
+            scaleY: Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1,
+        };
+    }
+
+    function cacheFinalLayoutRects(session, clientRects = null) {
+        const metrics = getViewportMetrics();
+        const layoutRects = new Map();
+        for (const item of state?.items ?? []) {
+            const card = cardElements.get(item.id);
+            if (!card?.isConnected) continue;
+            const rect = clientRects?.get(card) ?? card.getBoundingClientRect();
+            layoutRects.set(item.id, clientRectToContent(
+                rect,
+                metrics.rect,
+                metrics.scaleX,
+                metrics.scaleY,
+                scroll.scrollLeft,
+                scroll.scrollTop,
+            ));
+        }
+        session.layoutRects = layoutRects;
+    }
+
+    function applyCardVisualOrder() {
+        for (let index = 0; index < (state?.items.length ?? 0); index += 1) {
+            const card = cardElements.get(state.items[index].id);
+            if (card) card.style.order = String(index);
+        }
+    }
+
+    function normalizeCardDomOrder() {
+        const preservedScrollLeft = scroll.scrollLeft;
+        const preservedScrollTop = scroll.scrollTop;
+        for (const item of state?.items ?? []) {
+            const card = cardElements.get(item.id);
+            if (card) grid.append(card);
+        }
+        for (const card of cardElements.values()) card.style.removeProperty("order");
+        scroll.scrollLeft = preservedScrollLeft;
+        scroll.scrollTop = preservedScrollTop;
+    }
+
+    function animateCardsToStateOrder(movedId, session = dragSession) {
+        const movedCard = cardElements.get(movedId);
+        const before = new Map();
+        for (const card of cardElements.values()) {
+            if (card.isConnected) before.set(card, card.getBoundingClientRect());
+            reorderAnimations.get(card)?.cancel();
+        }
+
+        const preservedScrollLeft = scroll.scrollLeft;
+        const preservedScrollTop = scroll.scrollTop;
+        // CSS order keeps the captured drag handle connected to the document.
+        // Moving it through a DocumentFragment here would fire
+        // lostpointercapture and incorrectly cancel the drag.
+        applyCardVisualOrder();
+        scroll.scrollLeft = preservedScrollLeft;
+        scroll.scrollTop = preservedScrollTop;
+
+        const after = new Map();
+        for (const card of cardElements.values()) {
+            if (card.isConnected) after.set(card, card.getBoundingClientRect());
+        }
+        if (session) cacheFinalLayoutRects(session, after);
+        const animationMetrics = getViewportMetrics();
+
+        const reduceMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+        if (reduceMotion) return;
+
+        for (const [card, previousRect] of before) {
+            if (card === movedCard) continue;
+            const nextRect = after.get(card);
+            if (!nextRect) continue;
+            const offsetX = (previousRect.left - nextRect.left) / animationMetrics.scaleX;
+            const offsetY = (previousRect.top - nextRect.top) / animationMetrics.scaleY;
+            if (Math.abs(offsetX) < 0.25 && Math.abs(offsetY) < 0.25) continue;
+            const animation = card.animate(
+                [
+                    { transform: `translate(${offsetX}px, ${offsetY}px)` },
+                    { transform: "translate(0, 0)" },
+                ],
+                { duration: REORDER_ANIMATION_DURATION, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+            );
+            reorderAnimations.set(card, animation);
+            const forgetAnimation = () => {
+                if (reorderAnimations.get(card) === animation) reorderAnimations.delete(card);
+            };
+            animation.addEventListener("finish", forgetAnimation, { once: true });
+            animation.addEventListener("cancel", forgetAnimation, { once: true });
+        }
+    }
+
+    function renderDropState(targetId, side) {
+        if (
+            dragSession?.renderedTargetId === targetId
+            && dragSession?.renderedSide === side
+        ) {
+            return;
+        }
+        clearDropState();
+        if (!targetId || !side) return;
+        const targetCard = cardElements.get(targetId);
+        if (!targetCard) return;
+        targetCard.classList.add(
+            "cpw-prompt-grid__card--drop",
+            side === "before"
+                ? "cpw-prompt-grid__card--insert-before"
+                : "cpw-prompt-grid__card--insert-after",
+        );
+        if (dragSession) {
+            dragSession.renderedTargetId = targetId;
+            dragSession.renderedSide = side;
+        }
+    }
+
+    function cloneCardForDrag(card) {
+        const clone = card.cloneNode(true);
+        const sourceInputs = card.querySelectorAll("input");
+        const cloneInputs = clone.querySelectorAll("input");
+        for (let index = 0; index < sourceInputs.length; index += 1) {
+            cloneInputs[index].value = sourceInputs[index].value;
+            cloneInputs[index].checked = sourceInputs[index].checked;
+        }
+        clone.classList.remove(
+            "cpw-prompt-grid__card--dragging",
+            "cpw-prompt-grid__card--drop",
+            "cpw-prompt-grid__card--insert-before",
+            "cpw-prompt-grid__card--insert-after",
+        );
+        clone.classList.add("cpw-prompt-grid__drag-ghost");
+        clone.setAttribute("aria-hidden", "true");
+        return clone;
+    }
+
+    function updateDragGhost(session) {
+        const left = session.clientX - session.pointerOffsetX;
+        const top = session.clientY - session.pointerOffsetY;
+        session.ghost.style.transform = `translate3d(${left}px, ${top}px, 0) scale(${session.ghostScaleX}, ${session.ghostScaleY})`;
+    }
+
+    function scheduleDragFrame() {
+        if (!dragSession || dragFrame) return;
+        dragFrame = requestAnimationFrame(processDragFrame);
+    }
+
+    function processDragFrame() {
+        dragFrame = 0;
+        const session = dragSession;
+        if (!session || !state) return;
+        updateDragGhost(session);
+
+        const metrics = getViewportMetrics();
+        const velocityX = edgeScrollVelocity(
+            session.clientX,
+            metrics.rect.left,
+            metrics.rect.right,
+            EDGE_SCROLL_ZONE,
+            EDGE_SCROLL_MAX_SPEED,
+        );
+        const velocityY = edgeScrollVelocity(
+            session.clientY,
+            metrics.rect.top,
+            metrics.rect.bottom,
+            EDGE_SCROLL_ZONE,
+            EDGE_SCROLL_MAX_SPEED,
+        );
+        const previousScrollLeft = scroll.scrollLeft;
+        const previousScrollTop = scroll.scrollTop;
+        if (velocityX) scroll.scrollLeft += velocityX / metrics.scaleX;
+        if (velocityY) scroll.scrollTop += velocityY / metrics.scaleY;
+        const scrolled = scroll.scrollLeft !== previousScrollLeft || scroll.scrollTop !== previousScrollTop;
+
+        const point = clientPointToContent(
+            session.clientX,
+            session.clientY,
+            metrics.rect,
+            metrics.scaleX,
+            metrics.scaleY,
+            scroll.scrollLeft,
+            scroll.scrollTop,
+        );
+        const slots = state.items.flatMap((item) => {
+            const rect = session.layoutRects.get(item.id);
+            return rect ? [{ id: item.id, rect }] : [];
+        });
+        const target = findDropTarget(slots, point, session.sourceId, GRID_GAP, GRID_GAP);
+        if (!target) {
+            session.lastInsertionIndex = null;
+            renderDropState(null, null);
+        } else {
+            const sourceIndex = state.items.findIndex((item) => item.id === session.sourceId);
+            const targetIndex = state.items.findIndex((item) => item.id === target.id);
+            const side = resolveImmediateInsertionSide(sourceIndex, targetIndex);
+            renderDropState(target.id, side);
+            const insertionIndex = computeInsertionIndex(
+                sourceIndex,
+                targetIndex,
+                side,
+                state.items.length,
+            );
+            if (insertionIndex !== sourceIndex && insertionIndex !== session.lastInsertionIndex) {
+                const [moved] = state.items.splice(sourceIndex, 1);
+                state.items.splice(insertionIndex, 0, moved);
+                session.lastInsertionIndex = insertionIndex;
+                session.changed = true;
+                animateCardsToStateOrder(session.sourceId, session);
+                commit(false, false);
+            } else {
+                session.lastInsertionIndex = insertionIndex;
+            }
+        }
+
+        if (scrolled) scheduleDragFrame();
+    }
+
+    function cleanupDragSession(session) {
+        if (dragFrame) {
+            cancelAnimationFrame(dragFrame);
+            dragFrame = 0;
+        }
+        globalThis.removeEventListener("keydown", onDragKeyDown, true);
+        clearDropState();
+        session.card.classList.remove("cpw-prompt-grid__card--dragging");
+        session.handle.removeAttribute("aria-grabbed");
+        scroll.classList.remove("cpw-prompt-grid__scroll--sorting");
+        grid.classList.remove("cpw-prompt-grid__cards--sorting");
+        session.ghost.remove();
+    }
+
+    function endPointerDrag(cancelled, restoreState = true) {
+        const session = dragSession;
+        if (!session) return;
+
+        const currentOrder = state?.items.map((item) => item.id).join("\u0000") ?? "";
+        const originalOrder = session.originalItems.map((item) => item.id).join("\u0000");
+        const orderChanged = currentOrder !== originalOrder;
+        if (cancelled && restoreState && state && session.changed) {
+            state.items = session.originalItems;
+            if (orderChanged) animateCardsToStateOrder(session.sourceId, session);
+            const previousValue = serializedValue;
+            serializedValue = session.originalSerialized;
+            if (serializedValue !== previousValue || orderChanged) {
+                notifyWidgetChanged(node, widget, inputName, serializedValue, previousValue, false);
+            }
+        }
+
+        dragSession = null;
+        cleanupDragSession(session);
+        try {
+            if (session.handle.hasPointerCapture(session.pointerId)) {
+                session.handle.releasePointerCapture(session.pointerId);
+            }
+        } catch {
+            // The browser may already have released capture during cancellation.
+        }
+        normalizeCardDomOrder();
+
+        if (!cancelled && session.changed && orderChanged) captureCanvasState();
+    }
+
+    function onDragKeyDown(event) {
+        if (event.key !== "Escape" || !dragSession) return;
+        event.preventDefault();
+        event.stopPropagation();
+        endPointerDrag(true);
+    }
+
+    function beginPointerDrag(event, itemId, card, handle) {
+        if (!state || dragSession || event.button !== 0 || event.isPrimary === false) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        for (const candidate of cardElements.values()) reorderAnimations.get(candidate)?.cancel();
+        const metrics = getViewportMetrics();
+        const cardRect = card.getBoundingClientRect();
+        const ghost = cloneCardForDrag(card);
+        ghost.style.width = `${card.offsetWidth || cardRect.width / metrics.scaleX}px`;
+        ghost.style.height = `${card.offsetHeight || cardRect.height / metrics.scaleY}px`;
+        document.body.append(ghost);
+
+        dragSession = {
+            pointerId: event.pointerId,
+            sourceId: itemId,
+            card,
+            handle,
+            ghost,
+            ghostScaleX: metrics.scaleX,
+            ghostScaleY: metrics.scaleY,
+            pointerOffsetX: event.clientX - cardRect.left,
+            pointerOffsetY: event.clientY - cardRect.top,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            originalItems: state.items.slice(),
+            originalSerialized: serializedValue,
+            layoutRects: new Map(),
+            lastInsertionIndex: null,
+            renderedTargetId: null,
+            renderedSide: null,
+            changed: false,
+        };
+        cacheFinalLayoutRects(dragSession);
+        card.classList.add("cpw-prompt-grid__card--dragging");
+        handle.setAttribute("aria-grabbed", "true");
+        scroll.classList.add("cpw-prompt-grid__scroll--sorting");
+        grid.classList.add("cpw-prompt-grid__cards--sorting");
+        globalThis.addEventListener("keydown", onDragKeyDown, true);
+        updateDragGhost(dragSession);
+        try {
+            handle.setPointerCapture(event.pointerId);
+        } catch {
+            endPointerDrag(true);
+        }
+    }
+
+    function movePointerDrag(event) {
+        if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const coalesced = event.getCoalescedEvents?.();
+        const latest = coalesced?.length ? coalesced[coalesced.length - 1] : event;
+        dragSession.clientX = latest.clientX;
+        dragSession.clientY = latest.clientY;
+        scheduleDragFrame();
+    }
+
+    function finishPointerDrag(event) {
+        if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dragSession.clientX = event.clientX;
+        dragSession.clientY = event.clientY;
+        if (dragFrame) {
+            cancelAnimationFrame(dragFrame);
+            dragFrame = 0;
+            processDragFrame();
+        }
+        endPointerDrag(false);
+    }
+
+    function cancelPointerDrag(event) {
+        if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        endPointerDrag(true);
+    }
+
+    function losePointerCapture(event) {
+        if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+        endPointerDrag(true);
     }
 
     function createCard(item) {
         const card = element("article", "cpw-prompt-grid__card");
+        cardElements.set(item.id, card);
         card.classList.toggle("cpw-prompt-grid__card--disabled", !item.enabled);
 
         const header = element("div", "cpw-prompt-grid__card-header");
         const dragHandle = element("button", "cpw-prompt-grid__drag", "⠿");
         dragHandle.type = "button";
-        dragHandle.draggable = true;
         dragHandle.title = "拖拽排序";
         dragHandle.setAttribute("aria-label", "拖拽此卡片排序");
 
@@ -311,65 +693,31 @@ function createPromptGridWidget(node, inputName, inputData) {
             commit(true);
         });
 
-        dragHandle.addEventListener("dragstart", (event) => {
-            draggedId = item.id;
-            card.classList.add("cpw-prompt-grid__card--dragging");
-            if (event.dataTransfer) {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", "prompt-weaver-card");
-            }
-        });
-        dragHandle.addEventListener("dragend", () => {
-            draggedId = null;
-            card.classList.remove("cpw-prompt-grid__card--dragging");
-            clearDropState();
-        });
-        card.addEventListener("dragover", (event) => {
-            if (!draggedId || draggedId === item.id) return;
-            event.preventDefault();
-            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-            clearDropState();
-            card.classList.add("cpw-prompt-grid__card--drop");
-        });
-        card.addEventListener("dragleave", () => card.classList.remove("cpw-prompt-grid__card--drop"));
-        card.addEventListener("drop", (event) => {
-            event.preventDefault();
-            clearDropState();
-            if (!draggedId || draggedId === item.id) return;
-            const sourceIndex = state.items.findIndex((candidate) => candidate.id === draggedId);
-            let targetIndex = state.items.findIndex((candidate) => candidate.id === item.id);
-            if (sourceIndex < 0 || targetIndex < 0) return;
-            const [moved] = state.items.splice(sourceIndex, 1);
-            if (sourceIndex < targetIndex) targetIndex -= 1;
-            const rect = card.getBoundingClientRect();
-            const centerY = rect.top + rect.height / 2;
-            const nearSameRow = Math.abs(event.clientY - centerY) < rect.height * 0.25;
-            const after = state.columns === 1
-                ? event.clientY > centerY
-                : nearSameRow
-                ? event.clientX > rect.left + rect.width / 2
-                : event.clientY > centerY;
-            state.items.splice(targetIndex + (after ? 1 : 0), 0, moved);
-            draggedId = null;
-            commit(true);
-        });
+        dragHandle.addEventListener("pointerdown", (event) => beginPointerDrag(event, item.id, card, dragHandle));
+        dragHandle.addEventListener("pointermove", movePointerDrag);
+        dragHandle.addEventListener("pointerup", finishPointerDrag);
+        dragHandle.addEventListener("pointercancel", cancelPointerDrag);
+        dragHandle.addEventListener("lostpointercapture", losePointerCapture);
         return card;
     }
 
     function render() {
         if (disposed) return;
+        if (dragSession) endPointerDrag(true);
         const invalid = Boolean(parseError) || !state;
         toolbar.hidden = invalid;
         scroll.hidden = invalid;
         errorPanel.hidden = !invalid;
         if (invalid) {
             errorMessage.textContent = parseError || "未知配置错误";
+            cardElements.clear();
             grid.replaceChildren();
             return;
         }
 
         columnSelect.value = String(state.columns);
         applyGridColumns();
+        cardElements.clear();
         const cards = state.items.map(createCard);
         if (cards.length) {
             grid.replaceChildren(...cards);
@@ -407,8 +755,8 @@ function createPromptGridWidget(node, inputName, inputData) {
     });
 
     for (const eventName of [
-        "pointerdown", "pointermove", "mousedown", "click", "dblclick", "keydown", "contextmenu",
-        "dragstart", "dragover", "dragleave", "drop", "dragend",
+        "pointerdown", "pointermove", "pointerup", "pointercancel", "mousedown", "click", "dblclick",
+        "keydown", "keyup", "input", "change", "contextmenu",
     ]) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
@@ -421,6 +769,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         hideOnZoom: false,
         getValue: () => serializedValue,
         setValue: (value) => {
+            if (dragSession) endPointerDrag(true);
             readValue(value);
             render();
         },
@@ -431,6 +780,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
         previousOnRemove?.apply(this, args);
+        if (dragSession) endPointerDrag(true, false);
         disposed = true;
         root.replaceChildren();
     };
