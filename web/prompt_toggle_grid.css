@@ -87,8 +87,14 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
+    overflow-anchor: none;
     overscroll-behavior: contain;
     padding: 1px 3px 3px 1px;
+}
+
+.cpw-prompt-grid__scroll--sorting {
+    scroll-behavior: auto;
+    overflow-anchor: none;
 }
 
 .cpw-prompt-grid__cards {
@@ -97,6 +103,11 @@
     grid-template-columns: repeat(var(--cpw-columns), minmax(180px, 1fr));
     gap: 8px;
     align-items: start;
+    overflow: hidden;
+    overflow: clip;
+    overflow-anchor: none;
+    contain: paint;
+    isolation: isolate;
 }
 
 .cpw-prompt-grid__card {
@@ -110,7 +121,7 @@
     border-radius: 7px;
     background: color-mix(in srgb, var(--comfy-menu-bg, #202124) 92%, var(--p-primary-color, #7c6df2) 8%);
     box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
-    transition: opacity 120ms ease, border-color 120ms ease, transform 120ms ease;
+    transition: opacity 120ms ease, border-color 120ms ease;
 }
 
 .cpw-prompt-grid__card--disabled {
@@ -123,7 +134,60 @@
 
 .cpw-prompt-grid__card--drop {
     border-color: var(--p-primary-color, #7c6df2);
-    transform: translateY(-1px);
+    z-index: 1;
+}
+
+.cpw-prompt-grid__card--insert-before::after,
+.cpw-prompt-grid__card--insert-after::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--p-primary-color, #7c6df2);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--comfy-menu-bg, #202124) 70%, transparent);
+    pointer-events: none;
+}
+
+.cpw-prompt-grid__card--insert-before::after {
+    left: -2px;
+}
+
+.cpw-prompt-grid__card--insert-after::after {
+    right: -2px;
+}
+
+.cpw-prompt-grid__cards--single-column .cpw-prompt-grid__card--insert-before::after,
+.cpw-prompt-grid__cards--single-column .cpw-prompt-grid__card--insert-after::after {
+    left: 4px;
+    right: 4px;
+    width: auto;
+    height: 3px;
+}
+
+.cpw-prompt-grid__cards--single-column .cpw-prompt-grid__card--insert-before::after {
+    top: -2px;
+    bottom: auto;
+}
+
+.cpw-prompt-grid__cards--single-column .cpw-prompt-grid__card--insert-after::after {
+    top: auto;
+    bottom: -2px;
+}
+
+.cpw-prompt-grid__drag-ghost {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 2147483000;
+    margin: 0;
+    pointer-events: none;
+    opacity: 0.9 !important;
+    transform-origin: 0 0;
+    will-change: transform;
+    transition: none !important;
+    box-shadow: 0 8px 22px rgb(0 0 0 / 32%);
 }
 
 .cpw-prompt-grid__card-header {
@@ -161,6 +225,8 @@
     min-height: 0;
     font-size: 14px;
     cursor: grab;
+    touch-action: none;
+    user-select: none;
 }
 
 .cpw-prompt-grid__drag:active {
