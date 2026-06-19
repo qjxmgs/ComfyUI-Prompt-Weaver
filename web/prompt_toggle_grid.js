@@ -1,5 +1,9 @@
 import { app } from "../../scripts/app.js";
 import {
+    buildPromptFromSelection,
+    splitPromptTokens,
+} from "./prompt_editor_tokens.js";
+import {
     clientPointToContent,
     clientRectToContent,
     computeInsertionIndex,
@@ -196,6 +200,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let parseError = null;
     let dragSession = null;
     let dragFrame = 0;
+    let activePromptEditor = null;
     let disposed = false;
     let widget;
     const cardElements = new Map();
@@ -619,6 +624,133 @@ function createPromptGridWidget(node, inputName, inputData) {
         endPointerDrag(true);
     }
 
+    function closePromptEditor(restoreFocus = true) {
+        const editor = activePromptEditor;
+        if (!editor) return;
+        activePromptEditor = null;
+        editor.overlay.remove();
+        if (restoreFocus) {
+            queueMicrotask(() => {
+                if (editor.opener.isConnected) editor.opener.focus();
+            });
+        }
+    }
+
+    function openPromptEditor(promptInput, itemId, opener) {
+        closePromptEditor(false);
+        const originalPrompt = promptInput.value;
+        const tokens = splitPromptTokens(originalPrompt);
+        const initialSelected = tokens.map(() => true);
+        const selected = initialSelected.slice();
+
+        const overlay = element("div", "cpw-prompt-editor__overlay");
+        const dialog = element("section", "cpw-prompt-editor");
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+
+        const header = element("header", "cpw-prompt-editor__header");
+        const title = element("h2", "cpw-prompt-editor__title", "编辑提示词");
+        title.id = `cpw-prompt-editor-${createId()}`;
+        dialog.setAttribute("aria-labelledby", title.id);
+        const closeButton = element("button", "cpw-prompt-editor__close", "×");
+        closeButton.type = "button";
+        closeButton.title = "关闭且不保存";
+        closeButton.setAttribute("aria-label", "关闭提示词编辑窗口且不保存");
+        header.append(title, closeButton);
+
+        const content = element("div", "cpw-prompt-editor__content");
+        const tokenList = element("div", "cpw-prompt-editor__tokens");
+        tokenList.setAttribute("aria-label", "提示词标签");
+        const tokenButtons = tokens.map((token, index) => {
+            const button = element(
+                "button",
+                `cpw-prompt-editor__token cpw-prompt-editor__token--color-${index % 5}`,
+                token,
+            );
+            button.type = "button";
+            button.title = token;
+            button.setAttribute("aria-pressed", "true");
+            button.addEventListener("click", () => {
+                selected[index] = !selected[index];
+                button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
+                button.setAttribute("aria-pressed", String(selected[index]));
+            });
+            return button;
+        });
+        if (tokenButtons.length) {
+            tokenList.append(...tokenButtons);
+        } else {
+            tokenList.append(element("div", "cpw-prompt-editor__empty", "当前没有可编辑的提示词。"));
+        }
+        content.append(tokenList);
+
+        const footer = element("footer", "cpw-prompt-editor__footer");
+        const resetSelectionButton = element("button", "cpw-prompt-editor__action", "重置");
+        const confirmButton = element(
+            "button",
+            "cpw-prompt-editor__action cpw-prompt-editor__action--primary",
+            "确认",
+        );
+        resetSelectionButton.type = "button";
+        confirmButton.type = "button";
+        footer.append(resetSelectionButton, confirmButton);
+        dialog.append(header, content, footer);
+        overlay.append(dialog);
+
+        activePromptEditor = { overlay, opener };
+        closeButton.addEventListener("click", () => closePromptEditor());
+        overlay.addEventListener("click", (event) => {
+            if (event.target === overlay) closePromptEditor();
+        });
+        resetSelectionButton.addEventListener("click", () => {
+            for (let index = 0; index < selected.length; index += 1) {
+                selected[index] = initialSelected[index];
+                tokenButtons[index].classList.remove("cpw-prompt-editor__token--inactive");
+                tokenButtons[index].setAttribute("aria-pressed", "true");
+            }
+        });
+        confirmButton.addEventListener("click", () => {
+            const nextPrompt = buildPromptFromSelection(
+                originalPrompt,
+                tokens,
+                selected,
+                initialSelected,
+            );
+            closePromptEditor();
+            if (nextPrompt === originalPrompt) return;
+            promptInput.value = nextPrompt;
+            updateItem(itemId, { prompt: nextPrompt });
+        });
+        dialog.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closePromptEditor();
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const focusable = [...dialog.querySelectorAll("button:not([disabled])")];
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+        for (const eventName of [
+            "pointerdown", "pointermove", "pointerup", "pointercancel", "mousedown", "click", "dblclick",
+            "keydown", "keyup", "input", "change", "contextmenu",
+        ]) {
+            overlay.addEventListener(eventName, (event) => event.stopPropagation());
+        }
+        overlay.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+        document.body.append(overlay);
+        queueMicrotask(() => (tokenButtons[0] ?? confirmButton).focus());
+    }
+
     function createCard(item) {
         const card = element("article", "cpw-prompt-grid__card");
         cardElements.set(item.id, card);
@@ -656,8 +788,12 @@ function createPromptGridWidget(node, inputName, inputData) {
         prompt.value = item.prompt;
         prompt.placeholder = "输入提示词…";
         prompt.setAttribute("aria-label", "提示词内容");
+        const promptEditButton = element("button", "cpw-prompt-grid__prompt-edit", "✎");
+        promptEditButton.type = "button";
+        promptEditButton.title = "拆分并选择提示词";
+        promptEditButton.setAttribute("aria-label", "打开提示词标签编辑窗口");
         const promptRow = element("div", "cpw-prompt-grid__prompt-row");
-        promptRow.append(prompt);
+        promptRow.append(prompt, promptEditButton);
         card.append(header, promptRow);
 
         let deleteArmed = false;
@@ -678,6 +814,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         prompt.addEventListener("input", () => updateItem(item.id, { prompt: prompt.value }, false));
         title.addEventListener("change", captureCanvasState);
         prompt.addEventListener("change", captureCanvasState);
+        promptEditButton.addEventListener("click", () => openPromptEditor(prompt, item.id, promptEditButton));
         deleteButton.addEventListener("click", () => {
             if (prompt.value.trim() && !deleteArmed) {
                 deleteArmed = true;
@@ -703,6 +840,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function render() {
         if (disposed) return;
+        if (activePromptEditor) closePromptEditor(false);
         if (dragSession) endPointerDrag(true);
         const invalid = Boolean(parseError) || !state;
         toolbar.hidden = invalid;
@@ -779,6 +917,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     widget.inputSpec = inputData;
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
+        if (activePromptEditor) closePromptEditor(false);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;
