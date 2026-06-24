@@ -1,9 +1,20 @@
+import json
 import time
 import uuid
 
 from aiohttp import web
 from server import PromptServer
 
+from .archive_store import (
+    MAX_IMPORT_BYTES,
+    MAX_SNAPSHOT_BYTES,
+    ArchiveCapacityError,
+    ArchiveConflictError,
+    ArchiveCorruptError,
+    ArchiveNotFoundError,
+    ArchiveStore,
+    ArchiveValidationError,
+)
 from .nodes import PromptWeaverPromptToggleGrid
 
 
@@ -23,6 +34,55 @@ __all__ = [
 
 _pending_workflows = {}
 _frontend_heartbeats = {}
+_archive_stores = {}
+
+
+def _archive_store(request):
+    path = PromptServer.instance.user_manager.get_request_user_filepath(
+        request,
+        "ComfyUI-Prompt-Weaver/prompt-grid-archives.json",
+    )
+    if not path:
+        raise ArchiveValidationError("unable to resolve the ComfyUI user data directory")
+    store = _archive_stores.get(path)
+    if store is None:
+        store = ArchiveStore(path)
+        _archive_stores[path] = store
+    return store
+
+
+async def _request_json(request, maximum_bytes):
+    if request.content_length is not None and request.content_length > maximum_bytes:
+        raise ArchiveCapacityError("request body is too large")
+    raw = await request.read()
+    if len(raw) > maximum_bytes:
+        raise ArchiveCapacityError("request body is too large")
+    try:
+        payload = json.loads(
+            raw.decode("utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ArchiveValidationError(f"invalid JSON constant {value!r}")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ArchiveValidationError(f"invalid JSON: {error}") from error
+    if not isinstance(payload, dict):
+        raise ArchiveValidationError("request JSON must be an object")
+    return payload
+
+
+def _archive_error_response(error):
+    if isinstance(error, ArchiveNotFoundError):
+        status = 404
+    elif isinstance(error, ArchiveConflictError):
+        status = 409
+    elif isinstance(error, ArchiveCapacityError):
+        status = 413
+    elif isinstance(error, ArchiveCorruptError):
+        status = 500
+    else:
+        status = 400
+    return web.json_response({"error": str(error)}, status=status)
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/frontend-ready")
@@ -82,3 +142,70 @@ async def take_workflow(request):
     if data is None:
         return web.json_response({"error": "workflow expired"}, status=404)
     return web.json_response(data)
+
+
+@PromptServer.instance.routes.get("/prompt-weaver/prompt-grid-archives")
+async def list_prompt_grid_archives(request):
+    try:
+        return web.json_response(_archive_store(request).list_archives())
+    except Exception as error:
+        if isinstance(error, (ArchiveValidationError, ArchiveCorruptError)):
+            return _archive_error_response(error)
+        raise
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/prompt-grid-archives")
+async def create_prompt_grid_archive(request):
+    try:
+        payload = await _request_json(request, MAX_SNAPSHOT_BYTES + 4096)
+        archive = _archive_store(request).create(payload.get("name"), payload.get("snapshot"))
+        return web.json_response({"archive": archive}, status=201)
+    except (ArchiveValidationError, ArchiveConflictError, ArchiveCapacityError, ArchiveCorruptError) as error:
+        return _archive_error_response(error)
+
+
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-grid-archives/{archive_id}")
+async def update_prompt_grid_archive(request):
+    try:
+        payload = await _request_json(request, MAX_SNAPSHOT_BYTES + 4096)
+        archive = _archive_store(request).update(
+            request.match_info["archive_id"],
+            name=payload.get("name"),
+            snapshot=payload.get("snapshot"),
+        )
+        return web.json_response({"archive": archive})
+    except (
+        ArchiveValidationError,
+        ArchiveConflictError,
+        ArchiveNotFoundError,
+        ArchiveCapacityError,
+        ArchiveCorruptError,
+    ) as error:
+        return _archive_error_response(error)
+
+
+@PromptServer.instance.routes.delete("/prompt-weaver/prompt-grid-archives/{archive_id}")
+async def delete_prompt_grid_archive(request):
+    try:
+        archive = _archive_store(request).delete(request.match_info["archive_id"])
+        return web.json_response({"archive": archive})
+    except (ArchiveValidationError, ArchiveNotFoundError, ArchiveCorruptError) as error:
+        return _archive_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/prompt-grid-archives/import")
+async def import_prompt_grid_archives(request):
+    try:
+        payload = await _request_json(request, MAX_IMPORT_BYTES + 4096)
+        result = _archive_store(request).import_bundle(
+            payload.get("bundle"),
+            payload.get("conflict_policy", "skip"),
+        )
+        return web.json_response(result)
+    except (
+        ArchiveValidationError,
+        ArchiveConflictError,
+        ArchiveCapacityError,
+        ArchiveCorruptError,
+    ) as error:
+        return _archive_error_response(error)
