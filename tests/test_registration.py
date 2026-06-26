@@ -26,6 +26,12 @@ class _FakeRoutes:
     def get(self, path):
         return self._decorator("GET", path)
 
+    def patch(self, path):
+        return self._decorator("PATCH", path)
+
+    def delete(self, path):
+        return self._decorator("DELETE", path)
+
 
 class PluginRegistrationTests(unittest.TestCase):
     def test_node_mapping_loads_without_replacing_existing_routes(self):
@@ -70,6 +76,11 @@ class PluginRegistrationTests(unittest.TestCase):
                 ("POST", "/prompt-weaver/frontend-ready", "frontend_ready"),
                 ("POST", "/prompt-weaver/open-workflow", "open_workflow"),
                 ("GET", "/prompt-weaver/workflow/{token}", "take_workflow"),
+                ("GET", "/prompt-weaver/prompt-grid-archives", "list_prompt_grid_archives"),
+                ("POST", "/prompt-weaver/prompt-grid-archives", "create_prompt_grid_archive"),
+                ("PATCH", "/prompt-weaver/prompt-grid-archives/{archive_id}", "update_prompt_grid_archive"),
+                ("DELETE", "/prompt-weaver/prompt-grid-archives/{archive_id}", "delete_prompt_grid_archive"),
+                ("POST", "/prompt-weaver/prompt-grid-archives/import", "import_prompt_grid_archives"),
             ],
         )
 
