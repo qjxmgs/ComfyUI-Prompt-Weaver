@@ -1,4 +1,14 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
+import {
+    PromptGridArchiveClient,
+    buildArchiveExportBundle,
+    defaultArchiveName,
+    findMatchingArchive,
+    isDefaultSnapshot,
+    snapshotFromState,
+    validateImportBundlePreview,
+} from "./prompt_grid_archives.js";
 import {
     buildPromptFromSelection,
     splitPromptTokens,
@@ -23,6 +33,29 @@ const GRID_GAP = 8;
 const EDGE_SCROLL_ZONE = 24;
 const EDGE_SCROLL_MAX_SPEED = 12;
 const REORDER_ANIMATION_DURATION = 120;
+const ARCHIVE_SYNC_EVENT = "cpw-prompt-grid-archives-changed";
+const ARCHIVE_CHANNEL_NAME = "prompt-weaver-prompt-grid-archives";
+const MAX_ARCHIVE_IMPORT_BYTES = 2 * 1024 * 1024;
+
+const archiveClient = new PromptGridArchiveClient(api);
+const archiveChannel = typeof BroadcastChannel === "function"
+    ? new BroadcastChannel(ARCHIVE_CHANNEL_NAME)
+    : null;
+
+function dispatchArchiveSync() {
+    window.dispatchEvent(new CustomEvent(ARCHIVE_SYNC_EVENT));
+}
+
+function publishArchiveSync() {
+    dispatchArchiveSync();
+    archiveChannel?.postMessage({ type: "archives-changed" });
+}
+
+if (archiveChannel) {
+    archiveChannel.addEventListener("message", (event) => {
+        if (event.data?.type === "archives-changed") dispatchArchiveSync();
+    });
+}
 
 let fallbackId = 0;
 
@@ -174,13 +207,20 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
     columnGroup.append(columnSelect);
 
+    const archiveGroup = element("div", "cpw-prompt-grid__archives");
+    const archiveSelect = element("select", "cpw-prompt-grid__select cpw-prompt-grid__archive-select");
+    archiveSelect.setAttribute("aria-label", "快速切换提示词存档");
+    const manageArchivesButton = element("button", "cpw-prompt-grid__button", "存档管理");
+    manageArchivesButton.type = "button";
+    archiveGroup.append(archiveSelect, manageArchivesButton);
+
     const actions = element("div", "cpw-prompt-grid__actions");
     const addButton = element("button", "cpw-prompt-grid__button cpw-prompt-grid__button--primary", "＋ 新增提示词");
     const enableAllButton = element("button", "cpw-prompt-grid__button", "全开");
     const disableAllButton = element("button", "cpw-prompt-grid__button", "全关");
     for (const button of [addButton, enableAllButton, disableAllButton]) button.type = "button";
     actions.append(addButton, enableAllButton, disableAllButton);
-    toolbar.append(columnGroup, actions);
+    toolbar.append(columnGroup, archiveGroup, actions);
 
     const errorPanel = element("div", "cpw-prompt-grid__error");
     errorPanel.hidden = true;
@@ -201,6 +241,13 @@ function createPromptGridWidget(node, inputName, inputData) {
     let dragSession = null;
     let dragFrame = 0;
     let activePromptEditor = null;
+    let activeArchiveManager = null;
+    let activeArchiveConfirmation = null;
+    let archives = [];
+    let activeArchiveId = null;
+    let archiveDirty = false;
+    let archivesLoading = false;
+    let archivesRefreshPending = false;
     let disposed = false;
     let widget;
     const cardElements = new Map();
@@ -226,6 +273,537 @@ function createPromptGridWidget(node, inputName, inputData) {
         parseError = null;
         if (renderAfter) render();
         notifyWidgetChanged(node, widget, inputName, serializedValue, previousValue, captureHistory);
+        reconcileArchiveSelection();
+    }
+
+    function currentSnapshot() {
+        return state ? snapshotFromState(state) : null;
+    }
+
+    function renderArchiveSelect() {
+        const previousValue = activeArchiveId ?? "";
+        archiveSelect.replaceChildren();
+        const placeholder = element("option", "");
+        placeholder.value = "";
+        placeholder.textContent = archivesLoading
+            ? "正在加载存档…"
+            : archiveDirty
+                ? "* 未保存"
+                : "选择存档…";
+        archiveSelect.append(placeholder);
+        for (const archive of archives) {
+            const option = element("option", "", archive.name);
+            option.value = archive.id;
+            archiveSelect.append(option);
+        }
+        archiveSelect.value = previousValue;
+        if (archiveSelect.value !== previousValue) archiveSelect.value = "";
+        archiveSelect.disabled = !state;
+    }
+
+    function reconcileArchiveSelection() {
+        if (!state) {
+            activeArchiveId = null;
+            archiveDirty = false;
+            renderArchiveSelect();
+            return;
+        }
+        const snapshot = currentSnapshot();
+        const match = findMatchingArchive(archives, snapshot);
+        activeArchiveId = match?.id ?? null;
+        archiveDirty = !match && !isDefaultSnapshot(snapshot, snapshotFromState(createDefaultConfig()));
+        renderArchiveSelect();
+    }
+
+    function setArchiveManagerMessage(message, error = false) {
+        if (!activeArchiveManager) return;
+        activeArchiveManager.message.textContent = message || "";
+        activeArchiveManager.message.classList.toggle("cpw-archive-manager__message--error", error);
+        activeArchiveManager.message.hidden = !message;
+    }
+
+    async function refreshArchives({ reportError = false } = {}) {
+        if (disposed) return false;
+        if (archivesLoading) {
+            archivesRefreshPending = true;
+            return false;
+        }
+        archivesLoading = true;
+        renderArchiveSelect();
+        try {
+            const payload = await archiveClient.list();
+            if (disposed) return false;
+            archives = [...(payload?.archives ?? [])].sort(
+                (left, right) => String(right.updated_at).localeCompare(String(left.updated_at)),
+            );
+            reconcileArchiveSelection();
+            renderArchiveManagerList();
+            return true;
+        } catch (error) {
+            if (reportError) setArchiveManagerMessage(error.message || String(error), true);
+            return false;
+        } finally {
+            archivesLoading = false;
+            if (!disposed) renderArchiveSelect();
+            if (!disposed && archivesRefreshPending) {
+                archivesRefreshPending = false;
+                queueMicrotask(() => refreshArchives({ reportError }));
+            }
+        }
+    }
+
+    function closeArchiveConfirmation(result = false) {
+        if (!activeArchiveConfirmation) return;
+        const confirmation = activeArchiveConfirmation;
+        activeArchiveConfirmation = null;
+        document.removeEventListener("keydown", confirmation.onKeyDown, true);
+        confirmation.overlay.remove();
+        confirmation.resolve(result);
+    }
+
+    function askArchiveConfirmation({ title, message, confirmText = "确认", danger = false }) {
+        if (activeArchiveConfirmation) closeArchiveConfirmation(false);
+        return new Promise((resolve) => {
+            const overlay = element("div", "cpw-archive-confirm__overlay");
+            const dialog = element("section", "cpw-archive-confirm");
+            dialog.setAttribute("role", "alertdialog");
+            dialog.setAttribute("aria-modal", "true");
+            const heading = element("h3", "cpw-archive-confirm__title", title);
+            const body = element("p", "cpw-archive-confirm__message", message);
+            const actionsRow = element("div", "cpw-archive-confirm__actions");
+            const cancelButton = element("button", "cpw-archive-manager__button", "取消");
+            const confirmButton = element(
+                "button",
+                `cpw-archive-manager__button ${danger ? "cpw-archive-manager__button--danger" : "cpw-archive-manager__button--primary"}`,
+                confirmText,
+            );
+            cancelButton.type = "button";
+            confirmButton.type = "button";
+            actionsRow.append(cancelButton, confirmButton);
+            dialog.append(heading, body, actionsRow);
+            overlay.append(dialog);
+            const onKeyDown = (event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeArchiveConfirmation(false);
+                }
+            };
+            activeArchiveConfirmation = { overlay, onKeyDown, resolve };
+            overlay.addEventListener("pointerdown", (event) => {
+                if (event.target === overlay) closeArchiveConfirmation(false);
+            });
+            cancelButton.addEventListener("click", () => closeArchiveConfirmation(false));
+            confirmButton.addEventListener("click", () => closeArchiveConfirmation(true));
+            document.addEventListener("keydown", onKeyDown, true);
+            document.body.append(overlay);
+            queueMicrotask(() => confirmButton.focus());
+        });
+    }
+
+    function closeArchiveManager() {
+        if (!activeArchiveManager) return;
+        const manager = activeArchiveManager;
+        activeArchiveManager = null;
+        document.removeEventListener("keydown", manager.onKeyDown, true);
+        manager.overlay.remove();
+        manageArchivesButton.focus();
+    }
+
+    function loadArchive(archive) {
+        if (!archive || disposed) return;
+        const normalized = normalizeConfigValue(JSON.stringify(archive.snapshot));
+        state = normalized.state;
+        serializedValue = normalized.serialized;
+        parseError = null;
+        activeArchiveId = archive.id;
+        commit(true, true);
+    }
+
+    async function requestArchiveLoad(archive) {
+        if (!archive || archive.id === activeArchiveId) return false;
+        if (archiveDirty) {
+            const proceed = await askArchiveConfirmation({
+                title: "放弃未保存修改？",
+                message: `加载“${archive.name}”会完整替换当前网格状态。`,
+                confirmText: "放弃并加载",
+                danger: true,
+            });
+            if (!proceed) {
+                renderArchiveSelect();
+                return false;
+            }
+        }
+        closeArchiveManager();
+        loadArchive(archive);
+        return true;
+    }
+
+    function formatArchiveTime(value) {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value ?? "") : date.toLocaleString("zh-CN", { hour12: false });
+    }
+
+    function downloadArchiveBundle(selectedArchives, filename) {
+        const bundle = buildArchiveExportBundle(selectedArchives);
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = element("a", "");
+        anchor.href = url;
+        anchor.download = filename.replace(/[\\/:*?"<>|]+/g, "-");
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    async function importArchiveFile(file) {
+        if (!file) return;
+        if (file.size > MAX_ARCHIVE_IMPORT_BYTES) {
+            setArchiveManagerMessage("导入文件不能超过 2 MB。", true);
+            return;
+        }
+        try {
+            const bundle = JSON.parse(await file.text());
+            const preview = validateImportBundlePreview(bundle);
+            const policy = await askImportPolicy(preview);
+            if (!policy) return;
+            setArchiveManagerMessage("正在导入…");
+            const result = await archiveClient.import(bundle, policy);
+            await refreshArchives({ reportError: true });
+            publishArchiveSync();
+            setArchiveManagerMessage(
+                `导入完成：新增 ${result.imported ?? 0}，覆盖 ${result.overwritten ?? 0}，跳过 ${result.skipped ?? 0}，自动重命名 ${result.renamed ?? 0}。`,
+            );
+        } catch (error) {
+            setArchiveManagerMessage(error.message || String(error), true);
+        }
+    }
+
+    function askImportPolicy(preview) {
+        if (activeArchiveConfirmation) closeArchiveConfirmation(false);
+        return new Promise((resolve) => {
+            const overlay = element("div", "cpw-archive-confirm__overlay");
+            const dialog = element("section", "cpw-archive-confirm");
+            dialog.setAttribute("role", "dialog");
+            dialog.setAttribute("aria-modal", "true");
+            const heading = element("h3", "cpw-archive-confirm__title", "导入存档");
+            const summary = element(
+                "p",
+                "cpw-archive-confirm__message",
+                `文件包含 ${preview.archiveCount} 个存档、${preview.itemCount} 张提示词卡片。请选择同名冲突处理方式。`,
+            );
+            const policy = element("select", "cpw-archive-manager__input");
+            for (const [value, label] of [["skip", "跳过（推荐）"], ["overwrite", "覆盖本地存档"], ["rename", "自动重命名"]]) {
+                const option = element("option", "", label);
+                option.value = value;
+                policy.append(option);
+            }
+            const actionsRow = element("div", "cpw-archive-confirm__actions");
+            const cancelButton = element("button", "cpw-archive-manager__button", "取消");
+            const confirmButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "开始导入");
+            actionsRow.append(cancelButton, confirmButton);
+            dialog.append(heading, summary, policy, actionsRow);
+            overlay.append(dialog);
+            const onKeyDown = (event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeArchiveConfirmation(null);
+                }
+            };
+            activeArchiveConfirmation = {
+                overlay,
+                onKeyDown,
+                resolve: (result) => resolve(typeof result === "string" ? result : null),
+            };
+            overlay.addEventListener("pointerdown", (event) => {
+                if (event.target === overlay) closeArchiveConfirmation(null);
+            });
+            cancelButton.addEventListener("click", () => closeArchiveConfirmation(null));
+            confirmButton.addEventListener("click", () => closeArchiveConfirmation(policy.value));
+            document.addEventListener("keydown", onKeyDown, true);
+            document.body.append(overlay);
+            queueMicrotask(() => policy.focus());
+        });
+    }
+
+    function setArchiveManagerBusy(busy) {
+        if (!activeArchiveManager) return;
+        activeArchiveManager.busy = busy;
+        for (const control of activeArchiveManager.dialog.querySelectorAll("button, input, select")) {
+            control.disabled = busy;
+        }
+    }
+
+    async function runArchiveMutation(operation, successMessage) {
+        if (!activeArchiveManager || activeArchiveManager.busy) return null;
+        setArchiveManagerBusy(true);
+        setArchiveManagerMessage("正在保存…");
+        try {
+            const result = await operation();
+            await refreshArchives({ reportError: true });
+            publishArchiveSync();
+            setArchiveManagerMessage(successMessage);
+            return result;
+        } catch (error) {
+            setArchiveManagerMessage(error.message || String(error), true);
+            return null;
+        } finally {
+            setArchiveManagerBusy(false);
+            renderArchiveManagerList();
+        }
+    }
+
+    async function saveCurrentArchive() {
+        if (!state || !activeArchiveManager) return;
+        const name = activeArchiveManager.nameInput.value.trim();
+        if (!name) {
+            setArchiveManagerMessage("请输入存档名称。", true);
+            activeArchiveManager.nameInput.focus();
+            return;
+        }
+        const existing = archives.find((archive) => archive.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+        let result;
+        if (existing) {
+            const overwrite = await askArchiveConfirmation({
+                title: "覆盖同名存档？",
+                message: `“${existing.name}”已存在，是否用当前网格状态覆盖？`,
+                confirmText: "覆盖",
+                danger: true,
+            });
+            if (!overwrite) return;
+            result = await runArchiveMutation(
+                () => archiveClient.update(existing.id, { snapshot: currentSnapshot() }),
+                `已覆盖“${existing.name}”。`,
+            );
+        } else {
+            result = await runArchiveMutation(
+                () => archiveClient.create(name, currentSnapshot()),
+                `已保存“${name}”。`,
+            );
+        }
+        const saved = result?.archive;
+        if (saved) {
+            activeArchiveId = saved.id;
+            reconcileArchiveSelection();
+            if (activeArchiveManager) activeArchiveManager.nameInput.value = defaultArchiveName();
+        }
+    }
+
+    function renderArchiveManagerList() {
+        if (!activeArchiveManager) return;
+        const manager = activeArchiveManager;
+        manager.list.replaceChildren();
+        if (!archives.length) {
+            manager.list.append(element("div", "cpw-archive-manager__empty", "还没有存档。可在上方保存当前网格状态。"));
+            return;
+        }
+        for (const archive of archives) {
+            const row = element("article", "cpw-archive-manager__row");
+            if (archive.id === activeArchiveId) row.classList.add("cpw-archive-manager__row--active");
+            const main = element("div", "cpw-archive-manager__row-main");
+            const name = element("strong", "cpw-archive-manager__row-name", archive.name);
+            const enabledCount = archive.snapshot.items.filter((item) => item.enabled).length;
+            const meta = element(
+                "span",
+                "cpw-archive-manager__row-meta",
+                `${archive.snapshot.columns} 列 · ${archive.snapshot.items.length} 张卡片 · ${enabledCount} 张启用 · ${formatArchiveTime(archive.updated_at)}`,
+            );
+            main.append(name, meta);
+            const rowActions = element("div", "cpw-archive-manager__row-actions");
+
+            if (manager.renameId === archive.id) {
+                const renameInput = element("input", "cpw-archive-manager__input cpw-archive-manager__rename-input");
+                renameInput.type = "text";
+                renameInput.maxLength = 80;
+                renameInput.value = archive.name;
+                renameInput.setAttribute("aria-label", "新的存档名称");
+                const saveRename = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "保存名称");
+                const cancelRename = element("button", "cpw-archive-manager__button", "取消");
+                saveRename.type = "button";
+                cancelRename.type = "button";
+                main.replaceChildren(renameInput, meta);
+                rowActions.append(saveRename, cancelRename);
+                saveRename.addEventListener("click", async () => {
+                    const nextName = renameInput.value.trim();
+                    if (!nextName) {
+                        setArchiveManagerMessage("存档名称不能为空。", true);
+                        renameInput.focus();
+                        return;
+                    }
+                    const result = await runArchiveMutation(
+                        () => archiveClient.update(archive.id, { name: nextName }),
+                        `已重命名为“${nextName}”。`,
+                    );
+                    if (result && activeArchiveManager) activeArchiveManager.renameId = null;
+                    renderArchiveManagerList();
+                });
+                cancelRename.addEventListener("click", () => {
+                    if (!activeArchiveManager) return;
+                    activeArchiveManager.renameId = null;
+                    renderArchiveManagerList();
+                });
+                queueMicrotask(() => {
+                    renameInput.focus();
+                    renameInput.select();
+                });
+            } else {
+                for (const [label, title] of [
+                    ["加载", "加载此存档"],
+                    ["覆盖", "用当前网格覆盖此存档"],
+                    ["重命名", "重命名此存档"],
+                    ["导出", "导出此存档"],
+                    ["删除", "删除此存档"],
+                ]) {
+                    const button = element(
+                        "button",
+                        `cpw-archive-manager__button${label === "删除" ? " cpw-archive-manager__button--danger-text" : ""}`,
+                        label,
+                    );
+                    button.type = "button";
+                    button.title = title;
+                    rowActions.append(button);
+                    if (label === "加载") {
+                        button.addEventListener("click", () => requestArchiveLoad(archive));
+                    } else if (label === "覆盖") {
+                        button.addEventListener("click", async () => {
+                            const overwrite = await askArchiveConfirmation({
+                                title: "覆盖存档？",
+                                message: `是否用当前网格状态覆盖“${archive.name}”？`,
+                                confirmText: "覆盖",
+                                danger: true,
+                            });
+                            if (!overwrite) return;
+                            const result = await runArchiveMutation(
+                                () => archiveClient.update(archive.id, { snapshot: currentSnapshot() }),
+                                `已覆盖“${archive.name}”。`,
+                            );
+                            if (result) reconcileArchiveSelection();
+                        });
+                    } else if (label === "重命名") {
+                        button.addEventListener("click", () => {
+                            if (!activeArchiveManager) return;
+                            activeArchiveManager.renameId = archive.id;
+                            renderArchiveManagerList();
+                        });
+                    } else if (label === "导出") {
+                        button.addEventListener("click", () => {
+                            downloadArchiveBundle([archive], `${archive.name}.prompt-grid-archives.json`);
+                            setArchiveManagerMessage(`已导出“${archive.name}”。`);
+                        });
+                    } else {
+                        button.addEventListener("click", async () => {
+                            const remove = await askArchiveConfirmation({
+                                title: "删除存档？",
+                                message: `“${archive.name}”删除后无法恢复，当前节点状态不会改变。`,
+                                confirmText: "删除",
+                                danger: true,
+                            });
+                            if (!remove) return;
+                            const result = await runArchiveMutation(
+                                () => archiveClient.delete(archive.id),
+                                `已删除“${archive.name}”。`,
+                            );
+                            if (result) reconcileArchiveSelection();
+                        });
+                    }
+                }
+            }
+            row.append(main, rowActions);
+            manager.list.append(row);
+        }
+    }
+
+    function openArchiveManager() {
+        if (activeArchiveManager || disposed) return;
+        const overlay = element("div", "cpw-archive-manager__overlay");
+        const dialog = element("section", "cpw-archive-manager");
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-label", "提示词网格存档管理");
+
+        const header = element("header", "cpw-archive-manager__header");
+        const title = element("h2", "cpw-archive-manager__title", "提示词网格存档");
+        const closeButton = element("button", "cpw-archive-manager__close", "×");
+        closeButton.type = "button";
+        closeButton.title = "关闭";
+        closeButton.setAttribute("aria-label", "关闭存档管理");
+        header.append(title, closeButton);
+
+        const saveRow = element("div", "cpw-archive-manager__save-row");
+        const nameInput = element("input", "cpw-archive-manager__input");
+        nameInput.type = "text";
+        nameInput.maxLength = 80;
+        nameInput.value = defaultArchiveName();
+        nameInput.placeholder = "存档名称";
+        nameInput.setAttribute("aria-label", "新存档名称");
+        const saveButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "保存当前");
+        saveButton.type = "button";
+        saveRow.append(nameInput, saveButton);
+
+        const message = element("div", "cpw-archive-manager__message");
+        message.hidden = true;
+        const list = element("div", "cpw-archive-manager__list");
+        const footer = element("footer", "cpw-archive-manager__footer");
+        const importButton = element("button", "cpw-archive-manager__button", "导入存档");
+        const exportAllButton = element("button", "cpw-archive-manager__button", "导出全部");
+        const doneButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "关闭");
+        for (const button of [importButton, exportAllButton, doneButton]) button.type = "button";
+        const footerSpacer = element("span", "cpw-archive-manager__footer-spacer");
+        footer.append(importButton, exportAllButton, footerSpacer, doneButton);
+
+        const fileInput = element("input", "");
+        fileInput.type = "file";
+        fileInput.accept = ".json,application/json";
+        fileInput.hidden = true;
+        dialog.append(header, saveRow, message, list, footer, fileInput);
+        overlay.append(dialog);
+
+        const onKeyDown = (event) => {
+            if (event.key === "Escape" && !activeArchiveConfirmation) {
+                event.preventDefault();
+                closeArchiveManager();
+            }
+        };
+        activeArchiveManager = {
+            overlay,
+            dialog,
+            list,
+            message,
+            nameInput,
+            fileInput,
+            onKeyDown,
+            renameId: null,
+            busy: false,
+        };
+        overlay.addEventListener("pointerdown", (event) => {
+            if (event.target === overlay && !activeArchiveConfirmation) closeArchiveManager();
+        });
+        closeButton.addEventListener("click", closeArchiveManager);
+        doneButton.addEventListener("click", closeArchiveManager);
+        saveButton.addEventListener("click", saveCurrentArchive);
+        nameInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") saveCurrentArchive();
+        });
+        importButton.addEventListener("click", () => fileInput.click());
+        fileInput.addEventListener("change", async () => {
+            const [file] = fileInput.files ?? [];
+            fileInput.value = "";
+            await importArchiveFile(file);
+        });
+        exportAllButton.addEventListener("click", () => {
+            if (!archives.length) {
+                setArchiveManagerMessage("当前没有可导出的存档。", true);
+                return;
+            }
+            const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+            downloadArchiveBundle(archives, `prompt-grid-archives-${timestamp}.json`);
+            setArchiveManagerMessage(`已导出 ${archives.length} 个存档。`);
+        });
+        document.addEventListener("keydown", onKeyDown, true);
+        document.body.append(overlay);
+        renderArchiveManagerList();
+        refreshArchives({ reportError: true });
+        queueMicrotask(() => nameInput.focus());
     }
 
     function nextTitle() {
@@ -850,6 +1428,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             errorMessage.textContent = parseError || "未知配置错误";
             cardElements.clear();
             grid.replaceChildren();
+            reconcileArchiveSelection();
             return;
         }
 
@@ -862,6 +1441,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         } else {
             grid.replaceChildren(element("div", "cpw-prompt-grid__empty", "暂无提示词，点击“新增提示词”开始编辑。"));
         }
+        reconcileArchiveSelection();
     }
 
     columnSelect.addEventListener("change", () => {
@@ -886,11 +1466,30 @@ function createPromptGridWidget(node, inputName, inputData) {
         state.items = state.items.map((item) => ({ ...item, enabled: false }));
         commit(true);
     });
+    archiveSelect.addEventListener("focus", () => refreshArchives());
+    archiveSelect.addEventListener("change", async () => {
+        const requestedId = archiveSelect.value;
+        const archive = archives.find((candidate) => candidate.id === requestedId);
+        if (!archive) {
+            renderArchiveSelect();
+            return;
+        }
+        archiveSelect.disabled = true;
+        try {
+            await requestArchiveLoad(archive);
+        } finally {
+            if (!disposed) renderArchiveSelect();
+        }
+    });
+    manageArchivesButton.addEventListener("click", openArchiveManager);
     resetButton.addEventListener("click", () => {
         state = createDefaultConfig();
         parseError = null;
         commit(true);
     });
+
+    const onArchiveSync = () => refreshArchives();
+    window.addEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
 
     for (const eventName of [
         "pointerdown", "pointermove", "pointerup", "pointercancel", "mousedown", "click", "dblclick",
@@ -908,6 +1507,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         getValue: () => serializedValue,
         setValue: (value) => {
             if (dragSession) endPointerDrag(true);
+            if (activeArchiveConfirmation) closeArchiveConfirmation(false);
+            closeArchiveManager();
             readValue(value);
             render();
         },
@@ -918,12 +1519,16 @@ function createPromptGridWidget(node, inputName, inputData) {
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
         if (activePromptEditor) closePromptEditor(false);
+        if (activeArchiveConfirmation) closeArchiveConfirmation(false);
+        closeArchiveManager();
+        window.removeEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;
         root.replaceChildren();
     };
     render();
+    refreshArchives();
 
     // This runs during node construction. A loaded workflow restores its saved
     // size afterwards in configure(), while a newly created node starts at the
