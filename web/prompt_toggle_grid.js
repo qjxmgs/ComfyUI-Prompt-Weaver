@@ -4,8 +4,8 @@ import {
     PromptGridArchiveClient,
     buildArchiveExportBundle,
     defaultArchiveName,
-    findMatchingArchive,
-    isDefaultSnapshot,
+    formatArchiveOptionLabel,
+    resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
 } from "./prompt_grid_archives.js";
@@ -285,14 +285,17 @@ function createPromptGridWidget(node, inputName, inputData) {
         archiveSelect.replaceChildren();
         const placeholder = element("option", "");
         placeholder.value = "";
-        placeholder.textContent = archivesLoading
-            ? "正在加载存档…"
-            : archiveDirty
-                ? "* 未保存"
-                : "选择存档…";
+        placeholder.textContent = formatArchiveOptionLabel(
+            archivesLoading ? "正在加载存档…" : archiveDirty ? "未保存" : "选择存档…",
+            archiveDirty && !activeArchiveId,
+        );
         archiveSelect.append(placeholder);
         for (const archive of archives) {
-            const option = element("option", "", archive.name);
+            const option = element(
+                "option",
+                "",
+                formatArchiveOptionLabel(archive.name, archive.id === activeArchiveId && archiveDirty),
+            );
             option.value = archive.id;
             archiveSelect.append(option);
         }
@@ -309,9 +312,14 @@ function createPromptGridWidget(node, inputName, inputData) {
             return;
         }
         const snapshot = currentSnapshot();
-        const match = findMatchingArchive(archives, snapshot);
-        activeArchiveId = match?.id ?? null;
-        archiveDirty = !match && !isDefaultSnapshot(snapshot, snapshotFromState(createDefaultConfig()));
+        const status = resolveArchiveStatus(
+            archives,
+            snapshot,
+            activeArchiveId,
+            snapshotFromState(createDefaultConfig()),
+        );
+        activeArchiveId = status.activeArchiveId;
+        archiveDirty = status.dirty;
         renderArchiveSelect();
     }
 
@@ -420,7 +428,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     async function requestArchiveLoad(archive) {
-        if (!archive || archive.id === activeArchiveId) return false;
+        if (!archive || (archive.id === activeArchiveId && !archiveDirty)) return false;
         if (archiveDirty) {
             const proceed = await askArchiveConfirmation({
                 title: "放弃未保存修改？",
@@ -677,7 +685,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                                 () => archiveClient.update(archive.id, { snapshot: currentSnapshot() }),
                                 `已覆盖“${archive.name}”。`,
                             );
-                            if (result) reconcileArchiveSelection();
+                            if (result) {
+                                activeArchiveId = archive.id;
+                                reconcileArchiveSelection();
+                            }
                         });
                     } else if (label === "重命名") {
                         button.addEventListener("click", () => {

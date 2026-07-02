@@ -34,6 +34,27 @@ export function isDefaultSnapshot(snapshot, defaultSnapshot) {
     return semanticFingerprint(snapshot) === semanticFingerprint(defaultSnapshot);
 }
 
+export function resolveArchiveStatus(archives, snapshot, activeArchiveId, defaultSnapshot) {
+    const activeArchive = archives.find((archive) => archive.id === activeArchiveId) ?? null;
+    if (activeArchive) {
+        return {
+            activeArchiveId: activeArchive.id,
+            dirty: semanticFingerprint(activeArchive.snapshot) !== semanticFingerprint(snapshot),
+        };
+    }
+
+    const match = findMatchingArchive(archives, snapshot);
+    if (match) return { activeArchiveId: match.id, dirty: false };
+    return {
+        activeArchiveId: null,
+        dirty: !isDefaultSnapshot(snapshot, defaultSnapshot),
+    };
+}
+
+export function formatArchiveOptionLabel(label, marked = false) {
+    return `${marked ? "* " : "\u00A0\u00A0"}${label}`;
+}
+
 export function buildArchiveExportBundle(archives, exportedAt = new Date().toISOString()) {
     return {
         format: ARCHIVE_EXPORT_FORMAT,
