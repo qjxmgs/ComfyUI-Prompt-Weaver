@@ -12,7 +12,9 @@ const {
     buildArchiveExportBundle,
     defaultArchiveName,
     findMatchingArchive,
+    formatArchiveOptionLabel,
     isDefaultSnapshot,
+    resolveArchiveStatus,
     semanticFingerprint,
     snapshotFromState,
     validateImportBundlePreview,
@@ -50,6 +52,46 @@ test("default detection compares semantic state", () => {
     assert.equal(isDefaultSnapshot(current, defaults), true);
     defaults.columns = 3;
     assert.equal(isDefaultSnapshot(current, defaults), false);
+});
+
+test("dirty state keeps the current archive identity", () => {
+    const saved = snapshotFromState(state);
+    const changed = structuredClone(saved);
+    changed.items[0].prompt = "masterpiece, best quality";
+    const archives = [{ id: "common", name: "常用", snapshot: saved }];
+
+    assert.deepEqual(resolveArchiveStatus(archives, changed, "common", saved), {
+        activeArchiveId: "common",
+        dirty: true,
+    });
+    assert.deepEqual(resolveArchiveStatus(archives, saved, "common", saved), {
+        activeArchiveId: "common",
+        dirty: false,
+    });
+});
+
+test("unassociated state auto-matches archives and otherwise uses unsaved state", () => {
+    const saved = snapshotFromState(state);
+    const changed = structuredClone(saved);
+    changed.columns = 3;
+    const archives = [{ id: "common", name: "常用", snapshot: saved }];
+
+    assert.deepEqual(resolveArchiveStatus(archives, saved, null, changed), {
+        activeArchiveId: "common",
+        dirty: false,
+    });
+    assert.deepEqual(resolveArchiveStatus([], changed, "deleted", saved), {
+        activeArchiveId: null,
+        dirty: true,
+    });
+});
+
+test("archive labels always reserve the two-character dirty marker gutter", () => {
+    const clean = formatArchiveOptionLabel("常用");
+    const dirty = formatArchiveOptionLabel("常用", true);
+    assert.equal(clean, "\u00A0\u00A0常用");
+    assert.equal(dirty, "* 常用");
+    assert.equal([...clean].length, [...dirty].length);
 });
 
 test("export bundle and preview use the stable portable format", () => {
