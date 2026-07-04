@@ -112,3 +112,18 @@ export function edgeScrollVelocity(coordinate, minimum, maximum, threshold = 24,
     }
     return 0;
 }
+
+export function calculateFittedNodeHeight(
+    currentHeight,
+    viewportHeight,
+    contentHeight,
+    paddingTop,
+    paddingBottom,
+    minimumHeight,
+    tolerance = 2,
+) {
+    const availableContentHeight = Math.max(0, viewportHeight - paddingTop - paddingBottom);
+    const excessHeight = availableContentHeight - contentHeight;
+    if (excessHeight <= tolerance) return currentHeight;
+    return Math.max(minimumHeight, Math.ceil(currentHeight - excessHeight));
+}

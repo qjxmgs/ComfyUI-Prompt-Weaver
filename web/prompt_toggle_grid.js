@@ -14,6 +14,7 @@ import {
     splitPromptTokens,
 } from "./prompt_editor_tokens.js";
 import {
+    calculateFittedNodeHeight,
     clientPointToContent,
     clientRectToContent,
     computeInsertionIndex,
@@ -29,6 +30,10 @@ const DEFAULT_CARD_COUNT = 4;
 const MIN_COLUMNS = 1;
 const MAX_COLUMNS = 6;
 const DEFAULT_NODE_SIZE = [600, 420];
+const NODE_CHROME_HEIGHT = 74;
+const MIN_WIDGET_HEIGHT = 160;
+const MIN_NODE_HEIGHT = MIN_WIDGET_HEIGHT + NODE_CHROME_HEIGHT;
+const HEIGHT_FIT_TOLERANCE = 2;
 const GRID_GAP = 8;
 const EDGE_SCROLL_ZONE = 24;
 const EDGE_SCROLL_MAX_SPEED = 12;
@@ -248,6 +253,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let archiveDirty = false;
     let archivesLoading = false;
     let archivesRefreshPending = false;
+    let heightFitFrame = 0;
     let disposed = false;
     let widget;
     const cardElements = new Map();
@@ -278,6 +284,31 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function currentSnapshot() {
         return state ? snapshotFromState(state) : null;
+    }
+
+    function scheduleNodeHeightFit() {
+        if (disposed || parseError || !state) return;
+        if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
+        heightFitFrame = requestAnimationFrame(() => {
+            heightFitFrame = 0;
+            if (disposed || parseError || !state || dragSession || !scroll.isConnected) return;
+            const styles = getComputedStyle(scroll);
+            const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+            const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+            const currentHeight = node.size?.[1] ?? DEFAULT_NODE_SIZE[1];
+            const nextHeight = calculateFittedNodeHeight(
+                currentHeight,
+                scroll.clientHeight,
+                grid.offsetHeight,
+                paddingTop,
+                paddingBottom,
+                MIN_NODE_HEIGHT,
+                HEIGHT_FIT_TOLERANCE,
+            );
+            if (currentHeight - nextHeight <= HEIGHT_FIT_TOLERANCE) return;
+            node.setSize([node.size?.[0] ?? DEFAULT_NODE_SIZE[0], nextHeight]);
+            app.canvas?.setDirty?.(true, true);
+        });
     }
 
     function renderArchiveSelect() {
@@ -1453,6 +1484,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             grid.replaceChildren(element("div", "cpw-prompt-grid__empty", "暂无提示词，点击“新增提示词”开始编辑。"));
         }
         reconcileArchiveSelection();
+        scheduleNodeHeightFit();
     }
 
     columnSelect.addEventListener("change", () => {
@@ -1460,6 +1492,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         state.columns = Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Number(columnSelect.value) || DEFAULT_COLUMNS));
         applyGridColumns();
         commit();
+        scheduleNodeHeightFit();
     });
     addButton.addEventListener("click", () => {
         if (!state) return;
@@ -1523,8 +1556,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             readValue(value);
             render();
         },
-        getMinHeight: () => 300,
-        getMaxHeight: () => Math.max(300, (node.size?.[1] ?? DEFAULT_NODE_SIZE[1]) - 74),
+        getMinHeight: () => MIN_WIDGET_HEIGHT,
     });
     widget.inputSpec = inputData;
     const previousOnRemove = widget.onRemove;
@@ -1532,6 +1564,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (activePromptEditor) closePromptEditor(false);
         if (activeArchiveConfirmation) closeArchiveConfirmation(false);
         closeArchiveManager();
+        if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
         window.removeEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
@@ -1551,7 +1584,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             Math.max(currentSize[1], DEFAULT_NODE_SIZE[1]),
         ]);
     }
-    return { widget, minWidth: DEFAULT_NODE_SIZE[0], minHeight: DEFAULT_NODE_SIZE[1] };
+    return { widget, minWidth: DEFAULT_NODE_SIZE[0], minHeight: MIN_NODE_HEIGHT };
 }
 
 app.registerExtension({

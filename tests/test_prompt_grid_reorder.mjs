@@ -8,6 +8,7 @@ const moduleSource = await readFile(
 );
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
+    calculateFittedNodeHeight,
     clientPointToContent,
     clientRectToContent,
     computeInsertionIndex,
@@ -75,4 +76,11 @@ test("edge scrolling starts only inside the 24px edge band", () => {
     assert.equal(edgeScrollVelocity(0, 0, 200), -12);
     assert.equal(edgeScrollVelocity(200, 0, 200), 12);
     assert.equal(edgeScrollVelocity(-1, 0, 200), 0);
+});
+
+test("node height fitting removes only blank space below the grid", () => {
+    assert.equal(calculateFittedNodeHeight(800, 700, 590, 1, 3, 234), 694);
+    assert.equal(calculateFittedNodeHeight(420, 330, 100, 1, 3, 234), 234);
+    assert.equal(calculateFittedNodeHeight(420, 300, 400, 1, 3, 234), 420);
+    assert.equal(calculateFittedNodeHeight(420, 300, 295, 1, 3, 234), 420);
 });
