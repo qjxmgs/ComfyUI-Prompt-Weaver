@@ -103,8 +103,100 @@
 }
 
 .cpw-prompt-grid__select {
+    width: 100%;
     min-width: 50px;
     padding: 2px 5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+}
+
+.cpw-prompt-grid__select-control {
+    position: relative;
+    min-width: 50px;
+    display: inline-flex;
+}
+
+.cpw-prompt-grid__select-control--open > .cpw-prompt-grid__select {
+    border-color: var(--p-primary-color, #6f63e8);
+    outline: 1px solid var(--p-primary-color, #6f63e8);
+    outline-offset: 1px;
+}
+
+.cpw-prompt-grid__select-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
+}
+
+.cpw-prompt-grid__select-chevron {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    display: grid;
+    place-items: center;
+    line-height: 0;
+    transition: transform 100ms ease;
+}
+
+.cpw-prompt-grid__select-chevron::before {
+    content: "";
+    width: 8px;
+    height: 5px;
+    background: currentColor;
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.cpw-prompt-grid__select-control--open .cpw-prompt-grid__select-chevron {
+    transform: rotate(180deg);
+}
+
+.cpw-prompt-grid__select-menu {
+    position: fixed;
+    z-index: 2147483600;
+    max-height: min(240px, calc(100vh - 8px));
+    padding: 2px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color, #4b4d52);
+    border-radius: 3px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-input-bg, #17181a);
+    box-shadow: 0 7px 18px rgb(0 0 0 / 32%);
+    font: 12px/1.3 Inter, system-ui, sans-serif;
+}
+
+.cpw-prompt-grid__select-option {
+    width: 100%;
+    min-height: 24px;
+    display: block;
+    padding: 3px 7px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 2px;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: pre;
+    cursor: pointer;
+}
+
+.cpw-prompt-grid__select-option:hover,
+.cpw-prompt-grid__select-option:focus-visible {
+    outline: 0;
+    color: #14213d;
+    background: color-mix(in srgb, var(--p-primary-color, #6f63e8) 32%, #fff);
+}
+
+.cpw-prompt-grid__select-option--selected,
+.cpw-prompt-grid__select-option--selected:hover,
+.cpw-prompt-grid__select-option--selected:focus-visible {
+    color: #fff;
+    background: var(--p-primary-color, #6f63e8);
 }
 
 .cpw-prompt-grid__scroll {
@@ -218,6 +310,11 @@
     min-width: 0;
 }
 
+.cpw-prompt-grid__prompt-row {
+    position: relative;
+    min-width: 0;
+}
+
 .cpw-prompt-grid__card-actions {
     flex: 0 0 18px;
     width: 18px;
@@ -295,24 +392,28 @@
 .cpw-prompt-grid__prompt {
     min-width: 0;
     flex: 1 1 auto;
+    width: 100%;
     height: 28px;
     min-height: 28px;
     resize: none;
-    padding: 4px 7px;
+    padding: 4px 30px 4px 7px;
     border-radius: 5px;
     line-height: 1.35;
     user-select: text;
 }
 
 .cpw-prompt-grid__prompt-edit {
-    flex: 0 0 18px;
-    width: 18px;
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+    width: 28px;
     height: 28px;
-    min-width: 18px;
+    min-width: 28px;
     min-height: 28px;
     padding: 0;
     border: 0;
-    border-radius: 0;
+    border-radius: 0 5px 5px 0;
     background: transparent;
     font-size: 16px;
     line-height: 1;

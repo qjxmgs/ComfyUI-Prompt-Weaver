@@ -172,6 +172,217 @@ function element(tagName, className, text) {
     return result;
 }
 
+let activePromptGridSelect = null;
+
+function createCustomSelect(extraClass, ariaLabel) {
+    const control = element(
+        "div",
+        `cpw-prompt-grid__select-control${extraClass ? ` ${extraClass}` : ""}`,
+    );
+    const trigger = element("button", "cpw-prompt-grid__select");
+    trigger.type = "button";
+    trigger.setAttribute("role", "combobox");
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-label", ariaLabel);
+    const valueLabel = element("span", "cpw-prompt-grid__select-value");
+    const chevron = element("span", "cpw-prompt-grid__select-chevron");
+    chevron.setAttribute("aria-hidden", "true");
+    trigger.append(valueLabel, chevron);
+    control.append(trigger);
+
+    const menu = element("div", "cpw-prompt-grid__select-menu");
+    const menuId = `cpw-prompt-grid-select-${createId()}`;
+    menu.id = menuId;
+    menu.setAttribute("role", "listbox");
+    trigger.setAttribute("aria-controls", menuId);
+
+    let options = [];
+    let currentValue = "";
+    let disabled = false;
+    let opened = false;
+    let destroyed = false;
+
+    function selectedIndex() {
+        return options.findIndex((option) => option.value === currentValue);
+    }
+
+    function syncSelection() {
+        const selected = options[selectedIndex()];
+        valueLabel.textContent = selected?.label ?? "";
+        trigger.title = selected?.label ?? ariaLabel;
+        for (const optionButton of menu.children) {
+            const isSelected = optionButton.dataset.value === currentValue;
+            optionButton.classList.toggle("cpw-prompt-grid__select-option--selected", isSelected);
+            optionButton.setAttribute("aria-selected", String(isSelected));
+        }
+    }
+
+    function positionMenu() {
+        if (!opened || !trigger.isConnected) return;
+        const rect = trigger.getBoundingClientRect();
+        const width = Math.max(rect.width, 64);
+        menu.style.width = `${width}px`;
+        const left = Math.min(Math.max(4, rect.left), Math.max(4, window.innerWidth - width - 4));
+        menu.style.left = `${left}px`;
+        const menuHeight = menu.offsetHeight;
+        const below = window.innerHeight - rect.bottom;
+        const top = below >= Math.min(menuHeight, 240) || rect.top < below
+            ? rect.bottom + 2
+            : Math.max(4, rect.top - menuHeight - 2);
+        menu.style.top = `${top}px`;
+    }
+
+    function close({ restoreFocus = false } = {}) {
+        if (!opened) return;
+        opened = false;
+        if (activePromptGridSelect === api) activePromptGridSelect = null;
+        trigger.setAttribute("aria-expanded", "false");
+        control.classList.remove("cpw-prompt-grid__select-control--open");
+        menu.remove();
+        document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+        document.removeEventListener("keydown", onDocumentKeyDown, true);
+        window.removeEventListener("resize", positionMenu);
+        window.removeEventListener("scroll", positionMenu, true);
+        if (restoreFocus && trigger.isConnected) trigger.focus();
+    }
+
+    function focusOption(index) {
+        const buttons = [...menu.querySelectorAll(".cpw-prompt-grid__select-option")];
+        if (!buttons.length) return;
+        buttons[Math.min(buttons.length - 1, Math.max(0, index))].focus();
+    }
+
+    function onDocumentPointerDown(event) {
+        if (!control.contains(event.target) && !menu.contains(event.target)) close();
+    }
+
+    function onDocumentKeyDown(event) {
+        if (!opened) return;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            close({ restoreFocus: true });
+            return;
+        }
+        if (event.key === "Tab") {
+            close();
+            return;
+        }
+        const buttons = [...menu.querySelectorAll(".cpw-prompt-grid__select-option")];
+        const focusedIndex = buttons.indexOf(document.activeElement);
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const direction = event.key === "ArrowDown" ? 1 : -1;
+            const fallback = selectedIndex() >= 0 ? selectedIndex() : 0;
+            const next = focusedIndex >= 0 ? focusedIndex + direction : fallback;
+            focusOption(next);
+        } else if (event.key === "Home") {
+            event.preventDefault();
+            focusOption(0);
+        } else if (event.key === "End") {
+            event.preventDefault();
+            focusOption(buttons.length - 1);
+        }
+    }
+
+    function choose(value) {
+        const changed = currentValue !== value;
+        currentValue = value;
+        syncSelection();
+        close();
+        if (changed) control.dispatchEvent(new Event("change"));
+        trigger.focus();
+    }
+
+    function renderOptions() {
+        const optionButtons = options.map((option) => {
+            const button = element("button", "cpw-prompt-grid__select-option", option.label);
+            button.type = "button";
+            button.dataset.value = option.value;
+            button.setAttribute("role", "option");
+            button.addEventListener("click", () => choose(option.value));
+            return button;
+        });
+        menu.replaceChildren(...optionButtons);
+        syncSelection();
+    }
+
+    function open() {
+        if (destroyed || disabled || !options.length || opened) return;
+        activePromptGridSelect?.close();
+        activePromptGridSelect = api;
+        opened = true;
+        trigger.setAttribute("aria-expanded", "true");
+        control.classList.add("cpw-prompt-grid__select-control--open");
+        renderOptions();
+        document.body.append(menu);
+        positionMenu();
+        document.addEventListener("pointerdown", onDocumentPointerDown, true);
+        document.addEventListener("keydown", onDocumentKeyDown, true);
+        window.addEventListener("resize", positionMenu);
+        window.addEventListener("scroll", positionMenu, true);
+        queueMicrotask(() => focusOption(selectedIndex() >= 0 ? selectedIndex() : 0));
+    }
+
+    trigger.addEventListener("click", () => {
+        if (opened) close({ restoreFocus: true });
+        else open();
+    });
+    trigger.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        open();
+    });
+    for (const eventName of ["pointerdown", "pointerup", "click", "keydown", "keyup"]) {
+        menu.addEventListener(eventName, (event) => event.stopPropagation());
+    }
+    menu.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+
+    const api = {
+        root: control,
+        close,
+        destroy() {
+            destroyed = true;
+            close();
+            menu.remove();
+        },
+        setOptions(nextOptions) {
+            options = nextOptions.map((option) => ({
+                value: String(option.value),
+                label: String(option.label),
+            }));
+            if (!options.some((option) => option.value === currentValue)) {
+                currentValue = options.find((option) => option.value === "")?.value ?? options[0]?.value ?? "";
+            }
+            renderOptions();
+            if (opened) positionMenu();
+        },
+    };
+    Object.defineProperties(control, {
+        value: {
+            get: () => currentValue,
+            set: (value) => {
+                const requested = String(value ?? "");
+                currentValue = options.some((option) => option.value === requested)
+                    ? requested
+                    : options.find((option) => option.value === "")?.value ?? "";
+                syncSelection();
+            },
+        },
+        disabled: {
+            get: () => disabled,
+            set: (value) => {
+                disabled = Boolean(value);
+                trigger.disabled = disabled;
+                control.classList.toggle("cpw-prompt-grid__select-control--disabled", disabled);
+                if (disabled) close();
+            },
+        },
+    });
+    control.customSelect = api;
+    return control;
+}
+
 function ensureStylesheet() {
     const id = "cpw-prompt-toggle-grid-styles";
     if (document.getElementById(id)) return;
@@ -201,20 +412,19 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     const root = element("div", "cpw-prompt-grid");
     const toolbar = element("div", "cpw-prompt-grid__toolbar");
-    const columnGroup = element("label", "cpw-prompt-grid__columns");
+    const columnGroup = element("div", "cpw-prompt-grid__columns");
     columnGroup.append(element("span", "", "列数"));
-    const columnSelect = element("select", "cpw-prompt-grid__select");
-    columnSelect.setAttribute("aria-label", "网格列数");
-    for (let columns = MIN_COLUMNS; columns <= MAX_COLUMNS; columns += 1) {
-        const option = element("option", "", String(columns));
-        option.value = String(columns);
-        columnSelect.append(option);
-    }
+    const columnSelect = createCustomSelect("", "网格列数");
+    columnSelect.customSelect.setOptions(
+        Array.from({ length: MAX_COLUMNS - MIN_COLUMNS + 1 }, (_, index) => {
+            const columns = MIN_COLUMNS + index;
+            return { value: String(columns), label: String(columns) };
+        }),
+    );
     columnGroup.append(columnSelect);
 
     const archiveGroup = element("div", "cpw-prompt-grid__archives");
-    const archiveSelect = element("select", "cpw-prompt-grid__select cpw-prompt-grid__archive-select");
-    archiveSelect.setAttribute("aria-label", "快速切换提示词存档");
+    const archiveSelect = createCustomSelect("cpw-prompt-grid__archive-select", "快速切换提示词存档");
     const manageArchivesButton = element("button", "cpw-prompt-grid__button", "存档管理");
     manageArchivesButton.type = "button";
     archiveGroup.append(archiveSelect, manageArchivesButton);
@@ -313,23 +523,22 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function renderArchiveSelect() {
         const previousValue = activeArchiveId ?? "";
-        archiveSelect.replaceChildren();
-        const placeholder = element("option", "");
-        placeholder.value = "";
-        placeholder.textContent = formatArchiveOptionLabel(
-            archivesLoading ? "正在加载存档…" : archiveDirty ? "未保存" : "选择存档…",
-            archiveDirty && !activeArchiveId,
-        );
-        archiveSelect.append(placeholder);
-        for (const archive of archives) {
-            const option = element(
-                "option",
-                "",
-                formatArchiveOptionLabel(archive.name, archive.id === activeArchiveId && archiveDirty),
-            );
-            option.value = archive.id;
-            archiveSelect.append(option);
-        }
+        archiveSelect.customSelect.setOptions([
+            {
+                value: "",
+                label: formatArchiveOptionLabel(
+                    archivesLoading ? "正在加载存档…" : archiveDirty ? "未保存" : "选择存档…",
+                    archiveDirty && !activeArchiveId,
+                ),
+            },
+            ...archives.map((archive) => ({
+                value: archive.id,
+                label: formatArchiveOptionLabel(
+                    archive.name,
+                    archive.id === activeArchiveId && archiveDirty,
+                ),
+            })),
+        ]);
         archiveSelect.value = previousValue;
         if (archiveSelect.value !== previousValue) archiveSelect.value = "";
         archiveSelect.disabled = !state;
@@ -1510,7 +1719,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         state.items = state.items.map((item) => ({ ...item, enabled: false }));
         commit(true);
     });
-    archiveSelect.addEventListener("focus", () => refreshArchives());
+    archiveSelect.addEventListener("focusin", () => refreshArchives());
     archiveSelect.addEventListener("change", async () => {
         const requestedId = archiveSelect.value;
         const archive = archives.find((candidate) => candidate.id === requestedId);
@@ -1566,6 +1775,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         closeArchiveManager();
         if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
         window.removeEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
+        columnSelect.customSelect.destroy();
+        archiveSelect.customSelect.destroy();
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;
