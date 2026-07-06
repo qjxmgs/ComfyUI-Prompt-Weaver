@@ -1,10 +1,13 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import {
+    DEFAULT_ARCHIVE_ID,
+    DEFAULT_ARCHIVE_NAME,
     PromptGridArchiveClient,
     buildArchiveExportBundle,
     defaultArchiveName,
     formatArchiveOptionLabel,
+    resolveArchiveInitialization,
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
@@ -41,8 +44,11 @@ const REORDER_ANIMATION_DURATION = 120;
 const ARCHIVE_SYNC_EVENT = "cpw-prompt-grid-archives-changed";
 const ARCHIVE_CHANNEL_NAME = "prompt-weaver-prompt-grid-archives";
 const MAX_ARCHIVE_IMPORT_BYTES = 2 * 1024 * 1024;
+const ARCHIVE_PROPERTY_KEY = "prompt_weaver_archive_id";
 
 const archiveClient = new PromptGridArchiveClient(api);
+const loadedPromptGridNodes = new WeakSet();
+const promptGridArchiveControllers = new WeakMap();
 const archiveChannel = typeof BroadcastChannel === "function"
     ? new BroadcastChannel(ARCHIVE_CHANNEL_NAME)
     : null;
@@ -459,8 +465,13 @@ function createPromptGridWidget(node, inputName, inputData) {
     let activeArchiveManager = null;
     let activeArchiveConfirmation = null;
     let archives = [];
-    let activeArchiveId = null;
+    let activeArchiveId = DEFAULT_ARCHIVE_ID;
     let archiveDirty = false;
+    let lastSelectedArchiveId = DEFAULT_ARCHIVE_ID;
+    let archiveAssociationInitialized = false;
+    let receivedExternalValue = false;
+    let editedBeforeArchiveInitialization = false;
+    let loadedAssociationReconciled = false;
     let archivesLoading = false;
     let archivesRefreshPending = false;
     let heightFitFrame = 0;
@@ -484,6 +495,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function commit(renderAfter = false, captureHistory = true) {
         if (!state || disposed) return;
+        if (!archiveAssociationInitialized) editedBeforeArchiveInitialization = true;
         const previousValue = serializedValue;
         serializedValue = JSON.stringify(state);
         parseError = null;
@@ -494,6 +506,48 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function currentSnapshot() {
         return state ? snapshotFromState(state) : null;
+    }
+
+    function persistedArchiveId() {
+        const value = node.properties?.[ARCHIVE_PROPERTY_KEY];
+        return typeof value === "string" && value ? value : null;
+    }
+
+    function persistNodeArchiveId(archiveId) {
+        node.properties ??= {};
+        node.properties[ARCHIVE_PROPERTY_KEY] = archiveId;
+    }
+
+    function notifyArchiveAssociationChanged(captureHistory = false) {
+        const graph = node.graph ?? app.graph;
+        graph?.incrementVersion?.();
+        graph?.change?.();
+        app.canvas?.setDirty?.(true, true);
+        if (captureHistory) captureCanvasState();
+    }
+
+    async function persistGlobalArchiveId(archiveId) {
+        lastSelectedArchiveId = archiveId;
+        try {
+            await archiveClient.select(archiveId);
+            publishArchiveSync();
+        } catch (error) {
+            console.warn("[Prompt Weaver] 无法保存最后选择的存档", error);
+            setArchiveManagerMessage(error.message || String(error), true);
+        }
+    }
+
+    function setActiveArchive(
+        archiveId,
+        { persistGlobal = false, notifyGraph = false, captureHistory = false } = {},
+    ) {
+        const nextArchiveId = archiveId || DEFAULT_ARCHIVE_ID;
+        const changed = activeArchiveId !== nextArchiveId
+            || persistedArchiveId() !== nextArchiveId;
+        activeArchiveId = nextArchiveId;
+        persistNodeArchiveId(activeArchiveId);
+        if (changed && notifyGraph) notifyArchiveAssociationChanged(captureHistory);
+        if (persistGlobal) void persistGlobalArchiveId(activeArchiveId);
     }
 
     function scheduleNodeHeightFit() {
@@ -522,45 +576,82 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function renderArchiveSelect() {
-        const previousValue = activeArchiveId ?? "";
-        archiveSelect.customSelect.setOptions([
-            {
-                value: "",
-                label: formatArchiveOptionLabel(
-                    archivesLoading ? "正在加载存档…" : archiveDirty ? "未保存" : "选择存档…",
-                    archiveDirty && !activeArchiveId,
-                ),
-            },
-            ...archives.map((archive) => ({
+        const visibleArchives = archives.length
+            ? archives
+            : [{
+                id: DEFAULT_ARCHIVE_ID,
+                name: DEFAULT_ARCHIVE_NAME,
+                snapshot: createDefaultConfig(),
+                is_default: true,
+            }];
+        archiveSelect.customSelect.setOptions(
+            visibleArchives.map((archive) => ({
                 value: archive.id,
                 label: formatArchiveOptionLabel(
                     archive.name,
                     archive.id === activeArchiveId && archiveDirty,
                 ),
             })),
-        ]);
-        archiveSelect.value = previousValue;
-        if (archiveSelect.value !== previousValue) archiveSelect.value = "";
+        );
+        archiveSelect.value = activeArchiveId || DEFAULT_ARCHIVE_ID;
         archiveSelect.disabled = !state;
     }
 
     function reconcileArchiveSelection() {
         if (!state) {
-            activeArchiveId = null;
             archiveDirty = false;
             renderArchiveSelect();
             return;
         }
-        const snapshot = currentSnapshot();
-        const status = resolveArchiveStatus(
-            archives,
-            snapshot,
-            activeArchiveId,
-            snapshotFromState(createDefaultConfig()),
-        );
+        const statusArchives = archives.length
+            ? archives
+            : [{ id: DEFAULT_ARCHIVE_ID, snapshot: createDefaultConfig() }];
+        const previousArchiveId = activeArchiveId;
+        const status = resolveArchiveStatus(statusArchives, currentSnapshot(), activeArchiveId);
         activeArchiveId = status.activeArchiveId;
         archiveDirty = status.dirty;
+        if (archiveAssociationInitialized) {
+            persistNodeArchiveId(activeArchiveId);
+            if (previousArchiveId !== activeArchiveId) notifyArchiveAssociationChanged(false);
+        }
         renderArchiveSelect();
+    }
+
+    function initializeArchiveAssociation() {
+        if (archiveAssociationInitialized || !state || !archives.length) return;
+        const savedArchiveId = persistedArchiveId();
+        const isNewNode = !savedArchiveId
+            && !receivedExternalValue
+            && !loadedPromptGridNodes.has(node)
+            && !editedBeforeArchiveInitialization;
+        const initialization = resolveArchiveInitialization(
+            archives,
+            currentSnapshot(),
+            {
+                persistedArchiveId: savedArchiveId,
+                lastSelectedArchiveId,
+                isNewNode,
+            },
+        );
+        archiveAssociationInitialized = true;
+        setActiveArchive(initialization.activeArchiveId);
+        const target = archives.find((archive) => archive.id === initialization.activeArchiveId);
+        if (initialization.loadSnapshot && target && !editedBeforeArchiveInitialization) {
+            loadArchive(target, { captureHistory: false, persistGlobal: false });
+        } else {
+            reconcileArchiveSelection();
+        }
+    }
+
+    function reconcileLoadedArchiveAssociation() {
+        if (loadedAssociationReconciled
+            || !receivedExternalValue
+            || !archiveAssociationInitialized
+            || !state
+            || !archives.length) return;
+        archiveAssociationInitialized = false;
+        initializeArchiveAssociation();
+        loadedAssociationReconciled = true;
     }
 
     function setArchiveManagerMessage(message, error = false) {
@@ -582,9 +673,14 @@ function createPromptGridWidget(node, inputName, inputData) {
             const payload = await archiveClient.list();
             if (disposed) return false;
             archives = [...(payload?.archives ?? [])].sort(
-                (left, right) => String(right.updated_at).localeCompare(String(left.updated_at)),
+                (left, right) => Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
+                    || String(right.updated_at).localeCompare(String(left.updated_at)),
             );
-            reconcileArchiveSelection();
+            lastSelectedArchiveId = typeof payload?.last_selected_archive_id === "string"
+                ? payload.last_selected_archive_id
+                : DEFAULT_ARCHIVE_ID;
+            initializeArchiveAssociation();
+            if (archiveAssociationInitialized) reconcileArchiveSelection();
             renderArchiveManagerList();
             return true;
         } catch (error) {
@@ -657,21 +753,20 @@ function createPromptGridWidget(node, inputName, inputData) {
         manageArchivesButton.focus();
     }
 
-    function loadArchive(archive) {
+    function loadArchive(archive, { captureHistory = true, persistGlobal = true } = {}) {
         if (!archive || disposed) return;
         const normalized = normalizeConfigValue(JSON.stringify(archive.snapshot));
         state = normalized.state;
-        serializedValue = normalized.serialized;
         parseError = null;
-        activeArchiveId = archive.id;
-        commit(true, true);
+        setActiveArchive(archive.id, { persistGlobal });
+        commit(true, captureHistory);
     }
 
     async function requestArchiveLoad(archive) {
         if (!archive || (archive.id === activeArchiveId && !archiveDirty)) return false;
         if (archiveDirty) {
             const proceed = await askArchiveConfirmation({
-                title: "放弃未保存修改？",
+                title: "放弃当前修改？",
                 message: `加载“${archive.name}”会完整替换当前网格状态。`,
                 confirmText: "放弃并加载",
                 danger: true,
@@ -831,7 +926,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         const saved = result?.archive;
         if (saved) {
-            activeArchiveId = saved.id;
+            setActiveArchive(saved.id, {
+                persistGlobal: true,
+                notifyGraph: true,
+                captureHistory: true,
+            });
             reconcileArchiveSelection();
             if (activeArchiveManager) activeArchiveManager.nameInput.value = defaultArchiveName();
         }
@@ -850,16 +949,21 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (archive.id === activeArchiveId) row.classList.add("cpw-archive-manager__row--active");
             const main = element("div", "cpw-archive-manager__row-main");
             const name = element("strong", "cpw-archive-manager__row-name", archive.name);
+            const nameRow = element("div", "cpw-archive-manager__row-name-line");
+            nameRow.append(name);
+            if (archive.is_default) {
+                nameRow.append(element("span", "cpw-archive-manager__default-badge", "默认"));
+            }
             const enabledCount = archive.snapshot.items.filter((item) => item.enabled).length;
             const meta = element(
                 "span",
                 "cpw-archive-manager__row-meta",
                 `${archive.snapshot.columns} 列 · ${archive.snapshot.items.length} 张卡片 · ${enabledCount} 张启用 · ${formatArchiveTime(archive.updated_at)}`,
             );
-            main.append(name, meta);
+            main.append(nameRow, meta);
             const rowActions = element("div", "cpw-archive-manager__row-actions");
 
-            if (manager.renameId === archive.id) {
+            if (!archive.is_default && manager.renameId === archive.id) {
                 const renameInput = element("input", "cpw-archive-manager__input cpw-archive-manager__rename-input");
                 renameInput.type = "text";
                 renameInput.maxLength = 80;
@@ -895,13 +999,16 @@ function createPromptGridWidget(node, inputName, inputData) {
                     renameInput.select();
                 });
             } else {
-                for (const [label, title] of [
+                const availableActions = [
                     ["加载", "加载此存档"],
                     ["覆盖", "用当前网格覆盖此存档"],
-                    ["重命名", "重命名此存档"],
                     ["导出", "导出此存档"],
-                    ["删除", "删除此存档"],
-                ]) {
+                ];
+                if (!archive.is_default) {
+                    availableActions.splice(2, 0, ["重命名", "重命名此存档"]);
+                    availableActions.push(["删除", "删除此存档"]);
+                }
+                for (const [label, title] of availableActions) {
                     const button = element(
                         "button",
                         `cpw-archive-manager__button${label === "删除" ? " cpw-archive-manager__button--danger-text" : ""}`,
@@ -915,7 +1022,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     } else if (label === "覆盖") {
                         button.addEventListener("click", async () => {
                             const overwrite = await askArchiveConfirmation({
-                                title: "覆盖存档？",
+                                title: archive.is_default ? "覆盖默认存档？" : "覆盖存档？",
                                 message: `是否用当前网格状态覆盖“${archive.name}”？`,
                                 confirmText: "覆盖",
                                 danger: true,
@@ -926,7 +1033,11 @@ function createPromptGridWidget(node, inputName, inputData) {
                                 `已覆盖“${archive.name}”。`,
                             );
                             if (result) {
-                                activeArchiveId = archive.id;
+                                setActiveArchive(archive.id, {
+                                    persistGlobal: true,
+                                    notifyGraph: true,
+                                    captureHistory: true,
+                                });
                                 reconcileArchiveSelection();
                             }
                         });
@@ -1752,6 +1863,12 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
     root.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
 
+    promptGridArchiveControllers.set(node, {
+        markLoaded() {
+            loadedPromptGridNodes.add(node);
+            reconcileLoadedArchiveAssociation();
+        },
+    });
     readValue(inputData?.[1]?.default ?? JSON.stringify(createDefaultConfig()));
     widget = node.addDOMWidget(inputName, WIDGET_TYPE, root, {
         serialize: true,
@@ -1759,10 +1876,12 @@ function createPromptGridWidget(node, inputName, inputData) {
         hideOnZoom: false,
         getValue: () => serializedValue,
         setValue: (value) => {
+            receivedExternalValue = true;
             if (dragSession) endPointerDrag(true);
             if (activeArchiveConfirmation) closeArchiveConfirmation(false);
             closeArchiveManager();
             readValue(value);
+            reconcileLoadedArchiveAssociation();
             render();
         },
         getMinHeight: () => MIN_WIDGET_HEIGHT,
@@ -1777,6 +1896,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         window.removeEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
         columnSelect.customSelect.destroy();
         archiveSelect.customSelect.destroy();
+        promptGridArchiveControllers.delete(node);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;
@@ -1800,6 +1920,13 @@ function createPromptGridWidget(node, inputName, inputData) {
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.PromptToggleGrid",
+    loadedGraphNode(node) {
+        if (node?.comfyClass === "PromptWeaverPromptToggleGrid"
+            || node?.type === "PromptWeaverPromptToggleGrid") {
+            loadedPromptGridNodes.add(node);
+            promptGridArchiveControllers.get(node)?.markLoaded();
+        }
+    },
     getCustomWidgets() {
         return {
             [WIDGET_TYPE]: createPromptGridWidget,
