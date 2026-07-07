@@ -16,6 +16,8 @@ MAX_PROMPT_LENGTH = 100_000
 MAX_SNAPSHOT_BYTES = 512 * 1024
 MAX_IMPORT_BYTES = 2 * 1024 * 1024
 MAX_STORE_BYTES = 10 * 1024 * 1024
+DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000"
+DEFAULT_ARCHIVE_NAME = "默认存档"
 
 
 class ArchiveError(Exception):
@@ -52,6 +54,39 @@ def _reject_json_constant(value):
 
 def _json_size(value):
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def default_snapshot():
+    return {
+        "version": FORMAT_VERSION,
+        "columns": 2,
+        "items": [
+            {
+                "id": f"prompt-{index}",
+                "enabled": True,
+                "title": f"提示词 {index}",
+                "prompt": "",
+            }
+            for index in range(1, 5)
+        ],
+    }
+
+
+def _default_archive(timestamp=None):
+    timestamp = timestamp or _now()
+    return {
+        "id": DEFAULT_ARCHIVE_ID,
+        "name": DEFAULT_ARCHIVE_NAME,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "snapshot": default_snapshot(),
+    }
+
+
+def _public_archive(archive):
+    result = dict(archive)
+    result["is_default"] = archive["id"] == DEFAULT_ARCHIVE_ID
+    return result
 
 
 def normalize_name(value):
@@ -153,11 +188,17 @@ class ArchiveStore:
         self._lock = threading.RLock()
 
     def _empty(self):
-        return {"format_version": FORMAT_VERSION, "archives": []}
+        return {
+            "format_version": FORMAT_VERSION,
+            "last_selected_archive_id": DEFAULT_ARCHIVE_ID,
+            "archives": [_default_archive()],
+        }
 
     def _read_unlocked(self):
         if not os.path.exists(self.path):
-            return self._empty()
+            data = self._empty()
+            self._write_unlocked(data)
+            return data
         if os.path.getsize(self.path) > MAX_STORE_BYTES:
             raise ArchiveCorruptError("archive store is too large")
         try:
@@ -169,14 +210,63 @@ class ArchiveStore:
             if not isinstance(data, dict) or data.get("format_version") != FORMAT_VERSION:
                 raise ArchiveValidationError("unsupported archive store format")
             archives = data.get("archives")
-            if not isinstance(archives, list) or len(archives) > MAX_ARCHIVES:
+            if not isinstance(archives, list) or len(archives) > MAX_ARCHIVES + 1:
                 raise ArchiveValidationError("archive store has an invalid archive list")
             normalized = [_normalize_export_archive(archive) for archive in archives]
             ids = [archive["id"] for archive in normalized]
             names = [archive["name"].casefold() for archive in normalized]
             if len(ids) != len(set(ids)) or len(names) != len(set(names)):
                 raise ArchiveValidationError("archive store contains duplicate ids or names")
-            return {"format_version": FORMAT_VERSION, "archives": normalized}
+
+            changed = False
+            default_by_id = next(
+                (archive for archive in normalized if archive["id"] == DEFAULT_ARCHIVE_ID),
+                None,
+            )
+            default_by_name = next(
+                (
+                    archive
+                    for archive in normalized
+                    if archive["name"].casefold() == DEFAULT_ARCHIVE_NAME.casefold()
+                ),
+                None,
+            )
+            if default_by_id is not None and default_by_name is not None and default_by_id is not default_by_name:
+                raise ArchiveValidationError("default archive id and name refer to different archives")
+            if default_by_id is None and default_by_name is not None:
+                default_by_name["id"] = DEFAULT_ARCHIVE_ID
+                default_by_id = default_by_name
+                changed = True
+            if default_by_id is None:
+                default_by_id = _default_archive()
+                normalized.append(default_by_id)
+                changed = True
+            if default_by_id["name"] != DEFAULT_ARCHIVE_NAME:
+                default_by_id["name"] = DEFAULT_ARCHIVE_NAME
+                changed = True
+
+            regular_count = sum(archive["id"] != DEFAULT_ARCHIVE_ID for archive in normalized)
+            if regular_count > MAX_ARCHIVES:
+                raise ArchiveValidationError("archive store has too many regular archives")
+
+            raw_last_selected = data.get("last_selected_archive_id")
+            if raw_last_selected is None:
+                last_selected = DEFAULT_ARCHIVE_ID
+                changed = True
+            else:
+                last_selected = _normalize_archive_id(raw_last_selected)
+                if not any(archive["id"] == last_selected for archive in normalized):
+                    last_selected = DEFAULT_ARCHIVE_ID
+                    changed = True
+
+            result = {
+                "format_version": FORMAT_VERSION,
+                "last_selected_archive_id": last_selected,
+                "archives": normalized,
+            }
+            if changed:
+                self._write_unlocked(result)
+            return result
         except ArchiveValidationError as error:
             raise ArchiveCorruptError(f"archive store is invalid: {error}") from error
 
@@ -200,20 +290,37 @@ class ArchiveStore:
 
     @staticmethod
     def _sorted(archives):
-        return sorted(archives, key=lambda archive: archive["updated_at"], reverse=True)
+        return sorted(
+            archives,
+            key=lambda archive: (
+                archive["id"] == DEFAULT_ARCHIVE_ID,
+                archive["updated_at"],
+            ),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _regular_count(archives):
+        return sum(archive["id"] != DEFAULT_ARCHIVE_ID for archive in archives)
+
+    def _public_data(self, data):
+        return {
+            "format_version": FORMAT_VERSION,
+            "last_selected_archive_id": data["last_selected_archive_id"],
+            "archives": [_public_archive(archive) for archive in self._sorted(data["archives"])],
+        }
 
     def list_archives(self):
         with self._lock:
             data = self._read_unlocked()
-            data["archives"] = self._sorted(data["archives"])
-            return data
+            return self._public_data(data)
 
     def create(self, name, snapshot):
         name = normalize_name(name)
         snapshot = validate_snapshot(snapshot)
         with self._lock:
             data = self._read_unlocked()
-            if len(data["archives"]) >= MAX_ARCHIVES:
+            if self._regular_count(data["archives"]) >= MAX_ARCHIVES:
                 raise ArchiveCapacityError(f"at most {MAX_ARCHIVES} archives are allowed")
             if any(archive["name"].casefold() == name.casefold() for archive in data["archives"]):
                 raise ArchiveConflictError("an archive with this name already exists")
@@ -227,7 +334,7 @@ class ArchiveStore:
             }
             data["archives"].append(archive)
             self._write_unlocked(data)
-            return archive
+            return _public_archive(archive)
 
     def update(self, archive_id, name=None, snapshot=None):
         archive_id = _normalize_archive_id(archive_id)
@@ -240,6 +347,8 @@ class ArchiveStore:
             archive = next((item for item in data["archives"] if item["id"] == archive_id), None)
             if archive is None:
                 raise ArchiveNotFoundError("archive not found")
+            if archive_id == DEFAULT_ARCHIVE_ID and normalized_name is not None:
+                raise ArchiveValidationError("default archive cannot be renamed")
             if normalized_name is not None and any(
                 item["id"] != archive_id and item["name"].casefold() == normalized_name.casefold()
                 for item in data["archives"]
@@ -251,10 +360,12 @@ class ArchiveStore:
                 archive["snapshot"] = normalized_snapshot
             archive["updated_at"] = _now()
             self._write_unlocked(data)
-            return archive
+            return _public_archive(archive)
 
     def delete(self, archive_id):
         archive_id = _normalize_archive_id(archive_id)
+        if archive_id == DEFAULT_ARCHIVE_ID:
+            raise ArchiveValidationError("default archive cannot be deleted")
         with self._lock:
             data = self._read_unlocked()
             index = next(
@@ -264,8 +375,20 @@ class ArchiveStore:
             if index is None:
                 raise ArchiveNotFoundError("archive not found")
             removed = data["archives"].pop(index)
+            if data["last_selected_archive_id"] == archive_id:
+                data["last_selected_archive_id"] = DEFAULT_ARCHIVE_ID
             self._write_unlocked(data)
-            return removed
+            return _public_archive(removed)
+
+    def set_last_selected(self, archive_id):
+        archive_id = _normalize_archive_id(archive_id)
+        with self._lock:
+            data = self._read_unlocked()
+            if not any(archive["id"] == archive_id for archive in data["archives"]):
+                raise ArchiveNotFoundError("archive not found")
+            data["last_selected_archive_id"] = archive_id
+            self._write_unlocked(data)
+            return archive_id
 
     def import_bundle(self, bundle, conflict_policy="skip"):
         if not isinstance(bundle, dict):
@@ -277,8 +400,8 @@ class ArchiveStore:
         incoming_values = bundle.get("archives")
         if not isinstance(incoming_values, list) or not incoming_values:
             raise ArchiveValidationError("import bundle must contain archives")
-        if len(incoming_values) > MAX_ARCHIVES:
-            raise ArchiveValidationError(f"import bundle must not exceed {MAX_ARCHIVES} archives")
+        if len(incoming_values) > MAX_ARCHIVES + 1:
+            raise ArchiveValidationError(f"import bundle must not exceed {MAX_ARCHIVES + 1} archives")
         if conflict_policy not in {"skip", "overwrite", "rename"}:
             raise ArchiveValidationError("conflict_policy must be skip, overwrite, or rename")
         incoming = [_normalize_export_archive(value) for value in incoming_values]
@@ -304,7 +427,8 @@ class ArchiveStore:
                     result["skipped"] += 1
                     continue
                 if conflict is not None and conflict_policy == "overwrite":
-                    conflict["name"] = candidate["name"]
+                    if conflict["id"] != DEFAULT_ARCHIVE_ID:
+                        conflict["name"] = candidate["name"]
                     conflict["snapshot"] = candidate["snapshot"]
                     conflict["updated_at"] = _now()
                     result["overwritten"] += 1
@@ -330,8 +454,8 @@ class ArchiveStore:
                     result["renamed"] += 1
                 archives.append(new_archive)
                 result["imported"] += 1
-                if len(archives) > MAX_ARCHIVES:
+                if self._regular_count(archives) > MAX_ARCHIVES:
                     raise ArchiveCapacityError(f"at most {MAX_ARCHIVES} archives are allowed")
             self._write_unlocked(data)
-            result["archives"] = self._sorted(archives)
+            result.update(self._public_data(data))
             return result

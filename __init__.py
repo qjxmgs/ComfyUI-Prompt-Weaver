@@ -164,6 +164,20 @@ async def create_prompt_grid_archive(request):
         return _archive_error_response(error)
 
 
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-grid-archives/selection")
+async def select_prompt_grid_archive(request):
+    try:
+        payload = await _request_json(request, 4096)
+        archive_id = _archive_store(request).set_last_selected(payload.get("archive_id"))
+        return web.json_response({"last_selected_archive_id": archive_id})
+    except (
+        ArchiveValidationError,
+        ArchiveNotFoundError,
+        ArchiveCorruptError,
+    ) as error:
+        return _archive_error_response(error)
+
+
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-grid-archives/{archive_id}")
 async def update_prompt_grid_archive(request):
     try:
