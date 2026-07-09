@@ -11,6 +11,7 @@ import uuid
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000"
 
 
 class _Response:
@@ -129,8 +130,24 @@ class ArchiveRouteTests(unittest.TestCase):
 
         alice = self.run_async(self.module.list_prompt_grid_archives(_Request()))
         bob = self.run_async(self.module.list_prompt_grid_archives(_Request(user="bob")))
-        self.assertEqual([item["name"] for item in alice.payload["archives"]], ["人物"])
-        self.assertEqual(bob.payload["archives"], [])
+        self.assertEqual([item["name"] for item in alice.payload["archives"]], ["默认存档", "人物"])
+        self.assertEqual([item["name"] for item in bob.payload["archives"]], ["默认存档"])
+        self.assertEqual(alice.payload["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
+
+        selected = self.run_async(
+            self.module.select_prompt_grid_archive(
+                _Request({"archive_id": archive_id})
+            )
+        )
+        self.assertEqual(selected.status, 200)
+        self.assertEqual(selected.payload["last_selected_archive_id"], archive_id)
+
+        missing_selection = self.run_async(
+            self.module.select_prompt_grid_archive(
+                _Request({"archive_id": str(uuid.uuid4())})
+            )
+        )
+        self.assertEqual(missing_selection.status, 404)
 
         renamed = self.run_async(
             self.module.update_prompt_grid_archive(
@@ -156,6 +173,15 @@ class ArchiveRouteTests(unittest.TestCase):
             )
         )
         self.assertEqual(removed.status, 200)
+        after_delete = self.run_async(self.module.list_prompt_grid_archives(_Request()))
+        self.assertEqual(after_delete.payload["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
+
+        protected = self.run_async(
+            self.module.delete_prompt_grid_archive(
+                _Request(match_info={"archive_id": DEFAULT_ARCHIVE_ID})
+            )
+        )
+        self.assertEqual(protected.status, 400)
 
     def test_invalid_json_and_all_import_conflict_policies(self):
         invalid = self.run_async(
@@ -208,7 +234,7 @@ class ArchiveRouteTests(unittest.TestCase):
         )
         self.assertEqual(renamed.payload["renamed"], 1)
         names = [item["name"] for item in renamed.payload["archives"]]
-        self.assertCountEqual(names, ["通用画质 (2)", "通用画质"])
+        self.assertCountEqual(names, ["默认存档", "通用画质 (2)", "通用画质"])
 
 
 if __name__ == "__main__":

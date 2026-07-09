@@ -8,12 +8,13 @@ const moduleSource = await readFile(
 );
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
+    DEFAULT_ARCHIVE_ID,
     PromptGridArchiveClient,
     buildArchiveExportBundle,
     defaultArchiveName,
     findMatchingArchive,
     formatArchiveOptionLabel,
-    isDefaultSnapshot,
+    resolveArchiveInitialization,
     resolveArchiveStatus,
     semanticFingerprint,
     snapshotFromState,
@@ -45,43 +46,62 @@ test("semantic fingerprints ignore internal ids but preserve visible order and s
     assert.notEqual(semanticFingerprint(left), semanticFingerprint(right));
 });
 
-test("default detection compares semantic state", () => {
-    const current = snapshotFromState(state);
-    const defaults = structuredClone(current);
-    defaults.items[0].id = "new-id";
-    assert.equal(isDefaultSnapshot(current, defaults), true);
-    defaults.columns = 3;
-    assert.equal(isDefaultSnapshot(current, defaults), false);
-});
-
 test("dirty state keeps the current archive identity", () => {
     const saved = snapshotFromState(state);
     const changed = structuredClone(saved);
     changed.items[0].prompt = "masterpiece, best quality";
     const archives = [{ id: "common", name: "常用", snapshot: saved }];
 
-    assert.deepEqual(resolveArchiveStatus(archives, changed, "common", saved), {
+    assert.deepEqual(resolveArchiveStatus(archives, changed, "common"), {
         activeArchiveId: "common",
         dirty: true,
     });
-    assert.deepEqual(resolveArchiveStatus(archives, saved, "common", saved), {
+    assert.deepEqual(resolveArchiveStatus(archives, saved, "common"), {
         activeArchiveId: "common",
         dirty: false,
     });
 });
 
-test("unassociated state auto-matches archives and otherwise uses unsaved state", () => {
+test("archive initialization distinguishes persisted, legacy, and new nodes", () => {
     const saved = snapshotFromState(state);
     const changed = structuredClone(saved);
     changed.columns = 3;
-    const archives = [{ id: "common", name: "常用", snapshot: saved }];
+    const defaults = structuredClone(saved);
+    defaults.items = [];
+    const archives = [
+        { id: DEFAULT_ARCHIVE_ID, name: "默认存档", snapshot: defaults, is_default: true },
+        { id: "common", name: "常用", snapshot: saved },
+    ];
 
-    assert.deepEqual(resolveArchiveStatus(archives, saved, null, changed), {
+    assert.deepEqual(resolveArchiveInitialization(archives, changed, {
+        persistedArchiveId: "common",
+        lastSelectedArchiveId: DEFAULT_ARCHIVE_ID,
+        isNewNode: false,
+    }), {
         activeArchiveId: "common",
-        dirty: false,
+        loadSnapshot: false,
     });
-    assert.deepEqual(resolveArchiveStatus([], changed, "deleted", saved), {
-        activeArchiveId: null,
+    assert.deepEqual(resolveArchiveInitialization(archives, saved, {
+        isNewNode: false,
+    }), {
+        activeArchiveId: "common",
+        loadSnapshot: false,
+    });
+    assert.deepEqual(resolveArchiveInitialization(archives, defaults, {
+        lastSelectedArchiveId: "common",
+        isNewNode: true,
+    }), {
+        activeArchiveId: "common",
+        loadSnapshot: true,
+    });
+    assert.deepEqual(resolveArchiveInitialization(archives, changed, {
+        persistedArchiveId: "deleted",
+    }), {
+        activeArchiveId: DEFAULT_ARCHIVE_ID,
+        loadSnapshot: false,
+    });
+    assert.deepEqual(resolveArchiveStatus(archives, changed, "deleted"), {
+        activeArchiveId: DEFAULT_ARCHIVE_ID,
         dirty: true,
     });
 });
@@ -123,10 +143,13 @@ test("API client preserves paths, methods, payloads, and server errors", async (
     await client.create("人物", snapshotFromState(state));
     await client.update("id with space", { name: "夜景" });
     await client.delete("id with space");
+    await client.select("id with space");
     assert.equal(requests[0].path, "/prompt-weaver/prompt-grid-archives");
     assert.equal(requests[1].options.method, "POST");
     assert.equal(requests[2].path, "/prompt-weaver/prompt-grid-archives/id%20with%20space");
     assert.equal(requests[3].options.method, "DELETE");
+    assert.equal(requests[4].path, "/prompt-weaver/prompt-grid-archives/selection");
+    assert.equal(requests[4].options.method, "PATCH");
 
     const failing = new PromptGridArchiveClient({
         async fetchApi() {
