@@ -26,10 +26,11 @@ from archive_store import (  # noqa: E402
 )
 
 
-def snapshot(label="one", columns=2):
+def snapshot(label="one", columns=2, width=600, height=420):
     return {
         "version": 1,
         "columns": columns,
+        "node_size": {"width": width, "height": height},
         "items": [
             {
                 "id": f"id-{label}",
@@ -76,9 +77,25 @@ class ArchiveStoreTests(unittest.TestCase):
         value["ignored"] = "value"
         value["items"][0]["ignored"] = "value"
         self.assertEqual(validate_snapshot(value), snapshot())
+        legacy_value = snapshot("legacy")
+        legacy_value.pop("node_size")
+        self.assertEqual(validate_snapshot(legacy_value), snapshot("legacy"))
         invalid_values = [
             {"version": 2, "columns": 2, "items": []},
             {"version": 1, "columns": 0, "items": []},
+            {"version": 1, "columns": 2, "node_size": [], "items": []},
+            {
+                "version": 1,
+                "columns": 2,
+                "node_size": {"width": 99, "height": 420},
+                "items": [],
+            },
+            {
+                "version": 1,
+                "columns": 2,
+                "node_size": {"width": 600.5, "height": 420},
+                "items": [],
+            },
             {"version": 1, "columns": 2, "items": [{"id": "x", "enabled": 1, "title": "", "prompt": ""}]},
             {
                 "version": 1,
@@ -106,6 +123,8 @@ class ArchiveStoreTests(unittest.TestCase):
             self.assertEqual(handle.read(), original)
 
     def test_default_archive_migrates_is_protected_and_tracks_selection(self):
+        legacy_snapshot = snapshot("legacy-default")
+        legacy_snapshot.pop("node_size")
         legacy = {
             "format_version": FORMAT_VERSION,
             "archives": [
@@ -114,7 +133,7 @@ class ArchiveStoreTests(unittest.TestCase):
                     "name": DEFAULT_ARCHIVE_NAME,
                     "created_at": "2026-08-10T00:00:00Z",
                     "updated_at": "2026-08-10T00:00:00Z",
-                    "snapshot": snapshot("legacy-default"),
+                    "snapshot": legacy_snapshot,
                 }
             ],
         }
@@ -141,6 +160,33 @@ class ArchiveStoreTests(unittest.TestCase):
         self.assertEqual(self.store.list_archives()["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
         with self.assertRaises(ArchiveNotFoundError):
             self.store.set_last_selected(str(uuid.uuid4()))
+
+    def test_existing_store_atomically_persists_missing_node_size(self):
+        legacy_snapshot = snapshot("legacy-size")
+        legacy_snapshot.pop("node_size")
+        legacy = {
+            "format_version": FORMAT_VERSION,
+            "last_selected_archive_id": DEFAULT_ARCHIVE_ID,
+            "archives": [
+                {
+                    "id": DEFAULT_ARCHIVE_ID,
+                    "name": DEFAULT_ARCHIVE_NAME,
+                    "created_at": "2026-08-10T00:00:00.000Z",
+                    "updated_at": "2026-08-10T00:00:00.000Z",
+                    "snapshot": legacy_snapshot,
+                }
+            ],
+        }
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        Path(self.path).write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+
+        loaded = self.store.list_archives()
+        self.assertEqual(loaded["archives"][0]["snapshot"], snapshot("legacy-size"))
+        persisted = json.loads(Path(self.path).read_text(encoding="utf-8"))
+        self.assertEqual(
+            persisted["archives"][0]["snapshot"]["node_size"],
+            {"width": 600, "height": 420},
+        )
 
     def test_import_skip_overwrite_and_rename_are_atomic(self):
         local = self.store.create("人物", snapshot("local"))

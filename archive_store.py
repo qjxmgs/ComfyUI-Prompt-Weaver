@@ -16,6 +16,11 @@ MAX_PROMPT_LENGTH = 100_000
 MAX_SNAPSHOT_BYTES = 512 * 1024
 MAX_IMPORT_BYTES = 2 * 1024 * 1024
 MAX_STORE_BYTES = 10 * 1024 * 1024
+DEFAULT_NODE_WIDTH = 600
+DEFAULT_NODE_HEIGHT = 420
+MIN_NODE_WIDTH = 600
+MIN_NODE_HEIGHT = 234
+MAX_NODE_SIZE = 10_000
 DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000"
 DEFAULT_ARCHIVE_NAME = "默认存档"
 
@@ -60,6 +65,7 @@ def default_snapshot():
     return {
         "version": FORMAT_VERSION,
         "columns": 2,
+        "node_size": {"width": DEFAULT_NODE_WIDTH, "height": DEFAULT_NODE_HEIGHT},
         "items": [
             {
                 "id": f"prompt-{index}",
@@ -130,6 +136,29 @@ def validate_snapshot(value):
     columns = value.get("columns")
     if isinstance(columns, bool) or not isinstance(columns, int) or not 1 <= columns <= 6:
         raise ArchiveValidationError("snapshot columns must be an integer from 1 to 6")
+    node_size = value.get("node_size")
+    if node_size is None:
+        normalized_node_size = {
+            "width": DEFAULT_NODE_WIDTH,
+            "height": DEFAULT_NODE_HEIGHT,
+        }
+    else:
+        if not isinstance(node_size, dict):
+            raise ArchiveValidationError("snapshot node_size must be an object")
+        width = node_size.get("width")
+        height = node_size.get("height")
+        for field, dimension, minimum in (
+            ("width", width, MIN_NODE_WIDTH),
+            ("height", height, MIN_NODE_HEIGHT),
+        ):
+            if (isinstance(dimension, bool)
+                    or not isinstance(dimension, int)
+                    or not minimum <= dimension <= MAX_NODE_SIZE):
+                raise ArchiveValidationError(
+                    f"snapshot node_size.{field} must be an integer from "
+                    f"{minimum} to {MAX_NODE_SIZE}"
+                )
+        normalized_node_size = {"width": width, "height": height}
     items = value.get("items")
     if not isinstance(items, list):
         raise ArchiveValidationError("snapshot items must be an array")
@@ -164,7 +193,12 @@ def validate_snapshot(value):
             {"id": item_id, "enabled": enabled, "title": title, "prompt": prompt}
         )
 
-    snapshot = {"version": FORMAT_VERSION, "columns": columns, "items": normalized_items}
+    snapshot = {
+        "version": FORMAT_VERSION,
+        "columns": columns,
+        "node_size": normalized_node_size,
+        "items": normalized_items,
+    }
     if _json_size(snapshot) > MAX_SNAPSHOT_BYTES:
         raise ArchiveValidationError("snapshot is too large")
     return snapshot
@@ -218,7 +252,7 @@ class ArchiveStore:
             if len(ids) != len(set(ids)) or len(names) != len(set(names)):
                 raise ArchiveValidationError("archive store contains duplicate ids or names")
 
-            changed = False
+            changed = any("node_size" not in archive["snapshot"] for archive in archives)
             default_by_id = next(
                 (archive for archive in normalized if archive["id"] == DEFAULT_ARCHIVE_ID),
                 None,
