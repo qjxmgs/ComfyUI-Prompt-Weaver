@@ -2,11 +2,32 @@ export const ARCHIVE_EXPORT_FORMAT = "prompt-weaver-prompt-grid-archives";
 export const ARCHIVE_FORMAT_VERSION = 1;
 export const DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000";
 export const DEFAULT_ARCHIVE_NAME = "默认存档";
+export const DEFAULT_ARCHIVE_NODE_SIZE = Object.freeze({ width: 600, height: 420 });
+const MIN_ARCHIVE_NODE_WIDTH = 600;
+const MIN_ARCHIVE_NODE_HEIGHT = 234;
+const MAX_ARCHIVE_NODE_SIZE = 10_000;
 
-export function snapshotFromState(state) {
+export function normalizeArchiveNodeSize(value) {
+    // LiteGraph/Nodes 2.0 may expose size as an Array, Float32Array, or
+    // another array-like vector. Prefer numeric indexes before the persisted
+    // {width, height} archive representation.
+    const rawWidth = Number.isFinite(value?.[0]) ? value[0] : value?.width;
+    const rawHeight = Number.isFinite(value?.[1]) ? value[1] : value?.height;
+    const normalizeDimension = (dimension, fallback, minimum) => {
+        if (!Number.isFinite(dimension)) return fallback;
+        return Math.min(MAX_ARCHIVE_NODE_SIZE, Math.max(minimum, Math.round(dimension)));
+    };
+    return {
+        width: normalizeDimension(rawWidth, DEFAULT_ARCHIVE_NODE_SIZE.width, MIN_ARCHIVE_NODE_WIDTH),
+        height: normalizeDimension(rawHeight, DEFAULT_ARCHIVE_NODE_SIZE.height, MIN_ARCHIVE_NODE_HEIGHT),
+    };
+}
+
+export function snapshotFromState(state, nodeSize = DEFAULT_ARCHIVE_NODE_SIZE) {
     return {
         version: 1,
         columns: state.columns,
+        node_size: normalizeArchiveNodeSize(nodeSize),
         items: state.items.map((item) => ({
             id: item.id,
             enabled: item.enabled,
@@ -16,20 +37,44 @@ export function snapshotFromState(state) {
     };
 }
 
-export function semanticFingerprint(snapshot) {
-    return JSON.stringify({
+export function configFromArchiveSnapshot(snapshot) {
+    return {
+        version: 1,
+        columns: snapshot.columns,
+        items: snapshot.items.map((item) => ({
+            id: item.id,
+            enabled: item.enabled,
+            title: item.title,
+            prompt: item.prompt,
+        })),
+    };
+}
+
+function gridSemantics(snapshot) {
+    return {
         columns: snapshot.columns,
         items: snapshot.items.map((item) => ({
             enabled: item.enabled,
             title: item.title,
             prompt: item.prompt,
         })),
+    };
+}
+
+function gridFingerprint(snapshot) {
+    return JSON.stringify(gridSemantics(snapshot));
+}
+
+export function semanticFingerprint(snapshot) {
+    return JSON.stringify({
+        grid: gridSemantics(snapshot),
+        node_size: normalizeArchiveNodeSize(snapshot.node_size),
     });
 }
 
 export function findMatchingArchive(archives, snapshot) {
-    const fingerprint = semanticFingerprint(snapshot);
-    return archives.find((archive) => semanticFingerprint(archive.snapshot) === fingerprint) ?? null;
+    const fingerprint = gridFingerprint(snapshot);
+    return archives.find((archive) => gridFingerprint(archive.snapshot) === fingerprint) ?? null;
 }
 
 export function resolveArchiveInitialization(

@@ -5,13 +5,15 @@ import {
     DEFAULT_ARCHIVE_NAME,
     PromptGridArchiveClient,
     buildArchiveExportBundle,
+    configFromArchiveSnapshot,
     defaultArchiveName,
     formatArchiveOptionLabel,
+    normalizeArchiveNodeSize,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js";
+} from "./prompt_grid_archives.js?v=20260811-size-fix";
 import {
     buildPromptFromSelection,
     splitPromptTokens,
@@ -475,6 +477,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let archivesLoading = false;
     let archivesRefreshPending = false;
     let heightFitFrame = 0;
+    let sizeReconcileFrame = 0;
     let disposed = false;
     let widget;
     const cardElements = new Map();
@@ -505,7 +508,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function currentSnapshot() {
-        return state ? snapshotFromState(state) : null;
+        return state ? snapshotFromState(state, node.size) : null;
     }
 
     function persistedArchiveId() {
@@ -575,13 +578,35 @@ function createPromptGridWidget(node, inputName, inputData) {
         });
     }
 
+    function scheduleArchiveSizeReconcile() {
+        if (disposed || !archiveAssociationInitialized || !state) return;
+        if (sizeReconcileFrame) cancelAnimationFrame(sizeReconcileFrame);
+        sizeReconcileFrame = requestAnimationFrame(() => {
+            sizeReconcileFrame = 0;
+            if (!disposed && archiveAssociationInitialized && state) reconcileArchiveSelection();
+        });
+    }
+
+    function applyArchiveNodeSize(snapshot) {
+        const size = normalizeArchiveNodeSize(snapshot?.node_size);
+        const currentWidth = Math.round(node.size?.[0] ?? DEFAULT_NODE_SIZE[0]);
+        const currentHeight = Math.round(node.size?.[1] ?? DEFAULT_NODE_SIZE[1]);
+        if (heightFitFrame) {
+            cancelAnimationFrame(heightFitFrame);
+            heightFitFrame = 0;
+        }
+        if (currentWidth === size.width && currentHeight === size.height) return;
+        node.setSize([size.width, size.height]);
+        app.canvas?.setDirty?.(true, true);
+    }
+
     function renderArchiveSelect() {
         const visibleArchives = archives.length
             ? archives
             : [{
                 id: DEFAULT_ARCHIVE_ID,
                 name: DEFAULT_ARCHIVE_NAME,
-                snapshot: createDefaultConfig(),
+                snapshot: snapshotFromState(createDefaultConfig(), DEFAULT_NODE_SIZE),
                 is_default: true,
             }];
         archiveSelect.customSelect.setOptions(
@@ -605,7 +630,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         const statusArchives = archives.length
             ? archives
-            : [{ id: DEFAULT_ARCHIVE_ID, snapshot: createDefaultConfig() }];
+            : [{
+                id: DEFAULT_ARCHIVE_ID,
+                snapshot: snapshotFromState(createDefaultConfig(), DEFAULT_NODE_SIZE),
+            }];
         const previousArchiveId = activeArchiveId;
         const status = resolveArchiveStatus(statusArchives, currentSnapshot(), activeArchiveId);
         activeArchiveId = status.activeArchiveId;
@@ -755,11 +783,14 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function loadArchive(archive, { captureHistory = true, persistGlobal = true } = {}) {
         if (!archive || disposed) return;
-        const normalized = normalizeConfigValue(JSON.stringify(archive.snapshot));
+        const normalized = normalizeConfigValue(JSON.stringify(configFromArchiveSnapshot(archive.snapshot)));
         state = normalized.state;
         parseError = null;
         setActiveArchive(archive.id, { persistGlobal });
-        commit(true, captureHistory);
+        commit(true, false);
+        applyArchiveNodeSize(archive.snapshot);
+        reconcileArchiveSelection();
+        if (captureHistory) captureCanvasState();
     }
 
     async function requestArchiveLoad(archive) {
@@ -958,7 +989,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             const meta = element(
                 "span",
                 "cpw-archive-manager__row-meta",
-                `${archive.snapshot.columns} 列 · ${archive.snapshot.items.length} 张卡片 · ${enabledCount} 张启用 · ${formatArchiveTime(archive.updated_at)}`,
+                `${archive.snapshot.columns} 列 · ${archive.snapshot.items.length} 张卡片 · ${enabledCount} 张启用 · ${archive.snapshot.node_size.width}×${archive.snapshot.node_size.height} · ${formatArchiveTime(archive.updated_at)}`,
             );
             main.append(nameRow, meta);
             const rowActions = element("div", "cpw-archive-manager__row-actions");
@@ -1768,6 +1799,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             clearTimeout(deleteResetTimer);
             state.items = state.items.filter((candidate) => candidate.id !== item.id);
             commit(true);
+            scheduleNodeHeightFit();
         });
 
         dragHandle.addEventListener("pointerdown", (event) => beginPointerDrag(event, item.id, card, dragHandle));
@@ -1804,7 +1836,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             grid.replaceChildren(element("div", "cpw-prompt-grid__empty", "暂无提示词，点击“新增提示词”开始编辑。"));
         }
         reconcileArchiveSelection();
-        scheduleNodeHeightFit();
     }
 
     columnSelect.addEventListener("change", () => {
@@ -1818,6 +1849,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!state) return;
         state.items.push({ id: createId(), enabled: true, title: nextTitle(), prompt: "" });
         commit(true);
+        scheduleNodeHeightFit();
         queueMicrotask(() => grid.querySelector(".cpw-prompt-grid__card:last-child .cpw-prompt-grid__prompt")?.focus());
     });
     enableAllButton.addEventListener("click", () => {
@@ -1850,6 +1882,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         state = createDefaultConfig();
         parseError = null;
         commit(true);
+        scheduleNodeHeightFit();
     });
 
     const onArchiveSync = () => refreshArchives();
@@ -1869,6 +1902,17 @@ function createPromptGridWidget(node, inputName, inputData) {
             reconcileLoadedArchiveAssociation();
         },
     });
+    const sizeObserver = typeof ResizeObserver === "function"
+        ? new ResizeObserver(scheduleArchiveSizeReconcile)
+        : null;
+    sizeObserver?.observe(root);
+    const previousNodeOnResize = node.onResize;
+    const promptGridOnResize = function (...args) {
+        const result = previousNodeOnResize?.apply(this, args);
+        scheduleArchiveSizeReconcile();
+        return result;
+    };
+    node.onResize = promptGridOnResize;
     readValue(inputData?.[1]?.default ?? JSON.stringify(createDefaultConfig()));
     widget = node.addDOMWidget(inputName, WIDGET_TYPE, root, {
         serialize: true,
@@ -1893,6 +1937,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (activeArchiveConfirmation) closeArchiveConfirmation(false);
         closeArchiveManager();
         if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
+        if (sizeReconcileFrame) cancelAnimationFrame(sizeReconcileFrame);
+        sizeObserver?.disconnect();
+        if (node.onResize === promptGridOnResize) node.onResize = previousNodeOnResize;
         window.removeEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
         columnSelect.customSelect.destroy();
         archiveSelect.customSelect.destroy();
