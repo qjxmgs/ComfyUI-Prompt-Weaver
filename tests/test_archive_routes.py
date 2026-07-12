@@ -60,6 +60,7 @@ def _snapshot(prompt="masterpiece"):
     return {
         "version": 1,
         "columns": 2,
+        "node_size": {"width": 600, "height": 420},
         "items": [
             {
                 "id": "prompt-1",

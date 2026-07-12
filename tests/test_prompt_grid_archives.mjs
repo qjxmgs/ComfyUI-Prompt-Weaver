@@ -11,9 +11,11 @@ const {
     DEFAULT_ARCHIVE_ID,
     PromptGridArchiveClient,
     buildArchiveExportBundle,
+    configFromArchiveSnapshot,
     defaultArchiveName,
     findMatchingArchive,
     formatArchiveOptionLabel,
+    normalizeArchiveNodeSize,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     semanticFingerprint,
@@ -32,6 +34,7 @@ test("snapshot extraction keeps only execution state", () => {
     assert.deepEqual(snapshotFromState(state), {
         version: 1,
         columns: 2,
+        node_size: { width: 600, height: 420 },
         items: [{ id: "one", enabled: true, title: "画质", prompt: "masterpiece" }],
     });
 });
@@ -42,8 +45,29 @@ test("semantic fingerprints ignore internal ids but preserve visible order and s
     right.items[0].id = "different";
     assert.equal(semanticFingerprint(left), semanticFingerprint(right));
     assert.equal(findMatchingArchive([{ id: "archive", snapshot: right }], left)?.id, "archive");
+    right.node_size = { width: 900, height: 700 };
+    assert.notEqual(semanticFingerprint(left), semanticFingerprint(right));
+    assert.equal(findMatchingArchive([{ id: "archive", snapshot: right }], left)?.id, "archive");
     right.items[0].enabled = false;
     assert.notEqual(semanticFingerprint(left), semanticFingerprint(right));
+});
+
+test("node size is canonical archive metadata and never enters execution config", () => {
+    const saved = snapshotFromState(state, [812.6, 537.4]);
+    assert.deepEqual(saved.node_size, { width: 813, height: 537 });
+    assert.deepEqual(snapshotFromState(state, new Float32Array([900, 700])).node_size, {
+        width: 900,
+        height: 700,
+    });
+    assert.deepEqual(normalizeArchiveNodeSize({ width: 20, height: 20_000 }), {
+        width: 600,
+        height: 10_000,
+    });
+    assert.deepEqual(configFromArchiveSnapshot(saved), {
+        version: 1,
+        columns: 2,
+        items: [{ id: "one", enabled: true, title: "画质", prompt: "masterpiece" }],
+    });
 });
 
 test("dirty state keeps the current archive identity", () => {
@@ -59,6 +83,12 @@ test("dirty state keeps the current archive identity", () => {
     assert.deepEqual(resolveArchiveStatus(archives, saved, "common"), {
         activeArchiveId: "common",
         dirty: false,
+    });
+    const resized = structuredClone(saved);
+    resized.node_size.height += 100;
+    assert.deepEqual(resolveArchiveStatus(archives, resized, "common"), {
+        activeArchiveId: "common",
+        dirty: true,
     });
 });
 
