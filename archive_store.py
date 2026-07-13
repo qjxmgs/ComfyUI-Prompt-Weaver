@@ -323,15 +323,10 @@ class ArchiveStore:
                 os.unlink(temporary_path)
 
     @staticmethod
-    def _sorted(archives):
-        return sorted(
-            archives,
-            key=lambda archive: (
-                archive["id"] == DEFAULT_ARCHIVE_ID,
-                archive["updated_at"],
-            ),
-            reverse=True,
-        )
+    def _ordered(archives):
+        default = [archive for archive in archives if archive["id"] == DEFAULT_ARCHIVE_ID]
+        regular = [archive for archive in archives if archive["id"] != DEFAULT_ARCHIVE_ID]
+        return default + regular
 
     @staticmethod
     def _regular_count(archives):
@@ -341,7 +336,7 @@ class ArchiveStore:
         return {
             "format_version": FORMAT_VERSION,
             "last_selected_archive_id": data["last_selected_archive_id"],
-            "archives": [_public_archive(archive) for archive in self._sorted(data["archives"])],
+            "archives": [_public_archive(archive) for archive in self._ordered(data["archives"])],
         }
 
     def list_archives(self):
@@ -414,6 +409,37 @@ class ArchiveStore:
             self._write_unlocked(data)
             return _public_archive(removed)
 
+    def delete_many(self, archive_ids):
+        if not isinstance(archive_ids, list) or not archive_ids:
+            raise ArchiveValidationError("archive_ids must be a non-empty array")
+        if len(archive_ids) > MAX_ARCHIVES:
+            raise ArchiveValidationError(f"archive_ids must not contain more than {MAX_ARCHIVES} items")
+        normalized_ids = [_normalize_archive_id(archive_id) for archive_id in archive_ids]
+        if len(normalized_ids) != len(set(normalized_ids)):
+            raise ArchiveValidationError("archive_ids must not contain duplicates")
+        if DEFAULT_ARCHIVE_ID in normalized_ids:
+            raise ArchiveValidationError("default archive cannot be deleted")
+
+        with self._lock:
+            data = self._read_unlocked()
+            requested_ids = set(normalized_ids)
+            existing_ids = {archive["id"] for archive in data["archives"]}
+            missing_ids = requested_ids - existing_ids
+            if missing_ids:
+                raise ArchiveNotFoundError("one or more archives were not found")
+            removed = [
+                archive for archive in data["archives"] if archive["id"] in requested_ids
+            ]
+            data["archives"] = [
+                archive for archive in data["archives"] if archive["id"] not in requested_ids
+            ]
+            if data["last_selected_archive_id"] in requested_ids:
+                data["last_selected_archive_id"] = DEFAULT_ARCHIVE_ID
+            self._write_unlocked(data)
+            result = self._public_data(data)
+            result["deleted_archives"] = [_public_archive(archive) for archive in removed]
+            return result
+
     def set_last_selected(self, archive_id):
         archive_id = _normalize_archive_id(archive_id)
         with self._lock:
@@ -423,6 +449,35 @@ class ArchiveStore:
             data["last_selected_archive_id"] = archive_id
             self._write_unlocked(data)
             return archive_id
+
+    def reorder(self, archive_ids):
+        if not isinstance(archive_ids, list):
+            raise ArchiveValidationError("archive_ids must be an array")
+        normalized_ids = [_normalize_archive_id(archive_id) for archive_id in archive_ids]
+        if DEFAULT_ARCHIVE_ID in normalized_ids:
+            raise ArchiveValidationError("default archive must not be included in archive_ids")
+        if len(normalized_ids) != len(set(normalized_ids)):
+            raise ArchiveValidationError("archive_ids must not contain duplicates")
+
+        with self._lock:
+            data = self._read_unlocked()
+            default_archives = [
+                archive for archive in data["archives"] if archive["id"] == DEFAULT_ARCHIVE_ID
+            ]
+            regular_archives = {
+                archive["id"]: archive
+                for archive in data["archives"]
+                if archive["id"] != DEFAULT_ARCHIVE_ID
+            }
+            if len(normalized_ids) != len(regular_archives) or set(normalized_ids) != set(regular_archives):
+                raise ArchiveValidationError(
+                    "archive_ids must contain every current regular archive exactly once"
+                )
+            data["archives"] = default_archives + [
+                regular_archives[archive_id] for archive_id in normalized_ids
+            ]
+            self._write_unlocked(data)
+            return self._public_data(data)
 
     def import_bundle(self, bundle, conflict_policy="skip"):
         if not isinstance(bundle, dict):
