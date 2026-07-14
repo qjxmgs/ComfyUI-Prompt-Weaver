@@ -125,6 +125,100 @@ export function formatArchiveOptionLabel(label, marked = false) {
     return `${marked ? "* " : "\u00A0\u00A0"}${label}`;
 }
 
+export function reorderArchiveIds(archiveIds, draggedId, beforeId = null) {
+    const sourceIndex = archiveIds.indexOf(draggedId);
+    if (sourceIndex < 0 || beforeId === draggedId) return [...archiveIds];
+    const reordered = archiveIds.filter((archiveId) => archiveId !== draggedId);
+    if (beforeId === null) {
+        reordered.push(draggedId);
+        return reordered;
+    }
+    const targetIndex = reordered.indexOf(beforeId);
+    if (targetIndex < 0) return [...archiveIds];
+    reordered.splice(targetIndex, 0, draggedId);
+    return reordered;
+}
+
+export function normalizeArchiveManagerSelection(archives, selectedArchiveIds) {
+    const candidates = Array.isArray(archives) ? archives : [];
+    const selected = selectedArchiveIds instanceof Set
+        ? selectedArchiveIds
+        : new Set(Array.isArray(selectedArchiveIds) ? selectedArchiveIds : []);
+    return candidates
+        .filter((archive) => selected.has(archive.id))
+        .map((archive) => archive.id);
+}
+
+export function applyArchiveManagerSelectionGesture(
+    archiveIds,
+    selectedArchiveIds,
+    archiveId,
+    anchorId = null,
+    { additive = false, range = false } = {},
+) {
+    const orderedIds = Array.isArray(archiveIds) ? [...archiveIds] : [];
+    const current = new Set(
+        selectedArchiveIds instanceof Set
+            ? selectedArchiveIds
+            : (Array.isArray(selectedArchiveIds) ? selectedArchiveIds : []),
+    );
+    const normalize = (values) => orderedIds.filter((id) => values.has(id));
+    const targetIndex = orderedIds.indexOf(archiveId);
+    if (targetIndex < 0) {
+        return {
+            selectedIds: normalize(current),
+            anchorId: orderedIds.includes(anchorId) ? anchorId : null,
+        };
+    }
+
+    if (range) {
+        const anchorIndex = orderedIds.indexOf(anchorId);
+        if (anchorIndex >= 0) {
+            const start = Math.min(anchorIndex, targetIndex);
+            const end = Math.max(anchorIndex, targetIndex);
+            const next = additive ? new Set(current) : new Set();
+            for (const id of orderedIds.slice(start, end + 1)) next.add(id);
+            return { selectedIds: normalize(next), anchorId };
+        }
+        const next = additive ? new Set(current) : new Set();
+        next.add(archiveId);
+        return { selectedIds: normalize(next), anchorId: archiveId };
+    }
+
+    if (additive) {
+        if (current.has(archiveId)) current.delete(archiveId);
+        else current.add(archiveId);
+        return { selectedIds: normalize(current), anchorId: archiveId };
+    }
+
+    return { selectedIds: [archiveId], anchorId: archiveId };
+}
+
+export function archiveManagerSelectionAvailability(
+    selectedArchives,
+    { busy = false, dragging = false, renaming = false, hasState = true } = {},
+) {
+    const selection = Array.isArray(selectedArchives) ? selectedArchives : [];
+    const locked = busy || dragging || renaming || selection.length === 0;
+    const single = selection.length === 1;
+    const includesDefault = selection.some(
+        (archive) => archive?.is_default || archive?.id === DEFAULT_ARCHIVE_ID,
+    );
+    return {
+        save: !locked && single && hasState,
+        rename: !locked && single && !includesDefault,
+        export: !locked,
+        delete: !locked && !includesDefault,
+    };
+}
+
+export function canQuickSaveArchive(
+    archive,
+    { dirty = false, hasState = true, loading = false, saving = false } = {},
+) {
+    return Boolean(archive && dirty && hasState && !loading && !saving);
+}
+
 export function buildArchiveExportBundle(archives, exportedAt = new Date().toISOString()) {
     return {
         format: ARCHIVE_EXPORT_FORMAT,
@@ -203,11 +297,27 @@ export class PromptGridArchiveClient {
         return this.request(`/${encodeURIComponent(id)}`, { method: "DELETE" });
     }
 
+    deleteMany(archiveIds) {
+        return this.request("", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ archive_ids: archiveIds }),
+        });
+    }
+
     select(id) {
         return this.request("/selection", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ archive_id: id }),
+        });
+    }
+
+    reorder(archiveIds) {
+        return this.request("/order", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ archive_ids: archiveIds }),
         });
     }
 
