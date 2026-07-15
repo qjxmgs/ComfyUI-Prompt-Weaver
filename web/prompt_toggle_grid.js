@@ -4,16 +4,20 @@ import {
     DEFAULT_ARCHIVE_ID,
     DEFAULT_ARCHIVE_NAME,
     PromptGridArchiveClient,
+    applyArchiveManagerSelectionGesture,
+    archiveManagerSelectionAvailability,
     buildArchiveExportBundle,
+    canQuickSaveArchive,
     configFromArchiveSnapshot,
     defaultArchiveName,
     formatArchiveOptionLabel,
     normalizeArchiveNodeSize,
+    normalizeArchiveManagerSelection,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260811-size-fix";
+} from "./prompt_grid_archives.js?v=20260811-selection-gestures";
 import {
     buildPromptFromSelection,
     splitPromptTokens,
@@ -43,6 +47,9 @@ const GRID_GAP = 8;
 const EDGE_SCROLL_ZONE = 24;
 const EDGE_SCROLL_MAX_SPEED = 12;
 const REORDER_ANIMATION_DURATION = 120;
+const ARCHIVE_ROW_GAP = 7;
+const ARCHIVE_EDGE_SCROLL_ZONE = 32;
+const ARCHIVE_EDGE_SCROLL_MAX_SPEED = 12;
 const ARCHIVE_SYNC_EVENT = "cpw-prompt-grid-archives-changed";
 const ARCHIVE_CHANNEL_NAME = "prompt-weaver-prompt-grid-archives";
 const MAX_ARCHIVE_IMPORT_BYTES = 2 * 1024 * 1024;
@@ -397,7 +404,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260811-selection-no-text", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -433,9 +440,15 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     const archiveGroup = element("div", "cpw-prompt-grid__archives");
     const archiveSelect = createCustomSelect("cpw-prompt-grid__archive-select", "快速切换提示词存档");
+    const quickSaveArchiveButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-save",
+        "保存",
+    );
     const manageArchivesButton = element("button", "cpw-prompt-grid__button", "存档管理");
+    quickSaveArchiveButton.type = "button";
     manageArchivesButton.type = "button";
-    archiveGroup.append(archiveSelect, manageArchivesButton);
+    archiveGroup.append(archiveSelect, quickSaveArchiveButton, manageArchivesButton);
 
     const actions = element("div", "cpw-prompt-grid__actions");
     const addButton = element("button", "cpw-prompt-grid__button cpw-prompt-grid__button--primary", "＋ 新增提示词");
@@ -475,6 +488,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let editedBeforeArchiveInitialization = false;
     let loadedAssociationReconciled = false;
     let archivesLoading = false;
+    let archiveQuickSaveBusy = false;
     let archivesRefreshPending = false;
     let heightFitFrame = 0;
     let sizeReconcileFrame = 0;
@@ -482,6 +496,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let widget;
     const cardElements = new Map();
     const reorderAnimations = new WeakMap();
+    const archiveReorderAnimations = new WeakMap();
 
     function readValue(value) {
         try {
@@ -600,6 +615,34 @@ function createPromptGridWidget(node, inputName, inputData) {
         app.canvas?.setDirty?.(true, true);
     }
 
+    function showArchiveToast(severity, summary, detail) {
+        const toast = app.extensionManager?.toast;
+        if (typeof toast?.add !== "function") return;
+        toast.add({ severity, summary, detail, life: 3000 });
+    }
+
+    function renderQuickArchiveSaveButton() {
+        const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
+        const enabled = canQuickSaveArchive(archive, {
+            dirty: archiveDirty,
+            hasState: Boolean(state),
+            loading: archivesLoading,
+            saving: archiveQuickSaveBusy,
+        });
+        quickSaveArchiveButton.disabled = !enabled;
+        quickSaveArchiveButton.classList.toggle("cpw-prompt-grid__archive-save--ready", enabled);
+        quickSaveArchiveButton.setAttribute("aria-busy", String(archiveQuickSaveBusy));
+        if (archiveQuickSaveBusy) {
+            quickSaveArchiveButton.title = `正在保存“${archive?.name ?? "当前存档"}”…`;
+        } else if (!archive) {
+            quickSaveArchiveButton.title = "当前没有可保存的关联存档";
+        } else if (!archiveDirty) {
+            quickSaveArchiveButton.title = `“${archive.name}”没有需要保存的变更`;
+        } else {
+            quickSaveArchiveButton.title = `保存当前变更到“${archive.name}”`;
+        }
+    }
+
     function renderArchiveSelect() {
         const visibleArchives = archives.length
             ? archives
@@ -619,7 +662,46 @@ function createPromptGridWidget(node, inputName, inputData) {
             })),
         );
         archiveSelect.value = activeArchiveId || DEFAULT_ARCHIVE_ID;
-        archiveSelect.disabled = !state;
+        archiveSelect.disabled = !state || archiveQuickSaveBusy;
+        manageArchivesButton.disabled = archiveQuickSaveBusy;
+        renderQuickArchiveSaveButton();
+    }
+
+    async function quickSaveActiveArchive() {
+        const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
+        if (!canQuickSaveArchive(archive, {
+            dirty: archiveDirty,
+            hasState: Boolean(state),
+            loading: archivesLoading,
+            saving: archiveQuickSaveBusy,
+        })) return;
+
+        const snapshot = currentSnapshot();
+        archiveQuickSaveBusy = true;
+        renderArchiveSelect();
+        try {
+            const result = await archiveClient.update(archive.id, { snapshot });
+            const savedArchive = result?.archive;
+            if (savedArchive) {
+                archives = archives.map((candidate) => (
+                    candidate.id === savedArchive.id ? savedArchive : candidate
+                ));
+            } else {
+                await refreshArchives();
+            }
+            reconcileArchiveSelection();
+            renderArchiveManagerList();
+            publishArchiveSync();
+            showArchiveToast("success", "存档已保存", `已保存到“${archive.name}”。`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error("[Prompt Weaver] 快捷保存存档失败", error);
+            showArchiveToast("error", "存档保存失败", message);
+            quickSaveArchiveButton.title = `保存失败：${message}`;
+        } finally {
+            archiveQuickSaveBusy = false;
+            reconcileArchiveSelection();
+        }
     }
 
     function reconcileArchiveSelection() {
@@ -691,6 +773,10 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     async function refreshArchives({ reportError = false } = {}) {
         if (disposed) return false;
+        if (activeArchiveManager?.dragSession) {
+            archivesRefreshPending = true;
+            return false;
+        }
         if (archivesLoading) {
             archivesRefreshPending = true;
             return false;
@@ -700,10 +786,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         try {
             const payload = await archiveClient.list();
             if (disposed) return false;
-            archives = [...(payload?.archives ?? [])].sort(
-                (left, right) => Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
-                    || String(right.updated_at).localeCompare(String(left.updated_at)),
-            );
+            archives = [...(payload?.archives ?? [])];
             lastSelectedArchiveId = typeof payload?.last_selected_archive_id === "string"
                 ? payload.last_selected_archive_id
                 : DEFAULT_ARCHIVE_ID;
@@ -774,6 +857,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function closeArchiveManager() {
         if (!activeArchiveManager) return;
+        if (activeArchiveManager.dragSession) cancelArchiveReorder();
         const manager = activeArchiveManager;
         activeArchiveManager = null;
         document.removeEventListener("keydown", manager.onKeyDown, true);
@@ -906,6 +990,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         for (const control of activeArchiveManager.dialog.querySelectorAll("button, input, select")) {
             control.disabled = busy;
         }
+        renderArchiveManagerActions();
     }
 
     async function runArchiveMutation(operation, successMessage) {
@@ -939,15 +1024,15 @@ function createPromptGridWidget(node, inputName, inputData) {
         let result;
         if (existing) {
             const overwrite = await askArchiveConfirmation({
-                title: "覆盖同名存档？",
-                message: `“${existing.name}”已存在，是否用当前网格状态覆盖？`,
-                confirmText: "覆盖",
+                title: "保存到同名存档？",
+                message: `“${existing.name}”已存在，是否将当前网格状态保存到该存档？原有内容将被替换。`,
+                confirmText: "保存",
                 danger: true,
             });
             if (!overwrite) return;
             result = await runArchiveMutation(
                 () => archiveClient.update(existing.id, { snapshot: currentSnapshot() }),
-                `已覆盖“${existing.name}”。`,
+                `已保存到“${existing.name}”。`,
             );
         } else {
             result = await runArchiveMutation(
@@ -957,13 +1042,670 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         const saved = result?.archive;
         if (saved) {
+            if (activeArchiveManager) {
+                activeArchiveManager.selectedArchiveIds = new Set([saved.id]);
+                activeArchiveManager.selectionAnchorId = saved.id;
+            }
             setActiveArchive(saved.id, {
                 persistGlobal: true,
                 notifyGraph: true,
                 captureHistory: true,
             });
             reconcileArchiveSelection();
-            if (activeArchiveManager) activeArchiveManager.nameInput.value = defaultArchiveName();
+            if (activeArchiveManager) {
+                activeArchiveManager.nameInput.value = defaultArchiveName();
+                renderArchiveManagerList();
+            }
+        }
+    }
+
+    function regularArchiveIds() {
+        return archives
+            .filter((archive) => !archive.is_default && archive.id !== DEFAULT_ARCHIVE_ID)
+            .map((archive) => archive.id);
+    }
+
+    function applyRegularArchiveOrder(archiveIds) {
+        const defaults = archives.filter(
+            (archive) => archive.is_default || archive.id === DEFAULT_ARCHIVE_ID,
+        );
+        const regularById = new Map(
+            archives
+                .filter((archive) => !archive.is_default && archive.id !== DEFAULT_ARCHIVE_ID)
+                .map((archive) => [archive.id, archive]),
+        );
+        archives = [
+            ...defaults,
+            ...archiveIds.map((archiveId) => regularById.get(archiveId)).filter(Boolean),
+        ];
+        renderArchiveSelect();
+    }
+
+    function archiveManagerRows(manager) {
+        const rowsById = new Map(
+            [...manager.list.querySelectorAll(".cpw-archive-manager__row[data-archive-id]")]
+                .map((row) => [row.dataset.archiveId, row]),
+        );
+        return archives.map((archive) => rowsById.get(archive.id)).filter(Boolean);
+    }
+
+    function applyArchiveVisualOrder(manager) {
+        const rows = archiveManagerRows(manager);
+        // Keep the captured handle connected to the DOM. Moving the row with
+        // insertBefore/append would fire lostpointercapture and cancel sorting.
+        for (let index = 0; index < rows.length; index += 1) {
+            rows[index].style.order = String(index);
+        }
+    }
+
+    function cacheArchiveLayoutRects(manager, session, clientRects = null) {
+        const viewportRect = manager.list.getBoundingClientRect();
+        const layoutRects = new Map();
+        for (const row of archiveManagerRows(manager)) {
+            const rect = clientRects?.get(row) ?? row.getBoundingClientRect();
+            layoutRects.set(row.dataset.archiveId, clientRectToContent(
+                rect,
+                viewportRect,
+                1,
+                1,
+                manager.list.scrollLeft,
+                manager.list.scrollTop,
+            ));
+        }
+        session.layoutRects = layoutRects;
+    }
+
+    function cloneArchiveRowForDrag(row) {
+        const clone = row.cloneNode(true);
+        clone.classList.remove(
+            "cpw-archive-manager__row--drag-source",
+            "cpw-archive-manager__row--drop-target",
+            "cpw-archive-manager__row--insert-before",
+            "cpw-archive-manager__row--insert-after",
+        );
+        clone.classList.add("cpw-archive-manager__drag-ghost");
+        clone.removeAttribute("data-archive-id");
+        clone.removeAttribute("data-archive-default");
+        clone.setAttribute("aria-hidden", "true");
+        return clone;
+    }
+
+    function updateArchiveDragGhost(session) {
+        const left = session.clientX - session.pointerOffsetX;
+        const top = session.clientY - session.pointerOffsetY;
+        session.ghost.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+    }
+
+    function clearArchiveDropIndicators(manager) {
+        for (const row of archiveManagerRows(manager)) {
+            row.classList.remove(
+                "cpw-archive-manager__row--drop-target",
+                "cpw-archive-manager__row--insert-before",
+                "cpw-archive-manager__row--insert-after",
+            );
+        }
+        if (manager.dragSession) {
+            manager.dragSession.renderedTargetId = null;
+            manager.dragSession.renderedSide = null;
+        }
+    }
+
+    function renderArchiveDropIndicator(manager, targetId, side) {
+        const session = manager.dragSession;
+        if (session?.renderedTargetId === targetId && session?.renderedSide === side) return;
+        clearArchiveDropIndicators(manager);
+        if (!targetId || !side) return;
+        const targetRow = archiveManagerRows(manager).find(
+            (row) => row.dataset.archiveId === targetId,
+        );
+        if (!targetRow) return;
+        targetRow.classList.add(
+            "cpw-archive-manager__row--drop-target",
+            side === "before"
+                ? "cpw-archive-manager__row--insert-before"
+                : "cpw-archive-manager__row--insert-after",
+        );
+        if (session) {
+            session.renderedTargetId = targetId;
+            session.renderedSide = side;
+        }
+    }
+
+    function animateArchiveRowMoves(previousRects, finalRects, sourceRow) {
+        if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+        for (const [row, previousRect] of previousRects) {
+            if (row === sourceRow || !row.isConnected || typeof row.animate !== "function") continue;
+            const nextRect = finalRects.get(row);
+            if (!nextRect) continue;
+            const deltaY = previousRect.top - nextRect.top;
+            if (Math.abs(deltaY) < 0.5) continue;
+            archiveReorderAnimations.get(row)?.cancel();
+            const animation = row.animate(
+                [
+                    { transform: `translateY(${deltaY}px)` },
+                    { transform: "translateY(0)" },
+                ],
+                { duration: 120, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+            );
+            archiveReorderAnimations.set(row, animation);
+            const forgetAnimation = () => {
+                if (archiveReorderAnimations.get(row) === animation) {
+                    archiveReorderAnimations.delete(row);
+                }
+            };
+            animation.addEventListener("finish", forgetAnimation, { once: true });
+            animation.addEventListener("cancel", forgetAnimation, { once: true });
+        }
+    }
+
+    function scheduleArchiveReorderFrame(manager) {
+        const session = manager.dragSession;
+        if (!session || session.frame) return;
+        session.frame = requestAnimationFrame(() => processArchiveReorderFrame(manager));
+    }
+
+    function processArchiveReorderFrame(manager) {
+        const session = manager.dragSession;
+        if (!session) return;
+        session.frame = 0;
+        updateArchiveDragGhost(session);
+
+        const listRect = manager.list.getBoundingClientRect();
+        const velocityY = edgeScrollVelocity(
+            session.clientY,
+            listRect.top,
+            listRect.bottom,
+            ARCHIVE_EDGE_SCROLL_ZONE,
+            ARCHIVE_EDGE_SCROLL_MAX_SPEED,
+        );
+        const previousScrollTop = manager.list.scrollTop;
+        if (velocityY) manager.list.scrollTop += velocityY;
+        const scrolled = manager.list.scrollTop !== previousScrollTop;
+
+        const point = clientPointToContent(
+            session.clientX,
+            session.clientY,
+            listRect,
+            1,
+            1,
+            manager.list.scrollLeft,
+            manager.list.scrollTop,
+        );
+        const currentIds = regularArchiveIds();
+        const slots = currentIds.flatMap((archiveId) => {
+            const rect = session.layoutRects.get(archiveId);
+            return rect ? [{ id: archiveId, rect }] : [];
+        });
+        const target = findDropTarget(
+            slots,
+            point,
+            session.archiveId,
+            0,
+            ARCHIVE_ROW_GAP,
+        );
+        if (!target) {
+            session.lastInsertionIndex = null;
+            renderArchiveDropIndicator(manager, null, null);
+        } else {
+            const sourceIndex = currentIds.indexOf(session.archiveId);
+            const targetIndex = currentIds.indexOf(target.id);
+            const side = resolveImmediateInsertionSide(sourceIndex, targetIndex);
+            renderArchiveDropIndicator(manager, target.id, side);
+            const insertionIndex = computeInsertionIndex(
+                sourceIndex,
+                targetIndex,
+                side,
+                currentIds.length,
+            );
+            if (insertionIndex !== sourceIndex && insertionIndex !== session.lastInsertionIndex) {
+                for (const row of archiveManagerRows(manager)) {
+                    archiveReorderAnimations.get(row)?.cancel();
+                }
+                const previousRects = new Map(
+                    archiveManagerRows(manager).map((row) => [row, row.getBoundingClientRect()]),
+                );
+                const nextIds = [...currentIds];
+                const [movedId] = nextIds.splice(sourceIndex, 1);
+                nextIds.splice(insertionIndex, 0, movedId);
+                const scrollTop = manager.list.scrollTop;
+                applyRegularArchiveOrder(nextIds);
+                applyArchiveVisualOrder(manager);
+                manager.list.scrollTop = scrollTop;
+                const finalRects = new Map(
+                    archiveManagerRows(manager).map((row) => [row, row.getBoundingClientRect()]),
+                );
+                cacheArchiveLayoutRects(manager, session, finalRects);
+                animateArchiveRowMoves(previousRects, finalRects, session.row);
+                session.lastInsertionIndex = insertionIndex;
+                session.changed = nextIds.some(
+                    (archiveId, index) => archiveId !== session.originalIds[index],
+                );
+            } else {
+                session.lastInsertionIndex = insertionIndex;
+            }
+        }
+
+        if (scrolled) scheduleArchiveReorderFrame(manager);
+    }
+
+    function cleanupArchiveReorder(manager, session) {
+        if (session.frame) cancelAnimationFrame(session.frame);
+        clearArchiveDropIndicators(manager);
+        manager.dragSession = null;
+        try {
+            if (session.handle.hasPointerCapture?.(session.pointerId)) {
+                session.handle.releasePointerCapture(session.pointerId);
+            }
+        } catch {
+            // The browser may already have released capture during cancellation.
+        }
+        session.handle.removeAttribute("aria-grabbed");
+        session.row.classList.remove("cpw-archive-manager__row--drag-source");
+        manager.list.classList.remove("cpw-archive-manager__list--dragging");
+        session.ghost.remove();
+        renderArchiveManagerActions();
+    }
+
+    function drainPendingArchiveRefresh() {
+        if (!archivesRefreshPending || disposed) return;
+        archivesRefreshPending = false;
+        queueMicrotask(() => refreshArchives());
+    }
+
+    async function persistArchiveOrder(manager, session, archiveIds) {
+        if (activeArchiveManager === manager) {
+            setArchiveManagerBusy(true);
+            setArchiveManagerMessage("正在保存排序…");
+        }
+        try {
+            const payload = await archiveClient.reorder(archiveIds);
+            archives = [...(payload?.archives ?? archives)];
+            lastSelectedArchiveId = typeof payload?.last_selected_archive_id === "string"
+                ? payload.last_selected_archive_id
+                : lastSelectedArchiveId;
+            renderArchiveSelect();
+            renderArchiveManagerList();
+            publishArchiveSync();
+            setArchiveManagerMessage("存档顺序已保存。");
+        } catch (error) {
+            archives = session.originalArchives;
+            renderArchiveSelect();
+            renderArchiveManagerList();
+            await refreshArchives();
+            setArchiveManagerMessage(`排序保存失败：${error.message || String(error)}`, true);
+        } finally {
+            if (activeArchiveManager === manager) {
+                setArchiveManagerBusy(false);
+                renderArchiveManagerList();
+            }
+            drainPendingArchiveRefresh();
+        }
+    }
+
+    function finishArchiveReorder(cancelled = false) {
+        const manager = activeArchiveManager;
+        const session = manager?.dragSession;
+        if (!manager || !session) return;
+        cleanupArchiveReorder(manager, session);
+
+        if (cancelled) {
+            archives = session.originalArchives;
+            renderArchiveSelect();
+            renderArchiveManagerList();
+            drainPendingArchiveRefresh();
+            return;
+        }
+        const archiveIds = regularArchiveIds();
+        renderArchiveManagerList();
+        if (!session.changed) {
+            drainPendingArchiveRefresh();
+            return;
+        }
+        void persistArchiveOrder(manager, session, archiveIds);
+    }
+
+    function cancelArchiveReorder() {
+        finishArchiveReorder(true);
+    }
+
+    function moveArchiveReorder(event) {
+        const manager = activeArchiveManager;
+        const session = manager?.dragSession;
+        if (!manager || !session || event.pointerId !== session.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const coalesced = event.getCoalescedEvents?.();
+        const latest = coalesced?.length ? coalesced[coalesced.length - 1] : event;
+        session.clientX = latest.clientX;
+        session.clientY = latest.clientY;
+        scheduleArchiveReorderFrame(manager);
+    }
+
+    function finishArchiveReorderPointer(event) {
+        const manager = activeArchiveManager;
+        const session = manager?.dragSession;
+        if (!manager || !session || event.pointerId !== session.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        session.clientX = event.clientX;
+        session.clientY = event.clientY;
+        if (session.frame) {
+            cancelAnimationFrame(session.frame);
+            session.frame = 0;
+        }
+        processArchiveReorderFrame(manager);
+        finishArchiveReorder(false);
+    }
+
+    function cancelArchiveReorderPointer(event) {
+        const session = activeArchiveManager?.dragSession;
+        if (!session || event.pointerId !== session.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        cancelArchiveReorder();
+    }
+
+    function loseArchiveReorderPointerCapture(event) {
+        const session = activeArchiveManager?.dragSession;
+        if (!session || event.pointerId !== session.pointerId) return;
+        cancelArchiveReorder();
+    }
+
+    function beginArchiveReorder(event, archive, row, handle) {
+        const manager = activeArchiveManager;
+        if (!manager || manager.busy || manager.dragSession || manager.renameId || archive.is_default) return;
+        if (event.button !== 0 || event.isPrimary === false) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        for (const candidate of archiveManagerRows(manager)) {
+            archiveReorderAnimations.get(candidate)?.cancel();
+        }
+        const rowRect = row.getBoundingClientRect();
+        const ghost = cloneArchiveRowForDrag(row);
+        ghost.style.width = `${rowRect.width}px`;
+        ghost.style.height = `${rowRect.height}px`;
+        document.body.append(ghost);
+
+        const session = {
+            archiveId: archive.id,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            pointerId: event.pointerId,
+            row,
+            handle,
+            ghost,
+            pointerOffsetX: event.clientX - rowRect.left,
+            pointerOffsetY: event.clientY - rowRect.top,
+            originalArchives: [...archives],
+            originalIds: regularArchiveIds(),
+            layoutRects: new Map(),
+            lastInsertionIndex: null,
+            renderedTargetId: null,
+            renderedSide: null,
+            changed: false,
+            frame: 0,
+        };
+        manager.dragSession = session;
+        row.classList.add("cpw-archive-manager__row--drag-source");
+        manager.list.classList.add("cpw-archive-manager__list--dragging");
+        handle.setAttribute("aria-grabbed", "true");
+        cacheArchiveLayoutRects(manager, session);
+        updateArchiveDragGhost(session);
+        renderArchiveManagerActions();
+        try {
+            handle.setPointerCapture(event.pointerId);
+            scheduleArchiveReorderFrame(manager);
+        } catch {
+            cancelArchiveReorder();
+        }
+    }
+
+    function selectedArchivesForManager(manager = activeArchiveManager) {
+        if (!manager) return [];
+        const selectedIds = normalizeArchiveManagerSelection(archives, manager.selectedArchiveIds);
+        manager.selectedArchiveIds = new Set(selectedIds);
+        if (!archives.some((archive) => archive.id === manager.selectionAnchorId)) {
+            manager.selectionAnchorId = selectedIds.at(-1) ?? null;
+        }
+        const selectedArchives = archives.filter((archive) => manager.selectedArchiveIds.has(archive.id));
+        if (manager.renameId
+            && (selectedArchives.length !== 1 || selectedArchives[0].id !== manager.renameId)) {
+            manager.renameId = null;
+            manager.renameInput = null;
+        }
+        return selectedArchives;
+    }
+
+    function singleSelectedArchiveForManager(manager = activeArchiveManager) {
+        const selectedArchives = selectedArchivesForManager(manager);
+        return selectedArchives.length === 1 ? selectedArchives[0] : null;
+    }
+
+    function updateArchiveManagerSelectionStyles(manager = activeArchiveManager) {
+        if (!manager) return;
+        for (const row of archiveManagerRows(manager)) {
+            const selected = manager.selectedArchiveIds.has(row.dataset.archiveId);
+            row.classList.toggle("cpw-archive-manager__row--selected", selected);
+            row.setAttribute("aria-selected", String(selected));
+        }
+    }
+
+    function selectArchiveManagerArchive(
+        archiveId,
+        { additive = false, range = false, focus = false } = {},
+    ) {
+        const manager = activeArchiveManager;
+        if (!manager || manager.busy || manager.dragSession || manager.renameId) return false;
+        if (!archives.some((archive) => archive.id === archiveId)) return false;
+        const selection = applyArchiveManagerSelectionGesture(
+            archives.map((archive) => archive.id),
+            manager.selectedArchiveIds,
+            archiveId,
+            manager.selectionAnchorId,
+            { additive, range },
+        );
+        manager.selectedArchiveIds = new Set(selection.selectedIds);
+        manager.selectionAnchorId = selection.anchorId;
+        updateArchiveManagerSelectionStyles(manager);
+        renderArchiveManagerActions();
+        if (focus) {
+            archiveManagerRows(manager).find((row) => row.dataset.archiveId === archiveId)?.focus();
+        }
+        return true;
+    }
+
+    function cancelArchiveRename() {
+        const manager = activeArchiveManager;
+        if (!manager || manager.busy) return;
+        manager.renameId = null;
+        manager.renameInput = null;
+        renderArchiveManagerList();
+    }
+
+    async function saveArchiveRename() {
+        const manager = activeArchiveManager;
+        const archive = singleSelectedArchiveForManager(manager);
+        if (!manager || !archive || manager.renameId !== archive.id || manager.busy) return;
+        const nextName = manager.renameInput?.value.trim() ?? "";
+        if (!nextName) {
+            setArchiveManagerMessage("存档名称不能为空。", true);
+            manager.renameInput?.focus();
+            return;
+        }
+        const result = await runArchiveMutation(
+            () => archiveClient.update(archive.id, { name: nextName }),
+            `已重命名为“${nextName}”。`,
+        );
+        if (result && activeArchiveManager) {
+            activeArchiveManager.renameId = null;
+            activeArchiveManager.renameInput = null;
+            renderArchiveManagerList();
+        }
+    }
+
+    async function saveSelectedArchive() {
+        const manager = activeArchiveManager;
+        const archive = singleSelectedArchiveForManager(manager);
+        if (!manager || !archive || manager.busy || manager.dragSession || !state) return;
+        const save = await askArchiveConfirmation({
+            title: archive.is_default ? "保存默认存档？" : "保存存档？",
+            message: `是否将当前网格状态和窗口大小保存到“${archive.name}”？原有内容将被替换。`,
+            confirmText: "保存",
+            danger: true,
+        });
+        if (!save) return;
+        const result = await runArchiveMutation(
+            () => archiveClient.update(archive.id, { snapshot: currentSnapshot() }),
+            `已保存到“${archive.name}”。`,
+        );
+        if (!result) return;
+        if (activeArchiveManager) {
+            activeArchiveManager.selectedArchiveIds = new Set([archive.id]);
+            activeArchiveManager.selectionAnchorId = archive.id;
+        }
+        setActiveArchive(archive.id, {
+            persistGlobal: true,
+            notifyGraph: true,
+            captureHistory: true,
+        });
+        reconcileArchiveSelection();
+        renderArchiveManagerList();
+    }
+
+    function beginArchiveRename() {
+        const manager = activeArchiveManager;
+        const archive = singleSelectedArchiveForManager(manager);
+        if (!manager || !archive || archive.is_default || manager.busy || manager.dragSession) return;
+        manager.renameId = archive.id;
+        renderArchiveManagerList();
+    }
+
+    function exportSelectedArchives() {
+        const selectedArchives = selectedArchivesForManager();
+        if (!selectedArchives.length) return;
+        if (selectedArchives.length === 1) {
+            const [archive] = selectedArchives;
+            downloadArchiveBundle([archive], `${archive.name}.prompt-grid-archives.json`);
+            setArchiveManagerMessage(`已导出“${archive.name}”。`);
+            return;
+        }
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        downloadArchiveBundle(
+            selectedArchives,
+            `prompt-grid-archives-selection-${timestamp}.json`,
+        );
+        setArchiveManagerMessage(`已导出 ${selectedArchives.length} 个选中存档。`);
+    }
+
+    async function deleteSelectedArchives() {
+        const manager = activeArchiveManager;
+        const selectedArchives = selectedArchivesForManager(manager);
+        if (!manager || !selectedArchives.length || manager.busy || manager.dragSession) return;
+        if (selectedArchives.some((archive) => archive.is_default || archive.id === DEFAULT_ARCHIVE_ID)) {
+            setArchiveManagerMessage("默认存档不能删除。", true);
+            return;
+        }
+        const nameSummary = selectedArchives
+            .slice(0, 5)
+            .map((archive) => `“${archive.name}”`)
+            .join("、");
+        const extraCount = Math.max(0, selectedArchives.length - 5);
+        const remove = await askArchiveConfirmation({
+            title: selectedArchives.length === 1 ? "删除存档？" : `删除 ${selectedArchives.length} 个存档？`,
+            message: `${nameSummary}${extraCount ? ` 等 ${selectedArchives.length} 个存档` : ""}删除后无法恢复，当前节点状态不会改变。`,
+            confirmText: "删除",
+            danger: true,
+        });
+        if (!remove) return;
+        const selectedIds = selectedArchives.map((archive) => archive.id);
+        const originalSelection = new Set(manager.selectedArchiveIds);
+        const originalAnchorId = manager.selectionAnchorId;
+        const result = await runArchiveMutation(
+            () => selectedIds.length === 1
+                ? archiveClient.delete(selectedIds[0])
+                : archiveClient.deleteMany(selectedIds),
+            selectedIds.length === 1
+                ? `已删除“${selectedArchives[0].name}”。`
+                : `已删除 ${selectedIds.length} 个存档。`,
+        );
+        if (!result) {
+            if (activeArchiveManager) {
+                activeArchiveManager.selectedArchiveIds = originalSelection;
+                activeArchiveManager.selectionAnchorId = originalAnchorId;
+                await refreshArchives({ reportError: true });
+                renderArchiveManagerList();
+            }
+            return;
+        }
+        if (activeArchiveManager) {
+            activeArchiveManager.selectedArchiveIds = new Set();
+            activeArchiveManager.selectionAnchorId = null;
+        }
+        reconcileArchiveSelection();
+        renderArchiveManagerList();
+    }
+
+    function renderArchiveManagerActions() {
+        const manager = activeArchiveManager;
+        if (!manager?.selectedActions) return;
+        const actions = manager.selectedActions;
+        actions.replaceChildren();
+        const selectedArchives = selectedArchivesForManager(manager);
+        const archive = selectedArchives.length === 1 ? selectedArchives[0] : null;
+
+        if (manager.renameId && archive?.id === manager.renameId) {
+            const cancelButton = element("button", "cpw-archive-manager__button", "取消");
+            const saveNameButton = element(
+                "button",
+                "cpw-archive-manager__button cpw-archive-manager__button--primary",
+                "保存名称",
+            );
+            cancelButton.type = "button";
+            saveNameButton.type = "button";
+            cancelButton.disabled = manager.busy;
+            saveNameButton.disabled = manager.busy;
+            cancelButton.addEventListener("click", cancelArchiveRename);
+            saveNameButton.addEventListener("click", saveArchiveRename);
+            actions.append(cancelButton, saveNameButton);
+            return;
+        }
+
+        const availability = archiveManagerSelectionAvailability(selectedArchives, {
+            busy: manager.busy,
+            dragging: Boolean(manager.dragSession),
+            renaming: Boolean(manager.renameId),
+            hasState: Boolean(state),
+        });
+        const definitions = [
+            ["保存", "将当前网格状态保存到所选存档", availability.save, saveSelectedArchive],
+            [
+                "重命名",
+                archive?.is_default ? "默认存档不能重命名" : "重命名所选存档",
+                availability.rename,
+                beginArchiveRename,
+            ],
+            ["导出", "导出选中的存档", availability.export, exportSelectedArchives],
+            [
+                "删除",
+                selectedArchives.some((item) => item.is_default || item.id === DEFAULT_ARCHIVE_ID)
+                    ? "默认存档不能删除"
+                    : "删除选中的存档",
+                availability.delete,
+                deleteSelectedArchives,
+            ],
+        ];
+        for (const [label, title, enabled, handler] of definitions) {
+            const button = element(
+                "button",
+                `cpw-archive-manager__button${label === "删除" ? " cpw-archive-manager__button--danger-text" : ""}`,
+                label,
+            );
+            button.type = "button";
+            button.title = selectedArchives.length ? title : "请先选择存档";
+            button.disabled = !enabled;
+            button.addEventListener("click", handler);
+            actions.append(button);
         }
     }
 
@@ -971,19 +1713,63 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!activeArchiveManager) return;
         const manager = activeArchiveManager;
         manager.list.replaceChildren();
+        manager.renameInput = null;
         if (!archives.length) {
-            manager.list.append(element("div", "cpw-archive-manager__empty", "还没有存档。可在上方保存当前网格状态。"));
+            manager.list.append(element("div", "cpw-archive-manager__empty", "还没有存档。可在上方新建存档。"));
+            renderArchiveManagerActions();
             return;
         }
+        if (manager.selectionNeedsInitialization) {
+            manager.selectedArchiveIds = new Set(
+                archives.some((archive) => archive.id === activeArchiveId) ? [activeArchiveId] : [],
+            );
+            manager.selectionAnchorId = manager.selectedArchiveIds.has(activeArchiveId)
+                ? activeArchiveId
+                : null;
+            manager.selectionNeedsInitialization = false;
+        }
+        selectedArchivesForManager(manager);
         for (const archive of archives) {
             const row = element("article", "cpw-archive-manager__row");
-            if (archive.id === activeArchiveId) row.classList.add("cpw-archive-manager__row--active");
+            row.dataset.archiveId = archive.id;
+            row.dataset.archiveDefault = String(Boolean(archive.is_default));
+            row.tabIndex = 0;
+            row.setAttribute("role", "option");
+            row.setAttribute("aria-label", `${archive.name}存档`);
+            if (manager.selectedArchiveIds.has(archive.id)) {
+                row.classList.add("cpw-archive-manager__row--selected");
+                row.setAttribute("aria-selected", "true");
+            } else {
+                row.setAttribute("aria-selected", "false");
+            }
+            const dragControl = archive.is_default
+                ? element("span", "cpw-archive-manager__drag-placeholder")
+                : element("button", "cpw-archive-manager__drag", "⠿");
+            if (!archive.is_default) {
+                dragControl.type = "button";
+                dragControl.title = "拖拽调整存档顺序";
+                dragControl.setAttribute("aria-label", `拖拽“${archive.name}”调整顺序`);
+                dragControl.setAttribute("aria-grabbed", "false");
+                dragControl.addEventListener("pointerdown", (event) => {
+                    beginArchiveReorder(event, archive, row, dragControl);
+                });
+                dragControl.addEventListener("pointermove", moveArchiveReorder);
+                dragControl.addEventListener("pointerup", finishArchiveReorderPointer);
+                dragControl.addEventListener("pointercancel", cancelArchiveReorderPointer);
+                dragControl.addEventListener("lostpointercapture", loseArchiveReorderPointerCapture);
+            } else {
+                dragControl.setAttribute("aria-hidden", "true");
+            }
+            dragControl.disabled = manager.busy || Boolean(manager.renameId);
             const main = element("div", "cpw-archive-manager__row-main");
             const name = element("strong", "cpw-archive-manager__row-name", archive.name);
             const nameRow = element("div", "cpw-archive-manager__row-name-line");
             nameRow.append(name);
             if (archive.is_default) {
                 nameRow.append(element("span", "cpw-archive-manager__default-badge", "默认"));
+            }
+            if (archive.id === activeArchiveId) {
+                nameRow.append(element("span", "cpw-archive-manager__current-badge", "当前"));
             }
             const enabledCount = archive.snapshot.items.filter((item) => item.enabled).length;
             const meta = element(
@@ -992,7 +1778,6 @@ function createPromptGridWidget(node, inputName, inputData) {
                 `${archive.snapshot.columns} 列 · ${archive.snapshot.items.length} 张卡片 · ${enabledCount} 张启用 · ${archive.snapshot.node_size.width}×${archive.snapshot.node_size.height} · ${formatArchiveTime(archive.updated_at)}`,
             );
             main.append(nameRow, meta);
-            const rowActions = element("div", "cpw-archive-manager__row-actions");
 
             if (!archive.is_default && manager.renameId === archive.id) {
                 const renameInput = element("input", "cpw-archive-manager__input cpw-archive-manager__rename-input");
@@ -1000,110 +1785,46 @@ function createPromptGridWidget(node, inputName, inputData) {
                 renameInput.maxLength = 80;
                 renameInput.value = archive.name;
                 renameInput.setAttribute("aria-label", "新的存档名称");
-                const saveRename = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "保存名称");
-                const cancelRename = element("button", "cpw-archive-manager__button", "取消");
-                saveRename.type = "button";
-                cancelRename.type = "button";
+                renameInput.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveArchiveRename();
+                    }
+                });
+                manager.renameInput = renameInput;
                 main.replaceChildren(renameInput, meta);
-                rowActions.append(saveRename, cancelRename);
-                saveRename.addEventListener("click", async () => {
-                    const nextName = renameInput.value.trim();
-                    if (!nextName) {
-                        setArchiveManagerMessage("存档名称不能为空。", true);
-                        renameInput.focus();
-                        return;
-                    }
-                    const result = await runArchiveMutation(
-                        () => archiveClient.update(archive.id, { name: nextName }),
-                        `已重命名为“${nextName}”。`,
-                    );
-                    if (result && activeArchiveManager) activeArchiveManager.renameId = null;
-                    renderArchiveManagerList();
-                });
-                cancelRename.addEventListener("click", () => {
-                    if (!activeArchiveManager) return;
-                    activeArchiveManager.renameId = null;
-                    renderArchiveManagerList();
-                });
                 queueMicrotask(() => {
-                    renameInput.focus();
-                    renameInput.select();
-                });
-            } else {
-                const availableActions = [
-                    ["加载", "加载此存档"],
-                    ["覆盖", "用当前网格覆盖此存档"],
-                    ["导出", "导出此存档"],
-                ];
-                if (!archive.is_default) {
-                    availableActions.splice(2, 0, ["重命名", "重命名此存档"]);
-                    availableActions.push(["删除", "删除此存档"]);
-                }
-                for (const [label, title] of availableActions) {
-                    const button = element(
-                        "button",
-                        `cpw-archive-manager__button${label === "删除" ? " cpw-archive-manager__button--danger-text" : ""}`,
-                        label,
-                    );
-                    button.type = "button";
-                    button.title = title;
-                    rowActions.append(button);
-                    if (label === "加载") {
-                        button.addEventListener("click", () => requestArchiveLoad(archive));
-                    } else if (label === "覆盖") {
-                        button.addEventListener("click", async () => {
-                            const overwrite = await askArchiveConfirmation({
-                                title: archive.is_default ? "覆盖默认存档？" : "覆盖存档？",
-                                message: `是否用当前网格状态覆盖“${archive.name}”？`,
-                                confirmText: "覆盖",
-                                danger: true,
-                            });
-                            if (!overwrite) return;
-                            const result = await runArchiveMutation(
-                                () => archiveClient.update(archive.id, { snapshot: currentSnapshot() }),
-                                `已覆盖“${archive.name}”。`,
-                            );
-                            if (result) {
-                                setActiveArchive(archive.id, {
-                                    persistGlobal: true,
-                                    notifyGraph: true,
-                                    captureHistory: true,
-                                });
-                                reconcileArchiveSelection();
-                            }
-                        });
-                    } else if (label === "重命名") {
-                        button.addEventListener("click", () => {
-                            if (!activeArchiveManager) return;
-                            activeArchiveManager.renameId = archive.id;
-                            renderArchiveManagerList();
-                        });
-                    } else if (label === "导出") {
-                        button.addEventListener("click", () => {
-                            downloadArchiveBundle([archive], `${archive.name}.prompt-grid-archives.json`);
-                            setArchiveManagerMessage(`已导出“${archive.name}”。`);
-                        });
-                    } else {
-                        button.addEventListener("click", async () => {
-                            const remove = await askArchiveConfirmation({
-                                title: "删除存档？",
-                                message: `“${archive.name}”删除后无法恢复，当前节点状态不会改变。`,
-                                confirmText: "删除",
-                                danger: true,
-                            });
-                            if (!remove) return;
-                            const result = await runArchiveMutation(
-                                () => archiveClient.delete(archive.id),
-                                `已删除“${archive.name}”。`,
-                            );
-                            if (result) reconcileArchiveSelection();
-                        });
+                    if (activeArchiveManager === manager && manager.renameInput === renameInput) {
+                        renameInput.focus();
+                        renameInput.select();
                     }
-                }
+                });
             }
-            row.append(main, rowActions);
+
+            row.addEventListener("click", (event) => {
+                if (event.target.closest?.(".cpw-archive-manager__drag, input, button")) return;
+                selectArchiveManagerArchive(archive.id, {
+                    additive: event.ctrlKey || event.metaKey,
+                    range: event.shiftKey,
+                });
+            });
+            row.addEventListener("selectstart", (event) => {
+                if (event.target.closest?.("input, textarea")) return;
+                event.preventDefault();
+            });
+            row.addEventListener("keydown", (event) => {
+                if (event.target !== row || !["Enter", " "].includes(event.key)) return;
+                event.preventDefault();
+                selectArchiveManagerArchive(archive.id, {
+                    additive: event.ctrlKey || event.metaKey,
+                    range: event.shiftKey,
+                    focus: true,
+                });
+            });
+            row.append(dragControl, main);
             manager.list.append(row);
         }
+        renderArchiveManagerActions();
     }
 
     function openArchiveManager() {
@@ -1129,20 +1850,23 @@ function createPromptGridWidget(node, inputName, inputData) {
         nameInput.value = defaultArchiveName();
         nameInput.placeholder = "存档名称";
         nameInput.setAttribute("aria-label", "新存档名称");
-        const saveButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "保存当前");
+        const saveButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "新建存档");
         saveButton.type = "button";
         saveRow.append(nameInput, saveButton);
 
         const message = element("div", "cpw-archive-manager__message");
         message.hidden = true;
         const list = element("div", "cpw-archive-manager__list");
+        list.setAttribute("role", "listbox");
+        list.setAttribute("aria-label", "存档列表");
+        list.setAttribute("aria-multiselectable", "true");
         const footer = element("footer", "cpw-archive-manager__footer");
         const importButton = element("button", "cpw-archive-manager__button", "导入存档");
         const exportAllButton = element("button", "cpw-archive-manager__button", "导出全部");
-        const doneButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "关闭");
-        for (const button of [importButton, exportAllButton, doneButton]) button.type = "button";
+        const selectedActions = element("div", "cpw-archive-manager__selected-actions");
+        for (const button of [importButton, exportAllButton]) button.type = "button";
         const footerSpacer = element("span", "cpw-archive-manager__footer-spacer");
-        footer.append(importButton, exportAllButton, footerSpacer, doneButton);
+        footer.append(importButton, exportAllButton, footerSpacer, selectedActions);
 
         const fileInput = element("input", "");
         fileInput.type = "file";
@@ -1154,6 +1878,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         const onKeyDown = (event) => {
             if (event.key === "Escape" && !activeArchiveConfirmation) {
                 event.preventDefault();
+                if (activeArchiveManager?.dragSession) {
+                    cancelArchiveReorder();
+                    return;
+                }
+                if (activeArchiveManager?.renameId) {
+                    cancelArchiveRename();
+                    return;
+                }
                 closeArchiveManager();
             }
         };
@@ -1164,15 +1896,20 @@ function createPromptGridWidget(node, inputName, inputData) {
             message,
             nameInput,
             fileInput,
+            selectedActions,
             onKeyDown,
+            selectedArchiveIds: new Set(activeArchiveId ? [activeArchiveId] : []),
+            selectionAnchorId: activeArchiveId || null,
+            selectionNeedsInitialization: !archives.length,
             renameId: null,
+            renameInput: null,
             busy: false,
+            dragSession: null,
         };
         overlay.addEventListener("pointerdown", (event) => {
             if (event.target === overlay && !activeArchiveConfirmation) closeArchiveManager();
         });
         closeButton.addEventListener("click", closeArchiveManager);
-        doneButton.addEventListener("click", closeArchiveManager);
         saveButton.addEventListener("click", saveCurrentArchive);
         nameInput.addEventListener("keydown", (event) => {
             if (event.key === "Enter") saveCurrentArchive();
@@ -1877,6 +2614,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (!disposed) renderArchiveSelect();
         }
     });
+    quickSaveArchiveButton.addEventListener("click", quickSaveActiveArchive);
     manageArchivesButton.addEventListener("click", openArchiveManager);
     resetButton.addEventListener("click", () => {
         state = createDefaultConfig();
