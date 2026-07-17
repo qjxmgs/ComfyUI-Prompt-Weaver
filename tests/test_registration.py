@@ -79,6 +79,8 @@ class PluginRegistrationTests(unittest.TestCase):
                 ("GET", "/prompt-weaver/prompt-grid-archives", "list_prompt_grid_archives"),
                 ("POST", "/prompt-weaver/prompt-grid-archives", "create_prompt_grid_archive"),
                 ("PATCH", "/prompt-weaver/prompt-grid-archives/selection", "select_prompt_grid_archive"),
+                ("PATCH", "/prompt-weaver/prompt-grid-archives/order", "reorder_prompt_grid_archives"),
+                ("DELETE", "/prompt-weaver/prompt-grid-archives", "delete_prompt_grid_archives"),
                 ("PATCH", "/prompt-weaver/prompt-grid-archives/{archive_id}", "update_prompt_grid_archive"),
                 ("DELETE", "/prompt-weaver/prompt-grid-archives/{archive_id}", "delete_prompt_grid_archive"),
                 ("POST", "/prompt-weaver/prompt-grid-archives/import", "import_prompt_grid_archives"),

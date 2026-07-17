@@ -10,12 +10,17 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toStr
 const {
     DEFAULT_ARCHIVE_ID,
     PromptGridArchiveClient,
+    applyArchiveManagerSelectionGesture,
+    archiveManagerSelectionAvailability,
     buildArchiveExportBundle,
+    canQuickSaveArchive,
     configFromArchiveSnapshot,
     defaultArchiveName,
     findMatchingArchive,
     formatArchiveOptionLabel,
     normalizeArchiveNodeSize,
+    normalizeArchiveManagerSelection,
+    reorderArchiveIds,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     semanticFingerprint,
@@ -144,6 +149,123 @@ test("archive labels always reserve the two-character dirty marker gutter", () =
     assert.equal([...clean].length, [...dirty].length);
 });
 
+test("archive id reorder is stable and supports before or append semantics", () => {
+    assert.deepEqual(reorderArchiveIds(["a", "b", "c"], "c", "a"), ["c", "a", "b"]);
+    assert.deepEqual(reorderArchiveIds(["a", "b", "c"], "a", null), ["b", "c", "a"]);
+    assert.deepEqual(reorderArchiveIds(["a", "b", "c"], "b", "b"), ["a", "b", "c"]);
+    assert.deepEqual(reorderArchiveIds(["a", "b", "c"], "missing", "a"), ["a", "b", "c"]);
+    assert.deepEqual(reorderArchiveIds(["a", "b", "c"], "a", "missing"), ["a", "b", "c"]);
+});
+
+test("archive manager multi-selection preserves archive order and removes stale ids", () => {
+    const archives = [
+        { id: DEFAULT_ARCHIVE_ID, is_default: true },
+        { id: "common" },
+        { id: "portrait" },
+    ];
+    assert.deepEqual(
+        normalizeArchiveManagerSelection(archives, new Set(["portrait", "deleted", "common"])),
+        ["common", "portrait"],
+    );
+    assert.deepEqual(normalizeArchiveManagerSelection(archives, []), []);
+    assert.deepEqual(normalizeArchiveManagerSelection([], ["common"]), []);
+});
+
+test("archive manager selection gestures support plain, Ctrl, Shift, and Ctrl+Shift", () => {
+    const ids = ["default", "a", "b", "c", "d"];
+    assert.deepEqual(
+        applyArchiveManagerSelectionGesture(ids, ["a", "c"], "b", "a"),
+        { selectedIds: ["b"], anchorId: "b" },
+    );
+    assert.deepEqual(
+        applyArchiveManagerSelectionGesture(ids, ["a"], "c", "a", { additive: true }),
+        { selectedIds: ["a", "c"], anchorId: "c" },
+    );
+    assert.deepEqual(
+        applyArchiveManagerSelectionGesture(ids, ["a", "c"], "c", "a", { additive: true }),
+        { selectedIds: ["a"], anchorId: "c" },
+    );
+    assert.deepEqual(
+        applyArchiveManagerSelectionGesture(ids, ["default", "d"], "d", "a", { range: true }),
+        { selectedIds: ["a", "b", "c", "d"], anchorId: "a" },
+    );
+    assert.deepEqual(
+        applyArchiveManagerSelectionGesture(ids, ["default"], "c", "a", {
+            additive: true,
+            range: true,
+        }),
+        { selectedIds: ["default", "a", "b", "c"], anchorId: "a" },
+    );
+    assert.deepEqual(
+        applyArchiveManagerSelectionGesture(ids, ["a"], "d", "missing", { range: true }),
+        { selectedIds: ["d"], anchorId: "d" },
+    );
+});
+
+test("archive manager actions implement zero, single, and multi-selection rules", () => {
+    const regular = { id: "common" };
+    const second = { id: "portrait" };
+    const defaults = { id: DEFAULT_ARCHIVE_ID, is_default: true };
+    assert.deepEqual(archiveManagerSelectionAvailability([]), {
+        save: false,
+        rename: false,
+        export: false,
+        delete: false,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular]), {
+        save: true,
+        rename: true,
+        export: true,
+        delete: true,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([defaults]), {
+        save: true,
+        rename: false,
+        export: true,
+        delete: false,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular, second]), {
+        save: false,
+        rename: false,
+        export: true,
+        delete: true,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular, defaults]), {
+        save: false,
+        rename: false,
+        export: true,
+        delete: false,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular], { dragging: true }), {
+        save: false,
+        rename: false,
+        export: false,
+        delete: false,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular], { hasState: false }), {
+        save: false,
+        rename: true,
+        export: true,
+        delete: true,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular], { renaming: true }), {
+        save: false,
+        rename: false,
+        export: false,
+        delete: false,
+    });
+});
+
+test("quick archive save is enabled only for an available dirty snapshot", () => {
+    const archive = { id: "common" };
+    assert.equal(canQuickSaveArchive(archive, { dirty: true }), true);
+    assert.equal(canQuickSaveArchive(archive, { dirty: false }), false);
+    assert.equal(canQuickSaveArchive(null, { dirty: true }), false);
+    assert.equal(canQuickSaveArchive(archive, { dirty: true, hasState: false }), false);
+    assert.equal(canQuickSaveArchive(archive, { dirty: true, loading: true }), false);
+    assert.equal(canQuickSaveArchive(archive, { dirty: true, saving: true }), false);
+});
+
 test("export bundle and preview use the stable portable format", () => {
     const archive = { id: "a", name: "人物", snapshot: snapshotFromState(state) };
     const bundle = buildArchiveExportBundle([archive], "2026-08-10T00:00:00.000Z");
@@ -173,13 +295,25 @@ test("API client preserves paths, methods, payloads, and server errors", async (
     await client.create("人物", snapshotFromState(state));
     await client.update("id with space", { name: "夜景" });
     await client.delete("id with space");
+    await client.deleteMany(["first", "second"]);
     await client.select("id with space");
+    await client.reorder(["second", "first"]);
     assert.equal(requests[0].path, "/prompt-weaver/prompt-grid-archives");
     assert.equal(requests[1].options.method, "POST");
     assert.equal(requests[2].path, "/prompt-weaver/prompt-grid-archives/id%20with%20space");
     assert.equal(requests[3].options.method, "DELETE");
-    assert.equal(requests[4].path, "/prompt-weaver/prompt-grid-archives/selection");
-    assert.equal(requests[4].options.method, "PATCH");
+    assert.equal(requests[4].path, "/prompt-weaver/prompt-grid-archives");
+    assert.equal(requests[4].options.method, "DELETE");
+    assert.deepEqual(JSON.parse(requests[4].options.body), {
+        archive_ids: ["first", "second"],
+    });
+    assert.equal(requests[5].path, "/prompt-weaver/prompt-grid-archives/selection");
+    assert.equal(requests[5].options.method, "PATCH");
+    assert.equal(requests[6].path, "/prompt-weaver/prompt-grid-archives/order");
+    assert.equal(requests[6].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[6].options.body), {
+        archive_ids: ["second", "first"],
+    });
 
     const failing = new PromptGridArchiveClient({
         async fetchApi() {

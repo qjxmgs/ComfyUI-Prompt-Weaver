@@ -161,6 +161,29 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(renamed.status, 200)
         self.assertEqual(renamed.payload["archive"]["name"], "夜景")
 
+        second = self.run_async(
+            self.module.create_prompt_grid_archive(
+                _Request({"name": "人物补充", "snapshot": _snapshot("second")})
+            )
+        )
+        second_id = second.payload["archive"]["id"]
+        reordered = self.run_async(
+            self.module.reorder_prompt_grid_archives(
+                _Request({"archive_ids": [second_id, archive_id]})
+            )
+        )
+        self.assertEqual(reordered.status, 200)
+        self.assertEqual(
+            [item["id"] for item in reordered.payload["archives"]],
+            [DEFAULT_ARCHIVE_ID, second_id, archive_id],
+        )
+        stale_order = self.run_async(
+            self.module.reorder_prompt_grid_archives(
+                _Request({"archive_ids": [archive_id]})
+            )
+        )
+        self.assertEqual(stale_order.status, 400)
+
         missing = self.run_async(
             self.module.delete_prompt_grid_archive(
                 _Request(match_info={"archive_id": str(uuid.uuid4())})
@@ -174,6 +197,11 @@ class ArchiveRouteTests(unittest.TestCase):
             )
         )
         self.assertEqual(removed.status, 200)
+        self.run_async(
+            self.module.delete_prompt_grid_archive(
+                _Request(match_info={"archive_id": second_id})
+            )
+        )
         after_delete = self.run_async(self.module.list_prompt_grid_archives(_Request()))
         self.assertEqual(after_delete.payload["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
 
@@ -183,6 +211,60 @@ class ArchiveRouteTests(unittest.TestCase):
             )
         )
         self.assertEqual(protected.status, 400)
+
+    def test_bulk_delete_is_atomic_and_user_isolated(self):
+        first = self.run_async(
+            self.module.create_prompt_grid_archive(
+                _Request({"name": "第一项", "snapshot": _snapshot("first")})
+            )
+        ).payload["archive"]
+        second = self.run_async(
+            self.module.create_prompt_grid_archive(
+                _Request({"name": "第二项", "snapshot": _snapshot("second")})
+            )
+        ).payload["archive"]
+        self.run_async(
+            self.module.select_prompt_grid_archive(
+                _Request({"archive_id": second["id"]})
+            )
+        )
+
+        stale = self.run_async(
+            self.module.delete_prompt_grid_archives(
+                _Request({"archive_ids": [first["id"], str(uuid.uuid4())]})
+            )
+        )
+        self.assertEqual(stale.status, 404)
+        unchanged = self.run_async(self.module.list_prompt_grid_archives(_Request()))
+        self.assertEqual(
+            [archive["id"] for archive in unchanged.payload["archives"]],
+            [DEFAULT_ARCHIVE_ID, first["id"], second["id"]],
+        )
+
+        protected = self.run_async(
+            self.module.delete_prompt_grid_archives(
+                _Request({"archive_ids": [DEFAULT_ARCHIVE_ID, first["id"]]})
+            )
+        )
+        self.assertEqual(protected.status, 400)
+
+        deleted = self.run_async(
+            self.module.delete_prompt_grid_archives(
+                _Request({"archive_ids": [second["id"], first["id"]]})
+            )
+        )
+        self.assertEqual(deleted.status, 200)
+        self.assertEqual(
+            [archive["id"] for archive in deleted.payload["deleted_archives"]],
+            [first["id"], second["id"]],
+        )
+        self.assertEqual(deleted.payload["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
+        self.assertEqual(
+            [archive["id"] for archive in deleted.payload["archives"]],
+            [DEFAULT_ARCHIVE_ID],
+        )
+        bob = self.run_async(self.module.list_prompt_grid_archives(_Request(user="bob")))
+        self.assertEqual([archive["id"] for archive in bob.payload["archives"]], [DEFAULT_ARCHIVE_ID])
 
     def test_invalid_json_and_all_import_conflict_policies(self):
         invalid = self.run_async(

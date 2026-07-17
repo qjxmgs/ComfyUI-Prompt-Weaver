@@ -72,6 +72,68 @@ class ArchiveStoreTests(unittest.TestCase):
         with self.assertRaises(ArchiveNotFoundError):
             self.store.delete(created["id"])
 
+    def test_creation_order_is_stable_and_manual_order_is_persisted(self):
+        first = self.store.create("最早", snapshot("first"))
+        second = self.store.create("中间", snapshot("second"))
+        third = self.store.create("最新", snapshot("third"))
+        self.store.update(first["id"], name="最早（已修改）", snapshot=snapshot("updated"))
+
+        self.assertEqual(
+            [archive["id"] for archive in self.store.list_archives()["archives"]],
+            [DEFAULT_ARCHIVE_ID, first["id"], second["id"], third["id"]],
+        )
+
+        reordered = self.store.reorder([third["id"], first["id"], second["id"]])
+        expected = [DEFAULT_ARCHIVE_ID, third["id"], first["id"], second["id"]]
+        self.assertEqual([archive["id"] for archive in reordered["archives"]], expected)
+        self.assertEqual(
+            [archive["id"] for archive in self.store.list_archives()["archives"]],
+            expected,
+        )
+
+        before = Path(self.path).read_bytes()
+        invalid_orders = [
+            "not-an-array",
+            [DEFAULT_ARCHIVE_ID, third["id"], first["id"], second["id"]],
+            [third["id"], third["id"], second["id"]],
+            [third["id"], first["id"]],
+            [third["id"], first["id"], str(uuid.uuid4())],
+        ]
+        for invalid in invalid_orders:
+            with self.subTest(invalid=invalid), self.assertRaises(ArchiveValidationError):
+                self.store.reorder(invalid)
+            self.assertEqual(Path(self.path).read_bytes(), before)
+
+    def test_bulk_delete_is_atomic_and_resets_last_selection(self):
+        first = self.store.create("第一项", snapshot("first"))
+        second = self.store.create("第二项", snapshot("second"))
+        third = self.store.create("第三项", snapshot("third"))
+        self.store.set_last_selected(second["id"])
+
+        result = self.store.delete_many([second["id"], first["id"]])
+        self.assertEqual(
+            [archive["id"] for archive in result["deleted_archives"]],
+            [first["id"], second["id"]],
+        )
+        self.assertEqual(
+            [archive["id"] for archive in result["archives"]],
+            [DEFAULT_ARCHIVE_ID, third["id"]],
+        )
+        self.assertEqual(result["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
+
+        before = Path(self.path).read_bytes()
+        invalid_batches = [
+            ([], ArchiveValidationError),
+            ("not-an-array", ArchiveValidationError),
+            ([DEFAULT_ARCHIVE_ID], ArchiveValidationError),
+            ([third["id"], third["id"]], ArchiveValidationError),
+            ([third["id"], str(uuid.uuid4())], ArchiveNotFoundError),
+        ]
+        for invalid, expected_error in invalid_batches:
+            with self.subTest(invalid=invalid), self.assertRaises(expected_error):
+                self.store.delete_many(invalid)
+            self.assertEqual(Path(self.path).read_bytes(), before)
+
     def test_snapshot_validation_is_strict_and_canonical(self):
         value = snapshot()
         value["ignored"] = "value"
@@ -222,8 +284,8 @@ class ArchiveStoreTests(unittest.TestCase):
         archives = self.store.list_archives()["archives"]
         self.assertEqual(len(archives), 3)
         self.assertEqual(
-            {archive["name"] for archive in archives},
-            {DEFAULT_ARCHIVE_NAME, "人物", "人物 (2)"},
+            [archive["name"] for archive in archives],
+            [DEFAULT_ARCHIVE_NAME, "人物", "人物 (2)"],
         )
 
         before = Path(self.path).read_bytes()
