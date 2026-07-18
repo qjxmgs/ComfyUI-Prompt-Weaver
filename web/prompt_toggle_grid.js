@@ -19,9 +19,11 @@ import {
     validateImportBundlePreview,
 } from "./prompt_grid_archives.js?v=20260811-selection-gestures";
 import {
-    buildPromptFromSelection,
+    confirmPromptEditorDraft,
+    dedupePromptTokens,
+    mergePromptTokenInput,
     splitPromptTokens,
-} from "./prompt_editor_tokens.js";
+} from "./prompt_editor_tokens.js?v=20260811-prompt-add-v2";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -404,7 +406,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260811-selection-no-text", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260811-prompt-focus", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2335,6 +2337,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     function closePromptEditor(restoreFocus = true) {
         const editor = activePromptEditor;
         if (!editor) return;
+        editor.cancelPendingAdd?.();
         activePromptEditor = null;
         editor.overlay.remove();
         if (restoreFocus) {
@@ -2347,9 +2350,17 @@ function createPromptGridWidget(node, inputName, inputData) {
     function openPromptEditor(promptInput, itemId, opener) {
         closePromptEditor(false);
         const originalPrompt = promptInput.value;
-        const tokens = splitPromptTokens(originalPrompt);
-        const initialSelected = tokens.map(() => true);
-        const selected = initialSelected.slice();
+        const parsedTokens = splitPromptTokens(originalPrompt);
+        const initialTokens = dedupePromptTokens(parsedTokens);
+        const promptNeedsDeduplication = parsedTokens.length !== initialTokens.length;
+        const initialSelected = initialTokens.map(() => true);
+        let tokens = initialTokens.slice();
+        let selected = initialSelected.slice();
+        let adding = false;
+        let addInput = null;
+        let addButton = null;
+        let addDraft = "";
+        let addBlurTimer = 0;
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
@@ -2369,28 +2380,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         const content = element("div", "cpw-prompt-editor__content");
         const tokenList = element("div", "cpw-prompt-editor__tokens");
         tokenList.setAttribute("aria-label", "提示词标签");
-        const tokenButtons = tokens.map((token, index) => {
-            const button = element(
-                "button",
-                `cpw-prompt-editor__token cpw-prompt-editor__token--color-${index % 5}`,
-                token,
-            );
-            button.type = "button";
-            button.title = token;
-            button.setAttribute("aria-pressed", "true");
-            button.addEventListener("click", () => {
-                selected[index] = !selected[index];
-                button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
-                button.setAttribute("aria-pressed", String(selected[index]));
-            });
-            return button;
-        });
-        if (tokenButtons.length) {
-            tokenList.append(...tokenButtons);
-        } else {
-            tokenList.append(element("div", "cpw-prompt-editor__empty", "当前没有可编辑的提示词。"));
-        }
-        content.append(tokenList);
+        const addStatus = element("div", "cpw-prompt-editor__add-status");
+        addStatus.setAttribute("role", "status");
+        addStatus.setAttribute("aria-live", "polite");
+        addStatus.hidden = true;
+        content.append(tokenList, addStatus);
 
         const footer = element("footer", "cpw-prompt-editor__footer");
         const resetSelectionButton = element("button", "cpw-prompt-editor__action", "重置");
@@ -2405,24 +2399,154 @@ function createPromptGridWidget(node, inputName, inputData) {
         dialog.append(header, content, footer);
         overlay.append(dialog);
 
-        activePromptEditor = { overlay, opener };
+        const clearAddBlurTimer = () => {
+            if (!addBlurTimer) return;
+            clearTimeout(addBlurTimer);
+            addBlurTimer = 0;
+        };
+        const setAddStatus = (message) => {
+            addStatus.textContent = message || "";
+            addStatus.hidden = !message;
+        };
+        const renderTokens = ({ focusInput = false, focusAddButton = false } = {}) => {
+            tokenList.replaceChildren();
+            addInput = null;
+            addButton = null;
+            if (tokens.length) {
+                for (let index = 0; index < tokens.length; index += 1) {
+                    const token = tokens[index];
+                    const button = element(
+                        "button",
+                        `cpw-prompt-editor__token cpw-prompt-editor__token--color-${index % 5}`,
+                        token,
+                    );
+                    button.type = "button";
+                    button.title = token;
+                    button.setAttribute("aria-pressed", String(selected[index]));
+                    button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
+                    button.addEventListener("click", () => {
+                        selected[index] = !selected[index];
+                        button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
+                        button.setAttribute("aria-pressed", String(selected[index]));
+                    });
+                    tokenList.append(button);
+                }
+            } else {
+                tokenList.append(element("div", "cpw-prompt-editor__empty", "当前没有提示词，可点击 + 添加。"));
+            }
+
+            if (adding) {
+                addInput = element("textarea", "cpw-prompt-editor__add-input");
+                addInput.rows = 1;
+                addInput.value = addDraft;
+                addInput.placeholder = "输入提示词，支持逗号批量添加";
+                addInput.setAttribute("aria-label", "新增提示词");
+                tokenList.append(addInput);
+                addInput.addEventListener("input", (event) => {
+                    addDraft = event.currentTarget.value;
+                });
+                addInput.addEventListener("keydown", (event) => {
+                    if (event.isComposing) return;
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        commitAddInput({ focusAddButton: true });
+                    } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        cancelAddInput();
+                    }
+                });
+                addInput.addEventListener("blur", (event) => {
+                    addDraft = event.currentTarget.value;
+                    clearAddBlurTimer();
+                    commitAddInput({ render: false });
+                    addBlurTimer = setTimeout(() => {
+                        addBlurTimer = 0;
+                        if (activePromptEditor?.overlay === overlay && !adding) renderTokens();
+                    }, 0);
+                });
+            } else {
+                addButton = element("button", "cpw-prompt-editor__add", "+");
+                addButton.type = "button";
+                addButton.title = "添加提示词";
+                addButton.setAttribute("aria-label", "添加提示词");
+                addButton.addEventListener("click", () => {
+                    adding = true;
+                    addDraft = "";
+                    setAddStatus("");
+                    renderTokens({ focusInput: true });
+                });
+                tokenList.append(addButton);
+            }
+
+            if (focusInput) queueMicrotask(() => addInput?.focus());
+            if (focusAddButton) queueMicrotask(() => addButton?.focus());
+        };
+        const formatAddStatus = ({ addedCount, mergedCount, reactivatedCount }, hadInput) => {
+            if (!addedCount && !mergedCount) {
+                return hadInput ? "未检测到可添加的提示词。" : "";
+            }
+            const parts = [];
+            if (addedCount) parts.push(`已添加 ${addedCount} 个`);
+            if (mergedCount) parts.push(`合并 ${mergedCount} 个重复项`);
+            if (reactivatedCount) parts.push(`重新启用 ${reactivatedCount} 个`);
+            return `${parts.join("，")}。`;
+        };
+        function commitAddInput({ focusAddButton = false, render = true } = {}) {
+            if (!adding || !addInput) return false;
+            clearAddBlurTimer();
+            addDraft = addInput.value;
+            const value = addDraft;
+            const result = mergePromptTokenInput(tokens, selected, value);
+            tokens = result.tokens;
+            selected = result.selected;
+            adding = false;
+            addDraft = "";
+            const statusMessage = formatAddStatus(result, Boolean(value.trim()));
+            if (render) renderTokens({ focusAddButton });
+            setAddStatus(statusMessage);
+            return Boolean(result.addedCount || result.mergedCount);
+        }
+        function cancelAddInput() {
+            if (!adding) return;
+            clearAddBlurTimer();
+            adding = false;
+            addDraft = "";
+            setAddStatus("");
+            renderTokens({ focusAddButton: true });
+        }
+
+        activePromptEditor = { overlay, opener, cancelPendingAdd: clearAddBlurTimer };
+        renderTokens();
+        if (promptNeedsDeduplication) {
+            setAddStatus(`已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`);
+        }
         closeButton.addEventListener("click", () => closePromptEditor());
         overlay.addEventListener("click", (event) => {
             if (event.target === overlay) closePromptEditor();
         });
         resetSelectionButton.addEventListener("click", () => {
-            for (let index = 0; index < selected.length; index += 1) {
-                selected[index] = initialSelected[index];
-                tokenButtons[index].classList.remove("cpw-prompt-editor__token--inactive");
-                tokenButtons[index].setAttribute("aria-pressed", "true");
-            }
+            clearAddBlurTimer();
+            tokens = initialTokens.slice();
+            selected = initialSelected.slice();
+            adding = false;
+            addDraft = "";
+            setAddStatus(promptNeedsDeduplication
+                ? `已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`
+                : "");
+            renderTokens();
         });
         confirmButton.addEventListener("click", () => {
-            const nextPrompt = buildPromptFromSelection(
+            clearAddBlurTimer();
+            const pendingInput = addDraft || (adding && addInput ? addInput.value : "");
+            const nextPrompt = confirmPromptEditorDraft(
                 originalPrompt,
                 tokens,
                 selected,
                 initialSelected,
+                pendingInput,
+                { forceRebuild: promptNeedsDeduplication },
             );
             closePromptEditor();
             if (nextPrompt === originalPrompt) return;
@@ -2436,7 +2560,9 @@ function createPromptGridWidget(node, inputName, inputData) {
                 return;
             }
             if (event.key !== "Tab") return;
-            const focusable = [...dialog.querySelectorAll("button:not([disabled])")];
+            const focusable = [...dialog.querySelectorAll(
+                "button:not([disabled]), input:not([disabled]), textarea:not([disabled])",
+            )];
             if (!focusable.length) return;
             const first = focusable[0];
             const last = focusable[focusable.length - 1];
@@ -2456,7 +2582,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         overlay.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
         document.body.append(overlay);
-        queueMicrotask(() => (tokenButtons[0] ?? confirmButton).focus());
+        queueMicrotask(() => (
+            tokenList.querySelector(".cpw-prompt-editor__token")
+            ?? addButton
+            ?? confirmButton
+        ).focus());
     }
 
     function createCard(item) {
