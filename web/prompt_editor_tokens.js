@@ -86,10 +86,90 @@ export function splitPromptTokens(value) {
     return tokens;
 }
 
-export function buildPromptFromSelection(originalPrompt, tokens, selected, initialSelected) {
+function promptTokenKey(value) {
+    return (typeof value === "string" ? value.trim() : "").toLowerCase();
+}
+
+export function dedupePromptTokens(tokens) {
+    const result = [];
+    const seen = new Set();
+    for (const value of Array.isArray(tokens) ? tokens : []) {
+        const token = typeof value === "string" ? value.trim() : "";
+        const key = promptTokenKey(token);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        result.push(token);
+    }
+    return result;
+}
+
+export function mergePromptTokenInput(tokens, selected, input) {
+    const nextTokens = Array.isArray(tokens) ? [...tokens] : [];
+    const nextSelected = nextTokens.map((_token, index) => Boolean(selected?.[index]));
+    const indexByKey = new Map();
+    for (let index = 0; index < nextTokens.length; index += 1) {
+        const key = promptTokenKey(nextTokens[index]);
+        if (key && !indexByKey.has(key)) indexByKey.set(key, index);
+    }
+
+    let addedCount = 0;
+    let mergedCount = 0;
+    let reactivatedCount = 0;
+    for (const token of splitPromptTokens(input)) {
+        const key = promptTokenKey(token);
+        const existingIndex = indexByKey.get(key);
+        if (existingIndex !== undefined) {
+            mergedCount += 1;
+            if (!nextSelected[existingIndex]) {
+                nextSelected[existingIndex] = true;
+                reactivatedCount += 1;
+            }
+            continue;
+        }
+        indexByKey.set(key, nextTokens.length);
+        nextTokens.push(token);
+        nextSelected.push(true);
+        addedCount += 1;
+    }
+    return {
+        tokens: nextTokens,
+        selected: nextSelected,
+        addedCount,
+        mergedCount,
+        reactivatedCount,
+    };
+}
+
+export function buildPromptFromSelection(
+    originalPrompt,
+    tokens,
+    selected,
+    initialSelected,
+    { forceRebuild = false } = {},
+) {
     const selectionChanged = tokens.some(
         (_token, index) => Boolean(selected[index]) !== Boolean(initialSelected[index]),
     );
-    if (!selectionChanged) return originalPrompt;
+    if (!selectionChanged && !forceRebuild) return originalPrompt;
     return tokens.filter((_token, index) => Boolean(selected[index])).join(", ");
+}
+
+export function confirmPromptEditorDraft(
+    originalPrompt,
+    tokens,
+    selected,
+    initialSelected,
+    pendingInput,
+    { forceRebuild = false } = {},
+) {
+    const confirmedDraft = typeof pendingInput === "string" && pendingInput.trim()
+        ? mergePromptTokenInput(tokens, selected, pendingInput)
+        : { tokens, selected };
+    return buildPromptFromSelection(
+        originalPrompt,
+        confirmedDraft.tokens,
+        confirmedDraft.selected,
+        initialSelected,
+        { forceRebuild },
+    );
 }
