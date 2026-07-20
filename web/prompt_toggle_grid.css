@@ -595,7 +595,9 @@
 .cpw-prompt-editor__content {
     min-height: 0;
     display: flex;
+    flex-direction: column;
     flex: 1 1 auto;
+    gap: 8px;
     padding: 12px;
     overflow: hidden;
 }
@@ -604,6 +606,7 @@
     min-width: 0;
     width: 100%;
     display: flex;
+    flex: 1 1 auto;
     align-content: flex-start;
     align-items: flex-start;
     flex-wrap: wrap;
@@ -611,6 +614,52 @@
     overflow: auto;
     overscroll-behavior: contain;
     padding: 2px;
+}
+
+.cpw-prompt-editor__add {
+    flex: 0 0 29px;
+    width: 29px;
+    height: 27px;
+    padding: 0;
+    border: 1px dashed color-mix(in srgb, var(--p-primary-color, #7c6df2) 70%, var(--border-color, #4b4d52));
+    border-radius: 7px;
+    color: var(--p-primary-color, #87a9ff);
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 10%, var(--comfy-input-bg, #17181a));
+    font: 600 18px/1 Inter, system-ui, sans-serif;
+    cursor: pointer;
+}
+
+.cpw-prompt-editor__add:hover {
+    border-style: solid;
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 20%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__add-input {
+    box-sizing: border-box;
+    min-width: min(220px, 100%);
+    min-height: 27px;
+    flex: 1 1 220px;
+    padding: 4px 9px;
+    border: 1px solid var(--border-color, #4b4d52);
+    border-radius: 7px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-input-bg, #17181a);
+    font: inherit;
+    line-height: 1.4;
+    overflow: hidden;
+    resize: none;
+    user-select: text;
+}
+
+.cpw-prompt-editor__add-status {
+    flex: 0 0 auto;
+    min-height: 18px;
+    color: var(--descrip-text, #aaa);
+    font-size: 12px;
+}
+
+.cpw-prompt-editor__add-status[hidden] {
+    display: none;
 }
 
 .cpw-prompt-editor__token {
@@ -697,6 +746,7 @@
 
 .cpw-prompt-editor__close:focus-visible,
 .cpw-prompt-editor__token:focus-visible,
+.cpw-prompt-editor__add:focus-visible,
 .cpw-prompt-editor__action:focus-visible,
 .cpw-prompt-grid__prompt-edit:focus-visible,
 .cpw-archive-manager button:focus-visible,
@@ -706,6 +756,13 @@
 .cpw-archive-confirm select:focus-visible {
     outline: 2px solid var(--p-primary-color, #7c6df2);
     outline-offset: 2px;
+}
+
+.cpw-prompt-editor__add-input:focus,
+.cpw-prompt-editor__add-input:focus-visible {
+    border-color: var(--p-primary-color, #7c6df2);
+    outline: 0;
+    box-shadow: none;
 }
 
 .cpw-archive-manager__overlay,
