@@ -634,11 +634,22 @@
     background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 20%, var(--comfy-input-bg, #17181a));
 }
 
-.cpw-prompt-editor__add-input {
+.cpw-prompt-editor__add-composer {
     box-sizing: border-box;
     min-width: min(220px, 100%);
+    width: 100%;
+    display: flex;
+    flex: 1 1 100%;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cpw-prompt-editor__add-input {
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
     min-height: 27px;
-    flex: 1 1 220px;
+    flex: 0 0 auto;
     padding: 4px 9px;
     border: 1px solid var(--border-color, #4b4d52);
     border-radius: 7px;
@@ -649,6 +660,50 @@
     overflow: hidden;
     resize: none;
     user-select: text;
+}
+
+.cpw-prompt-editor__suggestions {
+    box-sizing: border-box;
+    width: 100%;
+    max-height: 210px;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 2px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 4px;
+    border: 1px solid var(--border-color, #4b4d52);
+    border-radius: 7px;
+    background: var(--comfy-menu-bg, #202124);
+    box-shadow: 0 8px 20px rgb(0 0 0 / 25%);
+}
+
+.cpw-prompt-editor__suggestions[hidden] {
+    display: none;
+}
+
+.cpw-prompt-editor__suggestion {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 29px;
+    padding: 5px 8px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 5px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.cpw-prompt-editor__suggestion:hover,
+.cpw-prompt-editor__suggestion--active {
+    color: var(--input-text, var(--fg-color, #fff));
+    background: color-mix(in srgb, var(--p-primary-color, #58a6ff) 24%, var(--comfy-input-bg, #17181a));
 }
 
 .cpw-prompt-editor__add-status {
