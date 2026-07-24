@@ -25,6 +25,12 @@ import {
     splitPromptTokens,
 } from "./prompt_editor_tokens.js?v=20260811-prompt-add-v2";
 import {
+    PromptAssistantTagCatalog,
+    formatPromptAssistantTagOption,
+    movePromptAssistantSuggestionIndex,
+    searchPromptAssistantTags,
+} from "./prompt_assistant_tags.js?v=20260811-tag-autocomplete-v1";
+import {
     calculateFittedNodeHeight,
     clientPointToContent,
     clientRectToContent,
@@ -58,6 +64,11 @@ const MAX_ARCHIVE_IMPORT_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_PROPERTY_KEY = "prompt_weaver_archive_id";
 
 const archiveClient = new PromptGridArchiveClient(api);
+const promptAssistantTagCatalog = new PromptAssistantTagCatalog(api, {
+    onDiagnostic(message, error) {
+        console.warn(`[Prompt Weaver] ${message}`, error || "");
+    },
+});
 const loadedPromptGridNodes = new WeakSet();
 const promptGridArchiveControllers = new WeakMap();
 const archiveChannel = typeof BroadcastChannel === "function"
@@ -2361,6 +2372,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         let addButton = null;
         let addDraft = "";
         let addBlurTimer = 0;
+        let suggestionList = null;
+        let suggestionResults = [];
+        let activeSuggestionIndex = -1;
+        let tagCatalogRecords = [];
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
@@ -2399,6 +2414,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         dialog.append(header, content, footer);
         overlay.append(dialog);
 
+        promptAssistantTagCatalog.load().then((records) => {
+            tagCatalogRecords = records;
+            if (activePromptEditor?.overlay === overlay && adding && addInput) {
+                renderPromptAssistantSuggestions();
+            }
+        });
+
         const clearAddBlurTimer = () => {
             if (!addBlurTimer) return;
             clearTimeout(addBlurTimer);
@@ -2408,10 +2430,74 @@ function createPromptGridWidget(node, inputName, inputData) {
             addStatus.textContent = message || "";
             addStatus.hidden = !message;
         };
+        const syncActiveSuggestion = () => {
+            if (!suggestionList || !addInput) return;
+            const options = [...suggestionList.querySelectorAll("[role='option']")];
+            options.forEach((option, index) => {
+                const active = index === activeSuggestionIndex;
+                option.classList.toggle("cpw-prompt-editor__suggestion--active", active);
+                option.setAttribute("aria-selected", String(active));
+            });
+            const activeOption = options[activeSuggestionIndex];
+            if (activeOption) {
+                addInput.setAttribute("aria-activedescendant", activeOption.id);
+                activeOption.scrollIntoView({ block: "nearest" });
+            } else {
+                addInput.removeAttribute("aria-activedescendant");
+            }
+        };
+        function renderPromptAssistantSuggestions() {
+            if (!suggestionList || !addInput) return;
+            suggestionResults = searchPromptAssistantTags(tagCatalogRecords, addInput.value);
+            activeSuggestionIndex = -1;
+            suggestionList.replaceChildren();
+            suggestionList.hidden = !suggestionResults.length;
+            addInput.setAttribute("aria-expanded", String(Boolean(suggestionResults.length)));
+            addInput.removeAttribute("aria-activedescendant");
+
+            suggestionResults.forEach((record, index) => {
+                const label = formatPromptAssistantTagOption(record);
+                const option = element("button", "cpw-prompt-editor__suggestion", label);
+                option.type = "button";
+                option.id = `${suggestionList.id}-option-${index}`;
+                option.tabIndex = -1;
+                option.title = label;
+                option.setAttribute("role", "option");
+                option.setAttribute("aria-selected", "false");
+                const keepInputFocused = (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                };
+                option.addEventListener("pointerdown", keepInputFocused);
+                option.addEventListener("mousedown", keepInputFocused);
+                option.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    selectPromptAssistantSuggestion(index);
+                });
+                suggestionList.append(option);
+            });
+        }
+        function selectPromptAssistantSuggestion(index) {
+            const record = suggestionResults[index];
+            if (!record) return;
+            clearAddBlurTimer();
+            if (addInput) addInput.dataset.cpwSkipBlurCommit = "true";
+            const result = mergePromptTokenInput(tokens, selected, record.value);
+            tokens = result.tokens;
+            selected = result.selected;
+            adding = true;
+            addDraft = "";
+            renderTokens({ focusInput: true });
+            setAddStatus(formatAddStatus(result, true));
+        }
         const renderTokens = ({ focusInput = false, focusAddButton = false } = {}) => {
             tokenList.replaceChildren();
             addInput = null;
             addButton = null;
+            suggestionList = null;
+            suggestionResults = [];
+            activeSuggestionIndex = -1;
             if (tokens.length) {
                 for (let index = 0; index < tokens.length; index += 1) {
                     const token = tokens[index];
@@ -2436,21 +2522,47 @@ function createPromptGridWidget(node, inputName, inputData) {
             }
 
             if (adding) {
+                const addComposer = element("div", "cpw-prompt-editor__add-composer");
                 addInput = element("textarea", "cpw-prompt-editor__add-input");
                 addInput.rows = 1;
                 addInput.value = addDraft;
-                addInput.placeholder = "输入提示词，支持逗号批量添加";
+                addInput.placeholder = "输入提示词，支持中文或英文标签匹配";
                 addInput.setAttribute("aria-label", "新增提示词");
-                tokenList.append(addInput);
+                addInput.setAttribute("role", "combobox");
+                addInput.setAttribute("aria-autocomplete", "list");
+                addInput.setAttribute("aria-expanded", "false");
+                suggestionList = element("div", "cpw-prompt-editor__suggestions");
+                suggestionList.id = `cpw-prompt-editor-suggestions-${createId()}`;
+                suggestionList.setAttribute("role", "listbox");
+                suggestionList.setAttribute("aria-label", "Prompt Assistant 标签匹配结果");
+                suggestionList.hidden = true;
+                addInput.setAttribute("aria-controls", suggestionList.id);
+                addComposer.append(addInput, suggestionList);
+                tokenList.append(addComposer);
                 addInput.addEventListener("input", (event) => {
                     addDraft = event.currentTarget.value;
+                    renderPromptAssistantSuggestions();
                 });
                 addInput.addEventListener("keydown", (event) => {
                     if (event.isComposing) return;
-                    if (event.key === "Enter") {
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        if (!suggestionResults.length) return;
                         event.preventDefault();
                         event.stopPropagation();
-                        commitAddInput({ focusAddButton: true });
+                        activeSuggestionIndex = movePromptAssistantSuggestionIndex(
+                            activeSuggestionIndex,
+                            suggestionResults.length,
+                            event.key === "ArrowDown" ? 1 : -1,
+                        );
+                        syncActiveSuggestion();
+                    } else if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (activeSuggestionIndex >= 0) {
+                            selectPromptAssistantSuggestion(activeSuggestionIndex);
+                        } else {
+                            commitAddInput({ focusAddButton: true });
+                        }
                     } else if (event.key === "Escape") {
                         event.preventDefault();
                         event.stopPropagation();
@@ -2458,6 +2570,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     }
                 });
                 addInput.addEventListener("blur", (event) => {
+                    if (!adding || event.currentTarget.dataset.cpwSkipBlurCommit === "true") return;
                     addDraft = event.currentTarget.value;
                     clearAddBlurTimer();
                     commitAddInput({ render: false });
@@ -2466,6 +2579,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                         if (activePromptEditor?.overlay === overlay && !adding) renderTokens();
                     }, 0);
                 });
+                renderPromptAssistantSuggestions();
             } else {
                 addButton = element("button", "cpw-prompt-editor__add", "+");
                 addButton.type = "button";
@@ -2562,7 +2676,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (event.key !== "Tab") return;
             const focusable = [...dialog.querySelectorAll(
                 "button:not([disabled]), input:not([disabled]), textarea:not([disabled])",
-            )];
+            )].filter((candidate) => candidate.tabIndex >= 0 && !candidate.hidden);
             if (!focusable.length) return;
             const first = focusable[0];
             const last = focusable[focusable.length - 1];
