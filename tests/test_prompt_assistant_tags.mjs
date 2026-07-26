@@ -113,7 +113,7 @@ test("merges duplicate English values but keeps every Chinese alias searchable",
     assert.equal(records.length, 2);
     assert.deepEqual(records[0].aliases, ["杰作", "大师作品"]);
     assert.equal(searchPromptAssistantTags(records, "大师")[0], records[0]);
-    assert.equal(formatPromptAssistantTagOption(records[0]), "杰作（masterpiece）");
+    assert.equal(formatPromptAssistantTagOption(records[0]), "masterpiece（杰作）");
 });
 
 test("matches Chinese from one character and English from two characters", () => {
@@ -227,4 +227,3 @@ test("catalog client hides integration when extension or valid tag data is unava
     assert.deepEqual(await invalid.load(), []);
     assert.equal(diagnostics.length, 1);
 });
-

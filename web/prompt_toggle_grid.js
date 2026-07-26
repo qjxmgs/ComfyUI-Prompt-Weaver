@@ -29,7 +29,7 @@ import {
     formatPromptAssistantTagOption,
     movePromptAssistantSuggestionIndex,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260811-tag-autocomplete-v1";
+} from "./prompt_assistant_tags.js?v=20260811-tag-autocomplete-v2";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -417,7 +417,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260811-prompt-focus", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260811-tag-popup-v2", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2430,6 +2430,43 @@ function createPromptGridWidget(node, inputName, inputData) {
             addStatus.textContent = message || "";
             addStatus.hidden = !message;
         };
+        const positionPromptAssistantSuggestions = () => {
+            if (!suggestionList || suggestionList.hidden || !addInput?.isConnected) return;
+
+            const inputRect = addInput.getBoundingClientRect();
+            const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+            const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+            const viewportMargin = 8;
+            const popupGap = 4;
+            const preferredHeight = Math.min(210, suggestionList.scrollHeight || 210);
+            const availableBelow = Math.max(
+                0,
+                viewportHeight - inputRect.bottom - viewportMargin - popupGap,
+            );
+            const availableAbove = Math.max(0, inputRect.top - viewportMargin - popupGap);
+            const openAbove = availableBelow < preferredHeight && availableAbove > availableBelow;
+            const availableHeight = openAbove ? availableAbove : availableBelow;
+            const popupWidth = Math.max(
+                0,
+                Math.min(inputRect.width, viewportWidth - viewportMargin * 2),
+            );
+            const popupLeft = Math.min(
+                Math.max(viewportMargin, inputRect.left),
+                Math.max(viewportMargin, viewportWidth - viewportMargin - popupWidth),
+            );
+
+            suggestionList.style.left = `${Math.round(popupLeft)}px`;
+            suggestionList.style.width = `${Math.round(popupWidth)}px`;
+            suggestionList.style.maxHeight = `${Math.max(48, Math.min(210, availableHeight))}px`;
+            if (openAbove) {
+                suggestionList.style.top = "auto";
+                suggestionList.style.bottom = `${Math.round(viewportHeight - inputRect.top + popupGap)}px`;
+            } else {
+                suggestionList.style.top = `${Math.round(inputRect.bottom + popupGap)}px`;
+                suggestionList.style.bottom = "auto";
+            }
+        };
+        const handleSuggestionAnchorChange = () => positionPromptAssistantSuggestions();
         const syncActiveSuggestion = () => {
             if (!suggestionList || !addInput) return;
             const options = [...suggestionList.querySelectorAll("[role='option']")];
@@ -2452,6 +2489,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             activeSuggestionIndex = -1;
             suggestionList.replaceChildren();
             suggestionList.hidden = !suggestionResults.length;
+            suggestionList.style.visibility = suggestionResults.length ? "hidden" : "";
             addInput.setAttribute("aria-expanded", String(Boolean(suggestionResults.length)));
             addInput.removeAttribute("aria-activedescendant");
 
@@ -2477,6 +2515,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 });
                 suggestionList.append(option);
             });
+            if (suggestionResults.length) {
+                positionPromptAssistantSuggestions();
+                suggestionList.style.visibility = "";
+            }
         }
         function selectPromptAssistantSuggestion(index) {
             const record = suggestionResults[index];
@@ -2492,6 +2534,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             setAddStatus(formatAddStatus(result, true));
         }
         const renderTokens = ({ focusInput = false, focusAddButton = false } = {}) => {
+            suggestionList?.remove();
             tokenList.replaceChildren();
             addInput = null;
             addButton = null;
@@ -2537,8 +2580,9 @@ function createPromptGridWidget(node, inputName, inputData) {
                 suggestionList.setAttribute("aria-label", "Prompt Assistant 标签匹配结果");
                 suggestionList.hidden = true;
                 addInput.setAttribute("aria-controls", suggestionList.id);
-                addComposer.append(addInput, suggestionList);
+                addComposer.append(addInput);
                 tokenList.append(addComposer);
+                overlay.append(suggestionList);
                 addInput.addEventListener("input", (event) => {
                     addDraft = event.currentTarget.value;
                     renderPromptAssistantSuggestions();
@@ -2631,7 +2675,15 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderTokens({ focusAddButton: true });
         }
 
-        activePromptEditor = { overlay, opener, cancelPendingAdd: clearAddBlurTimer };
+        const cleanupPromptEditor = () => {
+            clearAddBlurTimer();
+            suggestionList?.remove();
+            window.removeEventListener("resize", handleSuggestionAnchorChange);
+            overlay.removeEventListener("scroll", handleSuggestionAnchorChange, true);
+        };
+        activePromptEditor = { overlay, opener, cancelPendingAdd: cleanupPromptEditor };
+        window.addEventListener("resize", handleSuggestionAnchorChange);
+        overlay.addEventListener("scroll", handleSuggestionAnchorChange, true);
         renderTokens();
         if (promptNeedsDeduplication) {
             setAddStatus(`已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`);

@@ -190,7 +190,7 @@ export function formatPromptAssistantTagOption(record) {
     if (!value || normalizePromptAssistantSearchText(name) === normalizePromptAssistantSearchText(value)) {
         return name;
     }
-    return `${name}（${value}）`;
+    return `${value}（${name}）`;
 }
 
 export function movePromptAssistantSuggestionIndex(currentIndex, resultCount, direction) {

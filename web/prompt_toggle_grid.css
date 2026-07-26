@@ -663,11 +663,11 @@
 }
 
 .cpw-prompt-editor__suggestions {
+    position: fixed;
+    z-index: 2;
     box-sizing: border-box;
-    width: 100%;
     max-height: 210px;
     display: flex;
-    flex: 0 0 auto;
     flex-direction: column;
     gap: 2px;
     overflow: auto;
