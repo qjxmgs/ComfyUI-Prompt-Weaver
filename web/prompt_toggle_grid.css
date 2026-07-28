@@ -58,9 +58,9 @@
 }
 
 .cpw-prompt-grid__archive-select {
-    min-width: 110px;
-    max-width: 180px;
-    flex: 1 1 140px;
+    min-width: 74px;
+    max-width: 120px;
+    flex: 1 1 94px;
 }
 
 .cpw-prompt-grid__button,
@@ -100,7 +100,8 @@
     background: var(--comfy-input-bg, #17181a);
 }
 
-.cpw-prompt-grid__archive-save {
+.cpw-prompt-grid__archive-save,
+.cpw-prompt-grid__archive-restore {
     min-width: 48px;
     transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
@@ -542,6 +543,7 @@
 }
 
 .cpw-prompt-editor {
+    position: relative;
     width: min(560px, calc(100vw - 32px));
     max-height: min(70vh, 560px);
     display: flex;
@@ -552,6 +554,14 @@
     color: var(--input-text, var(--fg-color, #e8e8ea));
     background: var(--comfy-menu-bg, #202124);
     box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+.cpw-prompt-editor--positioned {
+    position: fixed;
+    min-width: min(360px, calc(100vw - 32px));
+    min-height: min(240px, calc(100vh - 32px));
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
 }
 
 .cpw-prompt-editor__header,
@@ -566,6 +576,13 @@
     justify-content: space-between;
     gap: 12px;
     border-bottom: 1px solid var(--border-color, #4b4d52);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.cpw-prompt-editor--dragging .cpw-prompt-editor__header {
+    cursor: grabbing;
 }
 
 .cpw-prompt-editor__title {
@@ -600,6 +617,38 @@
     gap: 8px;
     padding: 12px;
     overflow: hidden;
+}
+
+.cpw-prompt-editor__active-count {
+    color: color-mix(in srgb, var(--p-primary-color, #58a6ff) 86%, #fff);
+    font-variant-numeric: tabular-nums;
+}
+
+.cpw-prompt-editor__resize-handle {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    z-index: 3;
+    width: 18px;
+    height: 18px;
+    border: 0;
+    color: color-mix(in srgb, var(--p-primary-color, #58a6ff) 70%, var(--descrip-text, #aaa));
+    background: linear-gradient(
+        135deg,
+        transparent 0 48%,
+        currentColor 49% 55%,
+        transparent 56% 65%,
+        currentColor 66% 72%,
+        transparent 73%
+    );
+    cursor: nwse-resize;
+    touch-action: none;
+    user-select: none;
+}
+
+.cpw-prompt-editor__resize-handle:hover,
+.cpw-prompt-editor--resizing .cpw-prompt-editor__resize-handle {
+    color: var(--p-primary-color, #58a6ff);
 }
 
 .cpw-prompt-editor__tokens {
@@ -775,6 +824,7 @@
 .cpw-prompt-editor__footer {
     justify-content: space-between;
     gap: 10px;
+    padding-right: 30px;
     border-top: 1px solid var(--border-color, #4b4d52);
 }
 
