@@ -8,6 +8,7 @@ import {
     archiveManagerSelectionAvailability,
     buildArchiveExportBundle,
     canQuickSaveArchive,
+    canRestoreArchive,
     configFromArchiveSnapshot,
     defaultArchiveName,
     formatArchiveOptionLabel,
@@ -17,13 +18,18 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260811-selection-gestures";
+} from "./prompt_grid_archives.js?v=20260812-manager-load";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
     mergePromptTokenInput,
     splitPromptTokens,
 } from "./prompt_editor_tokens.js?v=20260811-prompt-add-v2";
+import {
+    clampPromptEditorPosition,
+    countActivePromptTokens,
+    normalizePromptEditorSize,
+} from "./prompt_editor_window.js?v=20260812-resizable-editor";
 import {
     PromptAssistantTagCatalog,
     formatPromptAssistantTagOption,
@@ -62,6 +68,10 @@ const ARCHIVE_SYNC_EVENT = "cpw-prompt-grid-archives-changed";
 const ARCHIVE_CHANNEL_NAME = "prompt-weaver-prompt-grid-archives";
 const MAX_ARCHIVE_IMPORT_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_PROPERTY_KEY = "prompt_weaver_archive_id";
+const PROMPT_EDITOR_SIZE_STORAGE_KEY = "prompt-weaver-prompt-editor-size-v1";
+const PROMPT_EDITOR_VIEWPORT_MARGIN = 16;
+const PROMPT_EDITOR_MIN_WIDTH = 360;
+const PROMPT_EDITOR_MIN_HEIGHT = 240;
 
 const archiveClient = new PromptGridArchiveClient(api);
 const promptAssistantTagCatalog = new PromptAssistantTagCatalog(api, {
@@ -198,6 +208,39 @@ function element(tagName, className, text) {
     if (className) result.className = className;
     if (text != null) result.textContent = text;
     return result;
+}
+
+function promptEditorViewportMetrics() {
+    return {
+        viewportWidth: document.documentElement.clientWidth || window.innerWidth,
+        viewportHeight: document.documentElement.clientHeight || window.innerHeight,
+        margin: PROMPT_EDITOR_VIEWPORT_MARGIN,
+        minWidth: PROMPT_EDITOR_MIN_WIDTH,
+        minHeight: PROMPT_EDITOR_MIN_HEIGHT,
+    };
+}
+
+function readPromptEditorSize() {
+    try {
+        const value = globalThis.localStorage?.getItem(PROMPT_EDITOR_SIZE_STORAGE_KEY);
+        return value ? JSON.parse(value) : null;
+    } catch {
+        return null;
+    }
+}
+
+function persistPromptEditorSize(value) {
+    try {
+        globalThis.localStorage?.setItem(
+            PROMPT_EDITOR_SIZE_STORAGE_KEY,
+            JSON.stringify({
+                width: Math.round(value.width),
+                height: Math.round(value.height),
+            }),
+        );
+    } catch {
+        // The editor remains usable when browser storage is unavailable.
+    }
 }
 
 let activePromptGridSelect = null;
@@ -417,7 +460,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260811-tag-popup-v2", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260812-resizable-editor", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -458,10 +501,21 @@ function createPromptGridWidget(node, inputName, inputData) {
         "cpw-prompt-grid__button cpw-prompt-grid__archive-save",
         "保存",
     );
+    const restoreArchiveButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-restore",
+        "还原",
+    );
     const manageArchivesButton = element("button", "cpw-prompt-grid__button", "存档管理");
     quickSaveArchiveButton.type = "button";
+    restoreArchiveButton.type = "button";
     manageArchivesButton.type = "button";
-    archiveGroup.append(archiveSelect, quickSaveArchiveButton, manageArchivesButton);
+    archiveGroup.append(
+        archiveSelect,
+        quickSaveArchiveButton,
+        restoreArchiveButton,
+        manageArchivesButton,
+    );
 
     const actions = element("div", "cpw-prompt-grid__actions");
     const addButton = element("button", "cpw-prompt-grid__button cpw-prompt-grid__button--primary", "＋ 新增提示词");
@@ -656,6 +710,26 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
     }
 
+    function renderRestoreArchiveButton() {
+        const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
+        const enabled = canRestoreArchive(archive, {
+            dirty: archiveDirty,
+            hasState: Boolean(state),
+            loading: archivesLoading,
+            saving: archiveQuickSaveBusy,
+        });
+        restoreArchiveButton.disabled = !enabled;
+        if (archiveQuickSaveBusy) {
+            restoreArchiveButton.title = "保存完成后才能还原存档";
+        } else if (!archive) {
+            restoreArchiveButton.title = "当前没有可还原的关联存档";
+        } else if (!archiveDirty) {
+            restoreArchiveButton.title = `“${archive.name}”没有需要还原的变更`;
+        } else {
+            restoreArchiveButton.title = `放弃当前变更并还原到“${archive.name}”`;
+        }
+    }
+
     function renderArchiveSelect() {
         const visibleArchives = archives.length
             ? archives
@@ -678,6 +752,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         archiveSelect.disabled = !state || archiveQuickSaveBusy;
         manageArchivesButton.disabled = archiveQuickSaveBusy;
         renderQuickArchiveSaveButton();
+        renderRestoreArchiveButton();
     }
 
     async function quickSaveActiveArchive() {
@@ -888,6 +963,18 @@ function createPromptGridWidget(node, inputName, inputData) {
         applyArchiveNodeSize(archive.snapshot);
         reconcileArchiveSelection();
         if (captureHistory) captureCanvasState();
+    }
+
+    function restoreActiveArchive() {
+        const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
+        if (!canRestoreArchive(archive, {
+            dirty: archiveDirty,
+            hasState: Boolean(state),
+            loading: archivesLoading,
+            saving: archiveQuickSaveBusy,
+        })) return;
+        loadArchive(archive);
+        showArchiveToast("success", "存档已还原", `已恢复到“${archive.name}”。`);
     }
 
     async function requestArchiveLoad(archive) {
@@ -1586,6 +1673,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         renderArchiveManagerList();
     }
 
+    async function loadSelectedArchive() {
+        const manager = activeArchiveManager;
+        const archive = singleSelectedArchiveForManager(manager);
+        if (!manager || !archive || manager.busy || manager.dragSession || manager.renameId) return false;
+        if (archive.id === activeArchiveId && !archiveDirty) return false;
+        return requestArchiveLoad(archive);
+    }
+
     function beginArchiveRename() {
         const manager = activeArchiveManager;
         const archive = singleSelectedArchiveForManager(manager);
@@ -1689,9 +1784,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             dragging: Boolean(manager.dragSession),
             renaming: Boolean(manager.renameId),
             hasState: Boolean(state),
+            loadable: Boolean(archive) && (archive.id !== activeArchiveId || archiveDirty),
         });
         const definitions = [
             ["保存", "将当前网格状态保存到所选存档", availability.save, saveSelectedArchive],
+            ["加载", "加载所选存档", availability.load, loadSelectedArchive],
             [
                 "重命名",
                 archive?.is_default ? "默认存档不能重命名" : "重命名所选存档",
@@ -1820,6 +1917,21 @@ function createPromptGridWidget(node, inputName, inputData) {
                     additive: event.ctrlKey || event.metaKey,
                     range: event.shiftKey,
                 });
+            });
+            row.addEventListener("dblclick", (event) => {
+                if (
+                    event.button !== 0
+                    || event.ctrlKey
+                    || event.metaKey
+                    || event.shiftKey
+                    || event.target.closest?.(".cpw-archive-manager__drag, input, button")
+                    || manager.busy
+                    || manager.dragSession
+                    || manager.renameId
+                ) return;
+                event.preventDefault();
+                if (!selectArchiveManagerArchive(archive.id, { focus: true })) return;
+                void loadSelectedArchive();
             });
             row.addEventListener("selectstart", (event) => {
                 if (event.target.closest?.("input, textarea")) return;
@@ -2376,6 +2488,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         let suggestionResults = [];
         let activeSuggestionIndex = -1;
         let tagCatalogRecords = [];
+        let editorDragSession = null;
+        let editorResizeSession = null;
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
@@ -2383,7 +2497,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         dialog.setAttribute("aria-modal", "true");
 
         const header = element("header", "cpw-prompt-editor__header");
-        const title = element("h2", "cpw-prompt-editor__title", "编辑提示词");
+        const title = element("h2", "cpw-prompt-editor__title");
+        const activeCount = element("span", "cpw-prompt-editor__active-count", "0");
+        activeCount.setAttribute("aria-label", "当前激活 0 个提示词");
+        title.append("编辑提示词（", activeCount, "）");
         title.id = `cpw-prompt-editor-${createId()}`;
         dialog.setAttribute("aria-labelledby", title.id);
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
@@ -2411,7 +2528,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         resetSelectionButton.type = "button";
         confirmButton.type = "button";
         footer.append(resetSelectionButton, confirmButton);
-        dialog.append(header, content, footer);
+        const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
+        resizeHandle.setAttribute("role", "separator");
+        resizeHandle.setAttribute("aria-label", "拖拽调整提示词编辑窗口大小");
+        dialog.append(header, content, footer, resizeHandle);
         overlay.append(dialog);
 
         promptAssistantTagCatalog.load().then((records) => {
@@ -2467,6 +2587,129 @@ function createPromptGridWidget(node, inputName, inputData) {
             }
         };
         const handleSuggestionAnchorChange = () => positionPromptAssistantSuggestions();
+        const applyPromptEditorSize = (size) => {
+            dialog.style.width = `${size.width}px`;
+            dialog.style.height = `${size.height}px`;
+        };
+        const applyPromptEditorPosition = (position) => {
+            dialog.style.left = `${position.left}px`;
+            dialog.style.top = `${position.top}px`;
+        };
+        const initializePromptEditorWindow = () => {
+            const defaultRect = dialog.getBoundingClientRect();
+            const metrics = promptEditorViewportMetrics();
+            const size = normalizePromptEditorSize(readPromptEditorSize(), metrics)
+                ?? normalizePromptEditorSize(defaultRect, metrics);
+            if (!size) return;
+            const position = clampPromptEditorPosition({
+                left: (metrics.viewportWidth - size.width) / 2,
+                top: (metrics.viewportHeight - size.height) / 2,
+                ...size,
+            }, metrics);
+            if (!position) return;
+            dialog.classList.add("cpw-prompt-editor--positioned");
+            applyPromptEditorSize(size);
+            applyPromptEditorPosition(position);
+        };
+        const handlePromptEditorViewportResize = () => {
+            if (!dialog.classList.contains("cpw-prompt-editor--positioned")) return;
+            const metrics = promptEditorViewportMetrics();
+            const rect = dialog.getBoundingClientRect();
+            const size = normalizePromptEditorSize(rect, metrics);
+            if (!size) return;
+            const position = clampPromptEditorPosition({
+                left: rect.left,
+                top: rect.top,
+                ...size,
+            }, metrics);
+            applyPromptEditorSize(size);
+            if (position) applyPromptEditorPosition(position);
+            handleSuggestionAnchorChange();
+        };
+        const beginPromptEditorDrag = (event) => {
+            if (
+                event.button !== 0
+                || editorDragSession
+                || editorResizeSession
+                || event.target.closest?.("button, input, textarea, select")
+            ) return;
+            const rect = dialog.getBoundingClientRect();
+            editorDragSession = {
+                pointerId: event.pointerId,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top,
+                width: rect.width,
+                height: rect.height,
+            };
+            dialog.classList.add("cpw-prompt-editor--dragging");
+            event.preventDefault();
+            header.setPointerCapture(event.pointerId);
+        };
+        const movePromptEditorDrag = (event) => {
+            if (!editorDragSession || event.pointerId !== editorDragSession.pointerId) return;
+            const position = clampPromptEditorPosition({
+                left: event.clientX - editorDragSession.offsetX,
+                top: event.clientY - editorDragSession.offsetY,
+                width: editorDragSession.width,
+                height: editorDragSession.height,
+            }, promptEditorViewportMetrics());
+            if (position) applyPromptEditorPosition(position);
+            handleSuggestionAnchorChange();
+            event.preventDefault();
+        };
+        const endPromptEditorDrag = (event) => {
+            if (!editorDragSession || event.pointerId !== editorDragSession.pointerId) return;
+            const pointerId = editorDragSession.pointerId;
+            editorDragSession = null;
+            dialog.classList.remove("cpw-prompt-editor--dragging");
+            if (header.hasPointerCapture(pointerId)) header.releasePointerCapture(pointerId);
+            event.preventDefault();
+        };
+        const beginPromptEditorResize = (event) => {
+            if (event.button !== 0 || editorDragSession || editorResizeSession) return;
+            const rect = dialog.getBoundingClientRect();
+            editorResizeSession = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                startWidth: rect.width,
+                startHeight: rect.height,
+                left: rect.left,
+                top: rect.top,
+            };
+            dialog.classList.add("cpw-prompt-editor--resizing");
+            event.preventDefault();
+            resizeHandle.setPointerCapture(event.pointerId);
+        };
+        const movePromptEditorResize = (event) => {
+            if (!editorResizeSession || event.pointerId !== editorResizeSession.pointerId) return;
+            const metrics = promptEditorViewportMetrics();
+            const maxWidth = Math.max(1, metrics.viewportWidth - editorResizeSession.left - metrics.margin);
+            const maxHeight = Math.max(1, metrics.viewportHeight - editorResizeSession.top - metrics.margin);
+            const minWidth = Math.min(PROMPT_EDITOR_MIN_WIDTH, maxWidth);
+            const minHeight = Math.min(PROMPT_EDITOR_MIN_HEIGHT, maxHeight);
+            applyPromptEditorSize({
+                width: Math.round(Math.min(
+                    maxWidth,
+                    Math.max(minWidth, editorResizeSession.startWidth + event.clientX - editorResizeSession.startX),
+                )),
+                height: Math.round(Math.min(
+                    maxHeight,
+                    Math.max(minHeight, editorResizeSession.startHeight + event.clientY - editorResizeSession.startY),
+                )),
+            });
+            handleSuggestionAnchorChange();
+            event.preventDefault();
+        };
+        const endPromptEditorResize = (event) => {
+            if (!editorResizeSession || event.pointerId !== editorResizeSession.pointerId) return;
+            const pointerId = editorResizeSession.pointerId;
+            editorResizeSession = null;
+            dialog.classList.remove("cpw-prompt-editor--resizing");
+            if (resizeHandle.hasPointerCapture(pointerId)) resizeHandle.releasePointerCapture(pointerId);
+            persistPromptEditorSize(dialog.getBoundingClientRect());
+            event.preventDefault();
+        };
         const syncActiveSuggestion = () => {
             if (!suggestionList || !addInput) return;
             const options = [...suggestionList.querySelectorAll("[role='option']")];
@@ -2533,7 +2776,13 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderTokens({ focusInput: true });
             setAddStatus(formatAddStatus(result, true));
         }
+        const renderActivePromptCount = () => {
+            const count = countActivePromptTokens(selected);
+            activeCount.textContent = String(count);
+            activeCount.setAttribute("aria-label", `当前激活 ${count} 个提示词`);
+        };
         const renderTokens = ({ focusInput = false, focusAddButton = false } = {}) => {
+            renderActivePromptCount();
             suggestionList?.remove();
             tokenList.replaceChildren();
             addInput = null;
@@ -2557,6 +2806,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                         selected[index] = !selected[index];
                         button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
                         button.setAttribute("aria-pressed", String(selected[index]));
+                        renderActivePromptCount();
                     });
                     tokenList.append(button);
                 }
@@ -2678,12 +2928,22 @@ function createPromptGridWidget(node, inputName, inputData) {
         const cleanupPromptEditor = () => {
             clearAddBlurTimer();
             suggestionList?.remove();
-            window.removeEventListener("resize", handleSuggestionAnchorChange);
+            window.removeEventListener("resize", handlePromptEditorViewportResize);
             overlay.removeEventListener("scroll", handleSuggestionAnchorChange, true);
         };
         activePromptEditor = { overlay, opener, cancelPendingAdd: cleanupPromptEditor };
-        window.addEventListener("resize", handleSuggestionAnchorChange);
+        window.addEventListener("resize", handlePromptEditorViewportResize);
         overlay.addEventListener("scroll", handleSuggestionAnchorChange, true);
+        header.addEventListener("pointerdown", beginPromptEditorDrag);
+        header.addEventListener("pointermove", movePromptEditorDrag);
+        header.addEventListener("pointerup", endPromptEditorDrag);
+        header.addEventListener("pointercancel", endPromptEditorDrag);
+        header.addEventListener("lostpointercapture", endPromptEditorDrag);
+        resizeHandle.addEventListener("pointerdown", beginPromptEditorResize);
+        resizeHandle.addEventListener("pointermove", movePromptEditorResize);
+        resizeHandle.addEventListener("pointerup", endPromptEditorResize);
+        resizeHandle.addEventListener("pointercancel", endPromptEditorResize);
+        resizeHandle.addEventListener("lostpointercapture", endPromptEditorResize);
         renderTokens();
         if (promptNeedsDeduplication) {
             setAddStatus(`已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`);
@@ -2748,6 +3008,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         overlay.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
         document.body.append(overlay);
+        initializePromptEditorWindow();
         queueMicrotask(() => (
             tokenList.querySelector(".cpw-prompt-editor__token")
             ?? addButton
@@ -2911,6 +3172,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
     });
     quickSaveArchiveButton.addEventListener("click", quickSaveActiveArchive);
+    restoreArchiveButton.addEventListener("click", restoreActiveArchive);
     manageArchivesButton.addEventListener("click", openArchiveManager);
     resetButton.addEventListener("click", () => {
         state = createDefaultConfig();

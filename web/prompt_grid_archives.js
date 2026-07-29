@@ -196,7 +196,13 @@ export function applyArchiveManagerSelectionGesture(
 
 export function archiveManagerSelectionAvailability(
     selectedArchives,
-    { busy = false, dragging = false, renaming = false, hasState = true } = {},
+    {
+        busy = false,
+        dragging = false,
+        renaming = false,
+        hasState = true,
+        loadable = true,
+    } = {},
 ) {
     const selection = Array.isArray(selectedArchives) ? selectedArchives : [];
     const locked = busy || dragging || renaming || selection.length === 0;
@@ -206,17 +212,26 @@ export function archiveManagerSelectionAvailability(
     );
     return {
         save: !locked && single && hasState,
+        load: !locked && single && loadable,
         rename: !locked && single && !includesDefault,
         export: !locked,
         delete: !locked && !includesDefault,
     };
 }
 
-export function canQuickSaveArchive(
+function canUseDirtyArchive(
     archive,
     { dirty = false, hasState = true, loading = false, saving = false } = {},
 ) {
     return Boolean(archive && dirty && hasState && !loading && !saving);
+}
+
+export function canQuickSaveArchive(archive, status = {}) {
+    return canUseDirtyArchive(archive, status);
+}
+
+export function canRestoreArchive(archive, status = {}) {
+    return canUseDirtyArchive(archive, status);
 }
 
 export function buildArchiveExportBundle(archives, exportedAt = new Date().toISOString()) {
