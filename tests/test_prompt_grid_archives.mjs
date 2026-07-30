@@ -14,6 +14,7 @@ const {
     archiveManagerSelectionAvailability,
     buildArchiveExportBundle,
     canQuickSaveArchive,
+    canRestoreArchive,
     configFromArchiveSnapshot,
     defaultArchiveName,
     findMatchingArchive,
@@ -208,51 +209,73 @@ test("archive manager actions implement zero, single, and multi-selection rules"
     const defaults = { id: DEFAULT_ARCHIVE_ID, is_default: true };
     assert.deepEqual(archiveManagerSelectionAvailability([]), {
         save: false,
+        load: false,
         rename: false,
         export: false,
         delete: false,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([regular]), {
         save: true,
+        load: true,
         rename: true,
         export: true,
         delete: true,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([defaults]), {
         save: true,
+        load: true,
         rename: false,
         export: true,
         delete: false,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([regular, second]), {
         save: false,
+        load: false,
         rename: false,
         export: true,
         delete: true,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([regular, defaults]), {
         save: false,
+        load: false,
         rename: false,
         export: true,
         delete: false,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([regular], { dragging: true }), {
         save: false,
+        load: false,
         rename: false,
         export: false,
         delete: false,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([regular], { hasState: false }), {
         save: false,
+        load: true,
         rename: true,
         export: true,
         delete: true,
     });
     assert.deepEqual(archiveManagerSelectionAvailability([regular], { renaming: true }), {
         save: false,
+        load: false,
         rename: false,
         export: false,
         delete: false,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular], { busy: true }), {
+        save: false,
+        load: false,
+        rename: false,
+        export: false,
+        delete: false,
+    });
+    assert.deepEqual(archiveManagerSelectionAvailability([regular], { loadable: false }), {
+        save: true,
+        load: false,
+        rename: true,
+        export: true,
+        delete: true,
     });
 });
 
@@ -264,6 +287,48 @@ test("quick archive save is enabled only for an available dirty snapshot", () =>
     assert.equal(canQuickSaveArchive(archive, { dirty: true, hasState: false }), false);
     assert.equal(canQuickSaveArchive(archive, { dirty: true, loading: true }), false);
     assert.equal(canQuickSaveArchive(archive, { dirty: true, saving: true }), false);
+});
+
+test("quick archive restore is enabled only for an available dirty snapshot", () => {
+    const archive = { id: "common" };
+    assert.equal(canRestoreArchive(archive, { dirty: true }), true);
+    assert.equal(canRestoreArchive(archive, { dirty: false }), false);
+    assert.equal(canRestoreArchive(null, { dirty: true }), false);
+    assert.equal(canRestoreArchive(archive, { dirty: true, hasState: false }), false);
+    assert.equal(canRestoreArchive(archive, { dirty: true, loading: true }), false);
+    assert.equal(canRestoreArchive(archive, { dirty: true, saving: true }), false);
+});
+
+test("archive toolbar places restore between save and manager and narrows the selector", async () => {
+    const toolbarSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(
+        toolbarSource,
+        /archiveGroup\.append\(\s*archiveSelect,\s*quickSaveArchiveButton,\s*restoreArchiveButton,\s*manageArchivesButton,/,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__archive-select\s*\{[^}]*max-width:\s*120px;/s,
+    );
+});
+
+test("archive manager places load between save and rename and supports row double-click", async () => {
+    const managerSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    assert.match(
+        managerSource,
+        /\["保存",[^\n]+saveSelectedArchive\],\s*\["加载",[^\n]+loadSelectedArchive\],\s*\[\s*"重命名",/s,
+    );
+    assert.match(managerSource, /row\.addEventListener\("dblclick",/);
+    assert.match(managerSource, /async function loadSelectedArchive\(\)[\s\S]*?return requestArchiveLoad\(archive\);/);
 });
 
 test("export bundle and preview use the stable portable format", () => {
