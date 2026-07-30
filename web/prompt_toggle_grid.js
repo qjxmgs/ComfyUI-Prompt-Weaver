@@ -23,8 +23,10 @@ import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
     mergePromptTokenInput,
+    setAllPromptTokenSelection,
     splitPromptTokens,
-} from "./prompt_editor_tokens.js?v=20260811-prompt-add-v2";
+    togglePromptTokenOnce,
+} from "./prompt_editor_tokens.js?v=20260812-toggle-paint";
 import {
     clampPromptEditorPosition,
     countActivePromptTokens,
@@ -72,6 +74,7 @@ const PROMPT_EDITOR_SIZE_STORAGE_KEY = "prompt-weaver-prompt-editor-size-v1";
 const PROMPT_EDITOR_VIEWPORT_MARGIN = 16;
 const PROMPT_EDITOR_MIN_WIDTH = 360;
 const PROMPT_EDITOR_MIN_HEIGHT = 240;
+const PROMPT_TOKEN_GESTURE_SAMPLE_STEP = 6;
 
 const archiveClient = new PromptGridArchiveClient(api);
 const promptAssistantTagCatalog = new PromptAssistantTagCatalog(api, {
@@ -460,7 +463,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260812-resizable-editor", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260812-toggle-paint", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2490,6 +2493,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         let tagCatalogRecords = [];
         let editorDragSession = null;
         let editorResizeSession = null;
+        let tokenToggleGesture = null;
+        let suppressTokenClick = false;
+        let suppressTokenClickTimer = 0;
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
@@ -2519,15 +2525,21 @@ function createPromptGridWidget(node, inputName, inputData) {
         content.append(tokenList, addStatus);
 
         const footer = element("footer", "cpw-prompt-editor__footer");
-        const resetSelectionButton = element("button", "cpw-prompt-editor__action", "重置");
+        const selectionActions = element("div", "cpw-prompt-editor__selection-actions");
+        const enableAllButton = element("button", "cpw-prompt-editor__action", "全开");
+        const disableAllButton = element("button", "cpw-prompt-editor__action", "全关");
         const confirmButton = element(
             "button",
             "cpw-prompt-editor__action cpw-prompt-editor__action--primary",
             "确认",
         );
-        resetSelectionButton.type = "button";
+        enableAllButton.type = "button";
+        enableAllButton.title = "启用全部提示词";
+        disableAllButton.type = "button";
+        disableAllButton.title = "停用全部提示词";
         confirmButton.type = "button";
-        footer.append(resetSelectionButton, confirmButton);
+        selectionActions.append(enableAllButton, disableAllButton);
+        footer.append(selectionActions, confirmButton);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
         resizeHandle.setAttribute("aria-label", "拖拽调整提示词编辑窗口大小");
@@ -2781,6 +2793,108 @@ function createPromptGridWidget(node, inputName, inputData) {
             activeCount.textContent = String(count);
             activeCount.setAttribute("aria-label", `当前激活 ${count} 个提示词`);
         };
+        const promptTokenIndexFromElement = (target) => {
+            const button = target?.closest?.(".cpw-prompt-editor__token");
+            if (!button || !tokenList.contains(button)) return -1;
+            const index = Number(button.dataset.promptTokenIndex);
+            return Number.isInteger(index) ? index : -1;
+        };
+        const syncPromptTokenButton = (index) => {
+            const button = tokenList.querySelector(
+                `.cpw-prompt-editor__token[data-prompt-token-index="${index}"]`,
+            );
+            if (!button) return;
+            button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
+            button.setAttribute("aria-pressed", String(Boolean(selected[index])));
+        };
+        const togglePromptTokenAt = (index, visitedIndexes = new Set()) => {
+            if (!togglePromptTokenOnce(selected, index, visitedIndexes)) return false;
+            syncPromptTokenButton(index);
+            renderActivePromptCount();
+            return true;
+        };
+        const clearTokenClickSuppressionTimer = () => {
+            if (!suppressTokenClickTimer) return;
+            clearTimeout(suppressTokenClickTimer);
+            suppressTokenClickTimer = 0;
+        };
+        const scheduleTokenClickSuppressionEnd = () => {
+            clearTokenClickSuppressionTimer();
+            suppressTokenClickTimer = setTimeout(() => {
+                suppressTokenClickTimer = 0;
+                suppressTokenClick = false;
+            }, 0);
+        };
+        const tokenAtPoint = (clientX, clientY) => promptTokenIndexFromElement(
+            document.elementFromPoint(clientX, clientY),
+        );
+        const togglePromptTokensAlongSegment = (fromX, fromY, toX, toY, visitedIndexes) => {
+            const distance = Math.hypot(toX - fromX, toY - fromY);
+            const steps = Math.max(1, Math.ceil(distance / PROMPT_TOKEN_GESTURE_SAMPLE_STEP));
+            for (let step = 1; step <= steps; step += 1) {
+                const ratio = step / steps;
+                togglePromptTokenAt(tokenAtPoint(
+                    fromX + (toX - fromX) * ratio,
+                    fromY + (toY - fromY) * ratio,
+                ), visitedIndexes);
+            }
+        };
+        const cleanupPromptTokenToggleGesture = () => {
+            const gesture = tokenToggleGesture;
+            tokenToggleGesture = null;
+            tokenList.classList.remove("cpw-prompt-editor__tokens--toggling");
+            if (gesture && tokenList.hasPointerCapture(gesture.pointerId)) {
+                tokenList.releasePointerCapture(gesture.pointerId);
+            }
+        };
+        const beginPromptTokenToggleGesture = (event) => {
+            if (event.button !== 0 || event.isPrimary === false || tokenToggleGesture) return;
+            const index = promptTokenIndexFromElement(event.target);
+            if (index < 0) return;
+            const visitedIndexes = new Set();
+            if (!togglePromptTokenAt(index, visitedIndexes)) return;
+            clearTokenClickSuppressionTimer();
+            suppressTokenClick = true;
+            tokenToggleGesture = {
+                pointerId: event.pointerId,
+                visitedIndexes,
+                lastX: event.clientX,
+                lastY: event.clientY,
+            };
+            tokenList.classList.add("cpw-prompt-editor__tokens--toggling");
+            event.target.focus?.({ preventScroll: true });
+            event.preventDefault();
+            try {
+                tokenList.setPointerCapture(event.pointerId);
+            } catch {
+                cleanupPromptTokenToggleGesture();
+                scheduleTokenClickSuppressionEnd();
+            }
+        };
+        const movePromptTokenToggleGesture = (event) => {
+            const gesture = tokenToggleGesture;
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            const coalesced = event.getCoalescedEvents?.();
+            const points = coalesced?.length ? coalesced : [event];
+            for (const point of points) {
+                togglePromptTokensAlongSegment(
+                    gesture.lastX,
+                    gesture.lastY,
+                    point.clientX,
+                    point.clientY,
+                    gesture.visitedIndexes,
+                );
+                gesture.lastX = point.clientX;
+                gesture.lastY = point.clientY;
+            }
+            event.preventDefault();
+        };
+        const endPromptTokenToggleGesture = (event) => {
+            if (!tokenToggleGesture || event.pointerId !== tokenToggleGesture.pointerId) return;
+            cleanupPromptTokenToggleGesture();
+            scheduleTokenClickSuppressionEnd();
+            event.preventDefault();
+        };
         const renderTokens = ({ focusInput = false, focusAddButton = false } = {}) => {
             renderActivePromptCount();
             suggestionList?.remove();
@@ -2800,13 +2914,17 @@ function createPromptGridWidget(node, inputName, inputData) {
                     );
                     button.type = "button";
                     button.title = token;
+                    button.dataset.promptTokenIndex = String(index);
                     button.setAttribute("aria-pressed", String(selected[index]));
                     button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
-                    button.addEventListener("click", () => {
-                        selected[index] = !selected[index];
-                        button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
-                        button.setAttribute("aria-pressed", String(selected[index]));
-                        renderActivePromptCount();
+                    button.addEventListener("click", (event) => {
+                        if (suppressTokenClick) {
+                            suppressTokenClick = false;
+                            clearTokenClickSuppressionTimer();
+                            event.preventDefault();
+                            return;
+                        }
+                        togglePromptTokenAt(index);
                     });
                     tokenList.append(button);
                 }
@@ -2925,8 +3043,19 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderTokens({ focusAddButton: true });
         }
 
+        const setAllPromptTokensActive = (active) => {
+            clearAddBlurTimer();
+            if (adding && addInput) commitAddInput({ render: false });
+            selected = setAllPromptTokenSelection(selected, active);
+            renderTokens();
+            setAddStatus(tokens.length ? (active ? "已全部启用。" : "已全部停用。") : "");
+        };
+
         const cleanupPromptEditor = () => {
             clearAddBlurTimer();
+            clearTokenClickSuppressionTimer();
+            suppressTokenClick = false;
+            cleanupPromptTokenToggleGesture();
             suggestionList?.remove();
             window.removeEventListener("resize", handlePromptEditorViewportResize);
             overlay.removeEventListener("scroll", handleSuggestionAnchorChange, true);
@@ -2944,6 +3073,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         resizeHandle.addEventListener("pointerup", endPromptEditorResize);
         resizeHandle.addEventListener("pointercancel", endPromptEditorResize);
         resizeHandle.addEventListener("lostpointercapture", endPromptEditorResize);
+        tokenList.addEventListener("pointerdown", beginPromptTokenToggleGesture);
+        tokenList.addEventListener("pointermove", movePromptTokenToggleGesture);
+        tokenList.addEventListener("pointerup", endPromptTokenToggleGesture);
+        tokenList.addEventListener("pointercancel", endPromptTokenToggleGesture);
+        tokenList.addEventListener("lostpointercapture", endPromptTokenToggleGesture);
         renderTokens();
         if (promptNeedsDeduplication) {
             setAddStatus(`已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`);
@@ -2952,17 +3086,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         overlay.addEventListener("click", (event) => {
             if (event.target === overlay) closePromptEditor();
         });
-        resetSelectionButton.addEventListener("click", () => {
-            clearAddBlurTimer();
-            tokens = initialTokens.slice();
-            selected = initialSelected.slice();
-            adding = false;
-            addDraft = "";
-            setAddStatus(promptNeedsDeduplication
-                ? `已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`
-                : "");
-            renderTokens();
-        });
+        enableAllButton.addEventListener("click", () => setAllPromptTokensActive(true));
+        disableAllButton.addEventListener("click", () => setAllPromptTokensActive(false));
         confirmButton.addEventListener("click", () => {
             clearAddBlurTimer();
             const pendingInput = addDraft || (adding && addInput ? addInput.value : "");

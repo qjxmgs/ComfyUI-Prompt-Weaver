@@ -780,7 +780,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
+    touch-action: none;
+    user-select: none;
     transition: opacity 100ms ease, border-color 100ms ease, background 100ms ease;
+}
+
+.cpw-prompt-editor__tokens--toggling,
+.cpw-prompt-editor__tokens--toggling .cpw-prompt-editor__token {
+    cursor: crosshair;
+    user-select: none;
 }
 
 .cpw-prompt-editor__token--color-1 {
@@ -826,6 +834,13 @@
     gap: 10px;
     padding-right: 30px;
     border-top: 1px solid var(--border-color, #4b4d52);
+}
+
+.cpw-prompt-editor__selection-actions {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .cpw-prompt-editor__action {

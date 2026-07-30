@@ -12,7 +12,9 @@ const {
     confirmPromptEditorDraft,
     dedupePromptTokens,
     mergePromptTokenInput,
+    setAllPromptTokenSelection,
     splitPromptTokens,
+    togglePromptTokenOnce,
 } = await import(moduleUrl);
 
 test("splits English and Chinese commas plus newlines at top level", () => {
@@ -128,4 +130,42 @@ test("confirmation commits pending input without requiring Enter or blur", () =>
         ),
         "masterpiece, blue eyes, red hair",
     );
+});
+
+test("bulk selection enables or disables every current prompt token", () => {
+    assert.deepEqual(setAllPromptTokenSelection([true, false, true], true), [true, true, true]);
+    assert.deepEqual(setAllPromptTokenSelection([true, false, true], false), [false, false, false]);
+    assert.deepEqual(setAllPromptTokenSelection([], true), []);
+    assert.deepEqual(setAllPromptTokenSelection(null, false), []);
+});
+
+test("toggle gestures invert each valid token at most once", () => {
+    const selected = [true, false, true];
+    const visitedIndexes = new Set();
+    assert.equal(togglePromptTokenOnce(selected, 0, visitedIndexes), true);
+    assert.deepEqual(selected, [false, false, true]);
+    assert.equal(togglePromptTokenOnce(selected, 1, visitedIndexes), true);
+    assert.deepEqual(selected, [false, true, true]);
+    assert.equal(togglePromptTokenOnce(selected, 0, visitedIndexes), false);
+    assert.deepEqual(selected, [false, true, true]);
+    assert.equal(togglePromptTokenOnce(selected, -1, visitedIndexes), false);
+    assert.equal(togglePromptTokenOnce(selected, 3, visitedIndexes), false);
+});
+
+test("prompt editor UI exposes bulk controls and pointer toggle painting", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /cpw-prompt-editor__action", "全开"/);
+    assert.match(uiSource, /cpw-prompt-editor__action", "全关"/);
+    assert.doesNotMatch(uiSource, /resetSelectionButton/);
+    assert.match(uiSource, /tokenList\.setPointerCapture\(event\.pointerId\)/);
+    assert.match(uiSource, /tokenList\.addEventListener\("pointermove", movePromptTokenToggleGesture\)/);
+    assert.match(uiSource, /suppressTokenClick = true/);
+    assert.match(styleSource, /\.cpw-prompt-editor__tokens--toggling/);
 });

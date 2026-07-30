@@ -103,6 +103,25 @@ export function dedupePromptTokens(tokens) {
     return result;
 }
 
+export function setAllPromptTokenSelection(selected, active) {
+    if (!Array.isArray(selected)) return [];
+    return selected.map(() => Boolean(active));
+}
+
+export function togglePromptTokenOnce(selected, index, visitedIndexes) {
+    if (
+        !Array.isArray(selected)
+        || !Number.isInteger(index)
+        || index < 0
+        || index >= selected.length
+        || !(visitedIndexes instanceof Set)
+        || visitedIndexes.has(index)
+    ) return false;
+    visitedIndexes.add(index);
+    selected[index] = !Boolean(selected[index]);
+    return true;
+}
+
 export function mergePromptTokenInput(tokens, selected, input) {
     const nextTokens = Array.isArray(tokens) ? [...tokens] : [];
     const nextSelected = nextTokens.map((_token, index) => Boolean(selected?.[index]));
