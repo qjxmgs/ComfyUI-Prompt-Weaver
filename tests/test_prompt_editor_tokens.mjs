@@ -12,6 +12,7 @@ const {
     confirmPromptEditorDraft,
     dedupePromptTokens,
     mergePromptTokenInput,
+    promptSelectionFromFreeText,
     setAllPromptTokenSelection,
     splitPromptTokens,
     togglePromptTokenOnce,
@@ -54,6 +55,19 @@ test("deduplicates all editor tokens case-insensitively and preserves the first 
         dedupePromptTokens(["masterpiece", "MasterPiece", " BLUE EYES ", "blue eyes", "夜景", "夜景"]),
         ["masterpiece", "BLUE EYES", "夜景"],
     );
+});
+
+test("parses free text into unique enabled tokens without breaking protected syntax", () => {
+    assert.deepEqual(
+        promptSelectionFromFreeText(
+            'one, (red, blue:1.2)，ONE\n"quoted, value", escaped\\, comma, 新标签',
+        ),
+        {
+            tokens: ["one", "(red, blue:1.2)", '"quoted, value"', "escaped\\, comma", "新标签"],
+            selected: [true, true, true, true, true],
+        },
+    );
+    assert.deepEqual(promptSelectionFromFreeText(" ,，\r\n "), { tokens: [], selected: [] });
 });
 
 test("merges split input, appends unique tokens, and reactivates inactive duplicates", () => {
@@ -115,6 +129,19 @@ test("forced rebuild writes a deduplicated token list even when selection is unc
     );
 });
 
+test("forced rebuild preserves an equal-count free-text replacement", () => {
+    assert.equal(
+        buildPromptFromSelection(
+            "one, two",
+            ["one", "three"],
+            [true, true],
+            [true, true],
+            { forceRebuild: true },
+        ),
+        "one, three",
+    );
+});
+
 test("confirmation commits pending input without requiring Enter or blur", () => {
     assert.equal(
         confirmPromptEditorDraft("", [], [], [], "one, two, ONE"),
@@ -168,4 +195,29 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
     assert.match(uiSource, /tokenList\.addEventListener\("pointermove", movePromptTokenToggleGesture\)/);
     assert.match(uiSource, /suppressTokenClick = true/);
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--toggling/);
+});
+
+test("prompt editor UI exposes non-persistent free mode with raw confirmation", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /freeModeInput\.checked = false/);
+    assert.match(uiSource, /cpw-prompt-editor__free-mode-text", "自由模式"/);
+    assert.match(uiSource, /cpw-prompt-editor__free-text/);
+    assert.match(uiSource, /enableAllButton\.disabled = freeMode/);
+    assert.match(uiSource, /disableAllButton\.disabled = freeMode/);
+    assert.match(uiSource, /freeModeInput\.addEventListener\("change"/);
+    assert.match(uiSource, /const nextPrompt = freeMode\s*\? \(freeTextArea\?\.value \?\? freePromptText\)/);
+    assert.match(uiSource, /promptRequiresRebuild = true/);
+    assert.match(uiSource, /\.cpw-prompt-editor__free-mode, button, input, textarea, select/);
+    assert.doesNotMatch(uiSource, /event\.target === overlay\) closePromptEditor/);
+    assert.match(styleSource, /\.cpw-prompt-editor__free-mode-input:checked/);
+    assert.match(styleSource, /\.cpw-prompt-editor__tokens--free/);
+    assert.match(styleSource, /\.cpw-prompt-editor__free-text/);
+    assert.match(styleSource, /\.cpw-prompt-editor__action:disabled/);
 });

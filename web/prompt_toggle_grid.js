@@ -23,10 +23,11 @@ import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
     mergePromptTokenInput,
+    promptSelectionFromFreeText,
     setAllPromptTokenSelection,
     splitPromptTokens,
     togglePromptTokenOnce,
-} from "./prompt_editor_tokens.js?v=20260812-toggle-paint";
+} from "./prompt_editor_tokens.js?v=20260812-free-mode";
 import {
     clampPromptEditorPosition,
     countActivePromptTokens,
@@ -463,7 +464,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260812-toggle-paint", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260812-free-mode-font-18", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2496,6 +2497,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         let tokenToggleGesture = null;
         let suppressTokenClick = false;
         let suppressTokenClickTimer = 0;
+        let freeMode = false;
+        let freePromptText = "";
+        let freeTextArea = null;
+        let promptRequiresRebuild = false;
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
@@ -2509,11 +2514,21 @@ function createPromptGridWidget(node, inputName, inputData) {
         title.append("编辑提示词（", activeCount, "）");
         title.id = `cpw-prompt-editor-${createId()}`;
         dialog.setAttribute("aria-labelledby", title.id);
+        const headerMain = element("div", "cpw-prompt-editor__header-main");
+        const freeModeLabel = element("label", "cpw-prompt-editor__free-mode");
+        const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
+        freeModeInput.type = "checkbox";
+        freeModeInput.checked = false;
+        freeModeInput.setAttribute("aria-label", "自由模式");
+        const freeModeIndicator = element("span", "cpw-prompt-editor__free-mode-indicator");
+        const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", "自由模式");
+        freeModeLabel.append(freeModeInput, freeModeIndicator, freeModeText);
+        headerMain.append(title, freeModeLabel);
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
         closeButton.title = "关闭且不保存";
         closeButton.setAttribute("aria-label", "关闭提示词编辑窗口且不保存");
-        header.append(title, closeButton);
+        header.append(headerMain, closeButton);
 
         const content = element("div", "cpw-prompt-editor__content");
         const tokenList = element("div", "cpw-prompt-editor__tokens");
@@ -2643,7 +2658,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 event.button !== 0
                 || editorDragSession
                 || editorResizeSession
-                || event.target.closest?.("button, input, textarea, select")
+                || event.target.closest?.(".cpw-prompt-editor__free-mode, button, input, textarea, select")
             ) return;
             const rect = dialog.getBoundingClientRect();
             editorDragSession = {
@@ -2789,7 +2804,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             setAddStatus(formatAddStatus(result, true));
         }
         const renderActivePromptCount = () => {
-            const count = countActivePromptTokens(selected);
+            const count = freeMode
+                ? promptSelectionFromFreeText(freePromptText).tokens.length
+                : countActivePromptTokens(selected);
             activeCount.textContent = String(count);
             activeCount.setAttribute("aria-label", `当前激活 ${count} 个提示词`);
         };
@@ -2895,15 +2912,46 @@ function createPromptGridWidget(node, inputName, inputData) {
             scheduleTokenClickSuppressionEnd();
             event.preventDefault();
         };
-        const renderTokens = ({ focusInput = false, focusAddButton = false } = {}) => {
+        const renderTokens = ({
+            focusInput = false,
+            focusAddButton = false,
+            focusFreeText = false,
+        } = {}) => {
             renderActivePromptCount();
             suggestionList?.remove();
             tokenList.replaceChildren();
             addInput = null;
             addButton = null;
+            freeTextArea = null;
             suggestionList = null;
             suggestionResults = [];
             activeSuggestionIndex = -1;
+            enableAllButton.disabled = freeMode;
+            disableAllButton.disabled = freeMode;
+            tokenList.classList.toggle("cpw-prompt-editor__tokens--free", freeMode);
+            tokenList.setAttribute("aria-label", freeMode ? "自由模式提示词文本" : "提示词标签");
+
+            if (freeMode) {
+                freeTextArea = element("textarea", "cpw-prompt-editor__free-text");
+                freeTextArea.value = freePromptText;
+                freeTextArea.placeholder = "输入完整提示词";
+                freeTextArea.spellcheck = false;
+                freeTextArea.setAttribute("aria-label", "自由模式提示词文本");
+                freeTextArea.addEventListener("input", (event) => {
+                    freePromptText = event.currentTarget.value;
+                    renderActivePromptCount();
+                });
+                tokenList.append(freeTextArea);
+                if (focusFreeText) {
+                    queueMicrotask(() => {
+                        freeTextArea?.focus();
+                        const cursorPosition = freeTextArea?.value.length ?? 0;
+                        freeTextArea?.setSelectionRange(cursorPosition, cursorPosition);
+                    });
+                }
+                return;
+            }
+
             if (tokens.length) {
                 for (let index = 0; index < tokens.length; index += 1) {
                     const token = tokens[index];
@@ -3043,7 +3091,51 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderTokens({ focusAddButton: true });
         }
 
+        const promptForFreeMode = () => {
+            clearAddBlurTimer();
+            if (adding && addInput) commitAddInput({ render: false });
+            const pendingInput = adding ? addDraft : "";
+            return confirmPromptEditorDraft(
+                originalPrompt,
+                tokens,
+                selected,
+                initialSelected,
+                pendingInput,
+                { forceRebuild: promptNeedsDeduplication || promptRequiresRebuild },
+            );
+        };
+
+        const setFreeModeEnabled = (enabled) => {
+            if (enabled === freeMode) return;
+            cleanupPromptTokenToggleGesture();
+            clearTokenClickSuppressionTimer();
+            suppressTokenClick = false;
+            suggestionList?.remove();
+            setAddStatus("");
+
+            if (enabled) {
+                freePromptText = promptForFreeMode();
+                freeMode = true;
+                freeModeInput.checked = true;
+                renderTokens({ focusFreeText: true });
+                return;
+            }
+
+            freePromptText = freeTextArea?.value ?? freePromptText;
+            const nextState = promptSelectionFromFreeText(freePromptText);
+            tokens = nextState.tokens;
+            selected = nextState.selected;
+            adding = false;
+            addDraft = "";
+            freeMode = false;
+            freeModeInput.checked = false;
+            promptRequiresRebuild = true;
+            renderTokens();
+            setAddStatus(tokens.length ? `已格式化为 ${tokens.length} 个提示词。` : "");
+        };
+
         const setAllPromptTokensActive = (active) => {
+            if (freeMode) return;
             clearAddBlurTimer();
             if (adding && addInput) commitAddInput({ render: false });
             selected = setAllPromptTokenSelection(selected, active);
@@ -3083,22 +3175,21 @@ function createPromptGridWidget(node, inputName, inputData) {
             setAddStatus(`已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`);
         }
         closeButton.addEventListener("click", () => closePromptEditor());
-        overlay.addEventListener("click", (event) => {
-            if (event.target === overlay) closePromptEditor();
-        });
         enableAllButton.addEventListener("click", () => setAllPromptTokensActive(true));
         disableAllButton.addEventListener("click", () => setAllPromptTokensActive(false));
+        freeModeInput.addEventListener("change", () => setFreeModeEnabled(freeModeInput.checked));
         confirmButton.addEventListener("click", () => {
             clearAddBlurTimer();
-            const pendingInput = addDraft || (adding && addInput ? addInput.value : "");
-            const nextPrompt = confirmPromptEditorDraft(
-                originalPrompt,
-                tokens,
-                selected,
-                initialSelected,
-                pendingInput,
-                { forceRebuild: promptNeedsDeduplication },
-            );
+            const nextPrompt = freeMode
+                ? (freeTextArea?.value ?? freePromptText)
+                : confirmPromptEditorDraft(
+                    originalPrompt,
+                    tokens,
+                    selected,
+                    initialSelected,
+                    addDraft || (adding && addInput ? addInput.value : ""),
+                    { forceRebuild: promptNeedsDeduplication || promptRequiresRebuild },
+                );
             closePromptEditor();
             if (nextPrompt === originalPrompt) return;
             promptInput.value = nextPrompt;

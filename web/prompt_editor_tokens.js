@@ -103,6 +103,14 @@ export function dedupePromptTokens(tokens) {
     return result;
 }
 
+export function promptSelectionFromFreeText(value) {
+    const tokens = dedupePromptTokens(splitPromptTokens(value));
+    return {
+        tokens,
+        selected: tokens.map(() => true),
+    };
+}
+
 export function setAllPromptTokenSelection(selected, active) {
     if (!Array.isArray(selected)) return [];
     return selected.map(() => Boolean(active));
