@@ -31,8 +31,9 @@ import {
 import {
     clampPromptEditorPosition,
     countActivePromptTokens,
+    normalizePromptEditorFontSize,
     normalizePromptEditorSize,
-} from "./prompt_editor_window.js?v=20260812-resizable-editor";
+} from "./prompt_editor_window.js?v=20260812-font-size-slider-12-30";
 import {
     PromptAssistantTagCatalog,
     formatPromptAssistantTagOption,
@@ -72,9 +73,13 @@ const ARCHIVE_CHANNEL_NAME = "prompt-weaver-prompt-grid-archives";
 const MAX_ARCHIVE_IMPORT_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_PROPERTY_KEY = "prompt_weaver_archive_id";
 const PROMPT_EDITOR_SIZE_STORAGE_KEY = "prompt-weaver-prompt-editor-size-v1";
+const PROMPT_EDITOR_FONT_SIZE_STORAGE_KEY = "prompt-weaver-prompt-editor-font-size-v1";
 const PROMPT_EDITOR_VIEWPORT_MARGIN = 16;
 const PROMPT_EDITOR_MIN_WIDTH = 360;
 const PROMPT_EDITOR_MIN_HEIGHT = 240;
+const PROMPT_EDITOR_DEFAULT_FONT_SIZE = 15;
+const PROMPT_EDITOR_MIN_FONT_SIZE = 12;
+const PROMPT_EDITOR_MAX_FONT_SIZE = 30;
 const PROMPT_TOKEN_GESTURE_SAMPLE_STEP = 6;
 
 const archiveClient = new PromptGridArchiveClient(api);
@@ -241,6 +246,35 @@ function persistPromptEditorSize(value) {
                 width: Math.round(value.width),
                 height: Math.round(value.height),
             }),
+        );
+    } catch {
+        // The editor remains usable when browser storage is unavailable.
+    }
+}
+
+function normalizeStoredPromptEditorFontSize(value) {
+    return normalizePromptEditorFontSize(value, {
+        minimum: PROMPT_EDITOR_MIN_FONT_SIZE,
+        maximum: PROMPT_EDITOR_MAX_FONT_SIZE,
+        fallback: PROMPT_EDITOR_DEFAULT_FONT_SIZE,
+    });
+}
+
+function readPromptEditorFontSize() {
+    try {
+        return normalizeStoredPromptEditorFontSize(
+            globalThis.localStorage?.getItem(PROMPT_EDITOR_FONT_SIZE_STORAGE_KEY),
+        );
+    } catch {
+        return PROMPT_EDITOR_DEFAULT_FONT_SIZE;
+    }
+}
+
+function persistPromptEditorFontSize(value) {
+    try {
+        globalThis.localStorage?.setItem(
+            PROMPT_EDITOR_FONT_SIZE_STORAGE_KEY,
+            String(normalizeStoredPromptEditorFontSize(value)),
         );
     } catch {
         // The editor remains usable when browser storage is unavailable.
@@ -464,7 +498,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260812-free-mode-font-18", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260812-font-size-slider-12-30", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2501,11 +2535,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         let freePromptText = "";
         let freeTextArea = null;
         let promptRequiresRebuild = false;
+        let promptFontSize = readPromptEditorFontSize();
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
         dialog.setAttribute("role", "dialog");
         dialog.setAttribute("aria-modal", "true");
+        dialog.style.setProperty("--cpw-prompt-editor-font-size", `${promptFontSize}px`);
 
         const header = element("header", "cpw-prompt-editor__header");
         const title = element("h2", "cpw-prompt-editor__title");
@@ -2523,7 +2559,24 @@ function createPromptGridWidget(node, inputName, inputData) {
         const freeModeIndicator = element("span", "cpw-prompt-editor__free-mode-indicator");
         const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", "自由模式");
         freeModeLabel.append(freeModeInput, freeModeIndicator, freeModeText);
-        headerMain.append(title, freeModeLabel);
+        const fontSizeControl = element("div", "cpw-prompt-editor__font-size-control");
+        const fontSizeInput = element("input", "cpw-prompt-editor__font-size-input");
+        fontSizeInput.type = "range";
+        fontSizeInput.min = String(PROMPT_EDITOR_MIN_FONT_SIZE);
+        fontSizeInput.max = String(PROMPT_EDITOR_MAX_FONT_SIZE);
+        fontSizeInput.step = "1";
+        fontSizeInput.value = String(promptFontSize);
+        fontSizeInput.id = `cpw-prompt-editor-font-size-${createId()}`;
+        fontSizeInput.setAttribute("aria-label", "提示词字号");
+        fontSizeInput.setAttribute("aria-valuetext", `${promptFontSize} 像素`);
+        const fontSizeValue = element(
+            "output",
+            "cpw-prompt-editor__font-size-value",
+            `${promptFontSize}px`,
+        );
+        fontSizeValue.setAttribute("for", fontSizeInput.id);
+        fontSizeControl.append(fontSizeInput, fontSizeValue);
+        headerMain.append(title, freeModeLabel, fontSizeControl);
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
         closeButton.title = "关闭且不保存";
@@ -2560,6 +2613,15 @@ function createPromptGridWidget(node, inputName, inputData) {
         resizeHandle.setAttribute("aria-label", "拖拽调整提示词编辑窗口大小");
         dialog.append(header, content, footer, resizeHandle);
         overlay.append(dialog);
+
+        fontSizeInput.addEventListener("input", (event) => {
+            promptFontSize = normalizeStoredPromptEditorFontSize(event.currentTarget.value);
+            fontSizeInput.value = String(promptFontSize);
+            fontSizeInput.setAttribute("aria-valuetext", `${promptFontSize} 像素`);
+            fontSizeValue.textContent = `${promptFontSize}px`;
+            dialog.style.setProperty("--cpw-prompt-editor-font-size", `${promptFontSize}px`);
+            persistPromptEditorFontSize(promptFontSize);
+        });
 
         promptAssistantTagCatalog.load().then((records) => {
             tagCatalogRecords = records;
@@ -2658,7 +2720,9 @@ function createPromptGridWidget(node, inputName, inputData) {
                 event.button !== 0
                 || editorDragSession
                 || editorResizeSession
-                || event.target.closest?.(".cpw-prompt-editor__free-mode, button, input, textarea, select")
+                || event.target.closest?.(
+                    ".cpw-prompt-editor__free-mode, .cpw-prompt-editor__font-size-control, button, input, textarea, select",
+                )
             ) return;
             const rect = dialog.getBoundingClientRect();
             editorDragSession = {

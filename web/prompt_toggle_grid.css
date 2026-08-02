@@ -590,11 +590,12 @@
     display: flex;
     flex: 1 1 auto;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
 }
 
 .cpw-prompt-editor__title {
     min-width: 0;
+    flex: 0 1 auto;
     margin: 0;
     font: 600 15px/1.4 Inter, system-ui, sans-serif;
 }
@@ -655,6 +656,36 @@
 .cpw-prompt-editor__free-mode-input:focus-visible + .cpw-prompt-editor__free-mode-indicator {
     outline: 2px solid var(--p-primary-color, #58a6ff);
     outline-offset: 2px;
+}
+
+.cpw-prompt-editor__font-size-control {
+    min-width: 96px;
+    max-width: 160px;
+    display: flex;
+    flex: 1 1 130px;
+    align-items: center;
+    gap: 6px;
+    cursor: default;
+    touch-action: manipulation;
+    user-select: none;
+}
+
+.cpw-prompt-editor__font-size-input {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 auto;
+    margin: 0;
+    accent-color: var(--p-primary-color, #58a6ff);
+    cursor: pointer;
+}
+
+.cpw-prompt-editor__font-size-value {
+    min-width: 34px;
+    flex: 0 0 34px;
+    color: var(--descrip-text, #aaa);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
 }
 
 .cpw-prompt-editor__close {
@@ -750,7 +781,7 @@
     color: var(--input-text, var(--fg-color, #e8e8ea));
     background: var(--comfy-input-bg, #17181a);
     font: inherit;
-    font-size: 18px;
+    font-size: var(--cpw-prompt-editor-font-size, 15px);
     line-height: 1.55;
     overflow: auto;
     resize: none;
@@ -875,6 +906,8 @@
     color: color-mix(in srgb, var(--cpw-token-color) 78%, var(--input-text, #fff));
     background: color-mix(in srgb, var(--cpw-token-color) 15%, var(--comfy-input-bg, #17181a));
     font: inherit;
+    font-size: var(--cpw-prompt-editor-font-size, 15px);
+    line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
@@ -970,6 +1003,7 @@
 }
 
 .cpw-prompt-editor__close:focus-visible,
+.cpw-prompt-editor__font-size-input:focus-visible,
 .cpw-prompt-editor__token:focus-visible,
 .cpw-prompt-editor__add:focus-visible,
 .cpw-prompt-editor__action:focus-visible,

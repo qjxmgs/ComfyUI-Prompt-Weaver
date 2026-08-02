@@ -214,7 +214,10 @@ test("prompt editor UI exposes non-persistent free mode with raw confirmation", 
     assert.match(uiSource, /freeModeInput\.addEventListener\("change"/);
     assert.match(uiSource, /const nextPrompt = freeMode\s*\? \(freeTextArea\?\.value \?\? freePromptText\)/);
     assert.match(uiSource, /promptRequiresRebuild = true/);
-    assert.match(uiSource, /\.cpw-prompt-editor__free-mode, button, input, textarea, select/);
+    assert.match(
+        uiSource,
+        /\.cpw-prompt-editor__free-mode, \.cpw-prompt-editor__font-size-control, button, input, textarea, select/,
+    );
     assert.doesNotMatch(uiSource, /event\.target === overlay\) closePromptEditor/);
     assert.match(styleSource, /\.cpw-prompt-editor__free-mode-input:checked/);
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--free/);

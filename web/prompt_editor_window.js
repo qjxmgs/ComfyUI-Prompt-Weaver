@@ -12,6 +12,19 @@ export function countActivePromptTokens(selected) {
     return selected.reduce((count, active) => count + (active === true ? 1 : 0), 0);
 }
 
+export function normalizePromptEditorFontSize(
+    value,
+    {
+        minimum = 12,
+        maximum = 30,
+        fallback = 15,
+    } = {},
+) {
+    const number = finiteNumber(value);
+    const fallbackNumber = finiteNumber(fallback) ?? 15;
+    return Math.round(clamp(number ?? fallbackNumber, minimum, maximum));
+}
+
 export function normalizePromptEditorSize(
     value,
     {

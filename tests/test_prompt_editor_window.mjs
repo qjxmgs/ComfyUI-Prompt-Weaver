@@ -10,6 +10,7 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toStr
 const {
     clampPromptEditorPosition,
     countActivePromptTokens,
+    normalizePromptEditorFontSize,
     normalizePromptEditorSize,
 } = await import(moduleUrl);
 
@@ -17,6 +18,17 @@ test("counts only explicitly active prompt tokens", () => {
     assert.equal(countActivePromptTokens([true, false, true, true]), 3);
     assert.equal(countActivePromptTokens([1, true, null, "true"]), 1);
     assert.equal(countActivePromptTokens(null), 0);
+});
+
+test("normalizes prompt editor font size to 12-30 integer limits with a 15px fallback", () => {
+    assert.equal(normalizePromptEditorFontSize(undefined), 15);
+    assert.equal(normalizePromptEditorFontSize("invalid"), 15);
+    assert.equal(normalizePromptEditorFontSize(12), 12);
+    assert.equal(normalizePromptEditorFontSize(15), 15);
+    assert.equal(normalizePromptEditorFontSize(30), 30);
+    assert.equal(normalizePromptEditorFontSize(8), 12);
+    assert.equal(normalizePromptEditorFontSize(80), 30);
+    assert.equal(normalizePromptEditorFontSize(24.6), 25);
 });
 
 test("normalizes stored editor size to minimum and viewport bounds", () => {
@@ -62,6 +74,18 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /header\.addEventListener\("pointerdown", beginPromptEditorDrag\)/);
     assert.match(uiSource, /resizeHandle\.addEventListener\("pointerdown", beginPromptEditorResize\)/);
     assert.match(uiSource, /localStorage\?\.setItem\([\s\S]*?PROMPT_EDITOR_SIZE_STORAGE_KEY/);
+    assert.match(uiSource, /PROMPT_EDITOR_FONT_SIZE_STORAGE_KEY/);
+    assert.match(uiSource, /fontSizeInput\.type = "range"/);
+    assert.match(uiSource, /fontSizeInput\.min = String\(PROMPT_EDITOR_MIN_FONT_SIZE\)/);
+    assert.match(uiSource, /fontSizeInput\.max = String\(PROMPT_EDITOR_MAX_FONT_SIZE\)/);
+    assert.match(uiSource, /fontSizeInput\.step = "1"/);
+    assert.match(uiSource, /PROMPT_EDITOR_MIN_FONT_SIZE = 12/);
+    assert.match(uiSource, /PROMPT_EDITOR_MAX_FONT_SIZE = 30/);
+    assert.match(uiSource, /persistPromptEditorFontSize\(promptFontSize\)/);
+    assert.match(uiSource, /--cpw-prompt-editor-font-size/);
+    assert.match(uiSource, /\.cpw-prompt-editor__font-size-control, button/);
     assert.match(styleSource, /\.cpw-prompt-editor__active-count\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__resize-handle\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-editor__font-size-control\s*\{/);
+    assert.match(styleSource, /font-size: var\(--cpw-prompt-editor-font-size, 15px\)/);
 });
