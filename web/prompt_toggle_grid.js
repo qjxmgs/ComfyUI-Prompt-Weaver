@@ -3,6 +3,7 @@ import { api } from "../../scripts/api.js";
 import {
     DEFAULT_ARCHIVE_ID,
     DEFAULT_ARCHIVE_NAME,
+    PROMPT_GRID_ITEM_COLORS,
     PromptGridArchiveClient,
     applyArchiveManagerSelectionGesture,
     archiveManagerSelectionAvailability,
@@ -14,11 +15,12 @@ import {
     formatArchiveOptionLabel,
     normalizeArchiveNodeSize,
     normalizeArchiveManagerSelection,
+    normalizePromptGridItemColor,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260812-manager-load";
+} from "./prompt_grid_archives.js?v=20260812-item-context-menu-pink";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -47,8 +49,9 @@ import {
     computeInsertionIndex,
     edgeScrollVelocity,
     findDropTarget,
+    movePromptGridItemToEdge,
     resolveImmediateInsertionSide,
-} from "./prompt_grid_reorder.js";
+} from "./prompt_grid_reorder.js?v=20260812-item-context-menu";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -197,12 +200,17 @@ function normalizeConfigValue(value) {
         if (usedIds.has(id)) throw configError(`items[${index}].id 与其他卡片重复`);
         if (id !== item.id) normalized = true;
         usedIds.add(id);
+        const hasColor = Object.prototype.hasOwnProperty.call(item, "color");
+        const color = normalizePromptGridItemColor(item.color);
+        if (hasColor && !color) normalized = true;
+        const { color: _discardedColor, ...itemWithoutColor } = item;
         return {
-            ...item,
+            ...itemWithoutColor,
             id,
             enabled: hasEnabled ? item.enabled : false,
             title: typeof item.title === "string" ? item.title : `提示词 ${index + 1}`,
             prompt: hasPrompt ? item.prompt : "",
+            ...(color ? { color } : {}),
         };
     });
     const state = { ...raw, version: CONFIG_VERSION, columns, items };
@@ -498,7 +506,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260812-font-size-slider-12-30", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260812-item-context-menu", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -582,6 +590,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let dragSession = null;
     let dragFrame = 0;
     let activePromptEditor = null;
+    let activeItemContextMenu = null;
     let activeArchiveManager = null;
     let activeArchiveConfirmation = null;
     let archives = [];
@@ -2116,6 +2125,182 @@ function createPromptGridWidget(node, inputName, inputData) {
         commit(false, captureHistory);
     }
 
+    function applyCardColor(card, colorValue) {
+        if (!card) return;
+        const color = normalizePromptGridItemColor(colorValue);
+        const definition = color ? PROMPT_GRID_ITEM_COLORS[color] : null;
+        card.classList.toggle("cpw-prompt-grid__card--colored", Boolean(definition));
+        if (definition) {
+            card.dataset.itemColor = color;
+            card.style.setProperty("--cpw-card-color", definition.hex);
+        } else {
+            delete card.dataset.itemColor;
+            card.style.removeProperty("--cpw-card-color");
+        }
+    }
+
+    function closeItemContextMenu({ restoreFocus = false } = {}) {
+        const active = activeItemContextMenu;
+        if (!active) return;
+        activeItemContextMenu = null;
+        active.cleanup();
+        active.menu.remove();
+        if (restoreFocus && active.opener?.isConnected) active.opener.focus?.();
+    }
+
+    function moveItemToEdge(itemId, edge) {
+        if (!state) return;
+        const reordered = movePromptGridItemToEdge(state.items, itemId, edge);
+        const changed = reordered.some((item, index) => item !== state.items[index]);
+        closeItemContextMenu();
+        if (!changed) return;
+        state.items = reordered;
+        commit(true, true);
+        scheduleNodeHeightFit();
+    }
+
+    function setItemColor(itemId, colorValue) {
+        if (!state) return;
+        const index = state.items.findIndex((item) => item.id === itemId);
+        if (index < 0) return;
+        const color = normalizePromptGridItemColor(colorValue);
+        const currentColor = normalizePromptGridItemColor(state.items[index].color);
+        closeItemContextMenu();
+        if (currentColor === color) return;
+        if (color) {
+            state.items[index] = { ...state.items[index], color };
+        } else {
+            const { color: _discardedColor, ...itemWithoutColor } = state.items[index];
+            state.items[index] = itemWithoutColor;
+        }
+        applyCardColor(cardElements.get(itemId), color);
+        commit(false, true);
+    }
+
+    function openItemContextMenu(event, item, card) {
+        if (!state || disposed || dragSession) return;
+        if (event.target.closest('input[type="text"], textarea, [contenteditable="true"]')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeItemContextMenu();
+
+        const currentIndex = state.items.findIndex((candidate) => candidate.id === item.id);
+        if (currentIndex < 0) return;
+        const menu = element("div", "cpw-prompt-grid__item-menu");
+        menu.setAttribute("role", "menu");
+        menu.setAttribute("aria-label", `${item.title || "提示词"} 菜单`);
+        menu.tabIndex = -1;
+
+        const makeAction = (label, disabled, action) => {
+            const button = element("button", "cpw-prompt-grid__item-menu-action", label);
+            button.type = "button";
+            button.setAttribute("role", "menuitem");
+            button.disabled = disabled;
+            button.addEventListener("click", () => action());
+            return button;
+        };
+        const topButton = makeAction("置顶", currentIndex === 0, () => moveItemToEdge(item.id, "start"));
+        const bottomButton = makeAction(
+            "置底",
+            currentIndex === state.items.length - 1,
+            () => moveItemToEdge(item.id, "end"),
+        );
+        const separator = element("div", "cpw-prompt-grid__item-menu-separator");
+        separator.setAttribute("role", "separator");
+        const colorLabel = element("div", "cpw-prompt-grid__item-menu-label", "颜色");
+        const colorGroup = element("div", "cpw-prompt-grid__item-menu-colors");
+        colorGroup.setAttribute("role", "group");
+        colorGroup.setAttribute("aria-label", "卡片颜色");
+        const currentColor = normalizePromptGridItemColor(item.color);
+        const colorOptions = [
+            { key: null, label: "无色", hex: null },
+            ...Object.entries(PROMPT_GRID_ITEM_COLORS).map(([key, definition]) => ({
+                key,
+                label: definition.label,
+                hex: definition.hex,
+            })),
+        ];
+        for (const option of colorOptions) {
+            const colorButton = element(
+                "button",
+                `cpw-prompt-grid__item-color${option.key ? "" : " cpw-prompt-grid__item-color--none"}`,
+            );
+            colorButton.type = "button";
+            colorButton.setAttribute("aria-label", option.key ? `颜色：${option.label}` : option.label);
+            colorButton.setAttribute("aria-pressed", String(currentColor === option.key));
+            colorButton.title = option.label;
+            if (option.hex) colorButton.style.setProperty("--cpw-item-color", option.hex);
+            colorButton.addEventListener("click", () => setItemColor(item.id, option.key));
+            colorGroup.append(colorButton);
+        }
+        menu.append(topButton, bottomButton, separator, colorLabel, colorGroup);
+
+        const onDocumentPointerDown = (pointerEvent) => {
+            if (!menu.contains(pointerEvent.target)) closeItemContextMenu();
+        };
+        const focusableMenuItems = () => [...menu.querySelectorAll("button:not([disabled])")];
+        const onDocumentKeyDown = (keyEvent) => {
+            if (!activeItemContextMenu || activeItemContextMenu.menu !== menu) return;
+            if (keyEvent.key === "Escape") {
+                keyEvent.preventDefault();
+                keyEvent.stopPropagation();
+                closeItemContextMenu({ restoreFocus: true });
+                return;
+            }
+            if (keyEvent.key === "Tab") {
+                closeItemContextMenu();
+                return;
+            }
+            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(keyEvent.key)) return;
+            const candidates = focusableMenuItems();
+            if (!candidates.length) return;
+            keyEvent.preventDefault();
+            keyEvent.stopPropagation();
+            const current = candidates.indexOf(document.activeElement);
+            let next = 0;
+            if (keyEvent.key === "End") next = candidates.length - 1;
+            else if (keyEvent.key === "ArrowUp") next = current <= 0 ? candidates.length - 1 : current - 1;
+            else if (keyEvent.key === "ArrowDown") next = current < 0 || current === candidates.length - 1 ? 0 : current + 1;
+            candidates[next].focus();
+        };
+        const onViewportChange = () => closeItemContextMenu();
+        const cleanup = () => {
+            document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+            document.removeEventListener("keydown", onDocumentKeyDown, true);
+            document.removeEventListener("scroll", onViewportChange, true);
+            window.removeEventListener("resize", onViewportChange);
+        };
+        activeItemContextMenu = { menu, opener: event.target, cleanup };
+        document.addEventListener("pointerdown", onDocumentPointerDown, true);
+        document.addEventListener("keydown", onDocumentKeyDown, true);
+        document.addEventListener("scroll", onViewportChange, true);
+        window.addEventListener("resize", onViewportChange);
+        for (const eventName of [
+            "pointerdown", "pointerup", "mousedown", "click", "dblclick", "contextmenu",
+            "keydown", "keyup",
+        ]) {
+            menu.addEventListener(eventName, (menuEvent) => menuEvent.stopPropagation());
+        }
+        menu.addEventListener("contextmenu", (menuEvent) => menuEvent.preventDefault());
+        menu.addEventListener("wheel", (menuEvent) => menuEvent.stopPropagation(), { passive: true });
+        document.body.append(menu);
+
+        const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+        const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+        const margin = 6;
+        const left = Math.min(
+            Math.max(margin, event.clientX),
+            Math.max(margin, viewportWidth - menu.offsetWidth - margin),
+        );
+        const top = Math.min(
+            Math.max(margin, event.clientY),
+            Math.max(margin, viewportHeight - menu.offsetHeight - margin),
+        );
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        queueMicrotask(() => focusableMenuItems()[0]?.focus());
+    }
+
     function clearDropState() {
         for (const card of cardElements.values()) {
             card.classList.remove(
@@ -2415,6 +2600,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!state || dragSession || event.button !== 0 || event.isPrimary === false) return;
         event.preventDefault();
         event.stopPropagation();
+        closeItemContextMenu();
 
         for (const candidate of cardElements.values()) reorderAnimations.get(candidate)?.cancel();
         const metrics = getViewportMetrics();
@@ -3300,6 +3486,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const card = element("article", "cpw-prompt-grid__card");
         cardElements.set(item.id, card);
         card.classList.toggle("cpw-prompt-grid__card--disabled", !item.enabled);
+        applyCardColor(card, item.color);
 
         const header = element("div", "cpw-prompt-grid__card-header");
         const dragHandle = element("button", "cpw-prompt-grid__drag", "⠿");
@@ -3381,11 +3568,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         dragHandle.addEventListener("pointerup", finishPointerDrag);
         dragHandle.addEventListener("pointercancel", cancelPointerDrag);
         dragHandle.addEventListener("lostpointercapture", losePointerCapture);
+        card.addEventListener("contextmenu", (event) => openItemContextMenu(event, item, card));
         return card;
     }
 
     function render() {
         if (disposed) return;
+        closeItemContextMenu();
         if (activePromptEditor) closePromptEditor(false);
         if (dragSession) endPointerDrag(true);
         const invalid = Boolean(parseError) || !state;
@@ -3497,6 +3686,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         getValue: () => serializedValue,
         setValue: (value) => {
             receivedExternalValue = true;
+            closeItemContextMenu();
             if (dragSession) endPointerDrag(true);
             if (activeArchiveConfirmation) closeArchiveConfirmation(false);
             closeArchiveManager();
@@ -3509,6 +3699,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     widget.inputSpec = inputData;
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
+        closeItemContextMenu();
         if (activePromptEditor) closePromptEditor(false);
         if (activeArchiveConfirmation) closeArchiveConfirmation(false);
         closeArchiveManager();

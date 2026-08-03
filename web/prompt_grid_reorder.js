@@ -97,6 +97,20 @@ export function computeInsertionIndex(sourceIndex, targetIndex, side, itemCount)
     return Math.max(0, Math.min(itemCount - 1, insertionIndex));
 }
 
+export function movePromptGridItemToEdge(items, itemId, edge) {
+    const candidates = Array.isArray(items) ? items : [];
+    const sourceIndex = candidates.findIndex((item) => item?.id === itemId);
+    const targetIndex = edge === "start"
+        ? 0
+        : (edge === "end" ? candidates.length - 1 : sourceIndex);
+    if (sourceIndex < 0 || sourceIndex === targetIndex || targetIndex < 0) return [...candidates];
+    const reordered = [...candidates];
+    const [moved] = reordered.splice(sourceIndex, 1);
+    if (edge === "start") reordered.unshift(moved);
+    else if (edge === "end") reordered.push(moved);
+    return reordered;
+}
+
 export function edgeScrollVelocity(coordinate, minimum, maximum, threshold = 24, maximumSpeed = 12) {
     if (!Number.isFinite(coordinate) || maximum <= minimum || threshold <= 0 || maximumSpeed <= 0) return 0;
     if (coordinate < minimum || coordinate > maximum) return 0;
