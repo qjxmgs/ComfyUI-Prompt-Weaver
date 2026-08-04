@@ -3,9 +3,40 @@ export const ARCHIVE_FORMAT_VERSION = 1;
 export const DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000";
 export const DEFAULT_ARCHIVE_NAME = "默认存档";
 export const DEFAULT_ARCHIVE_NODE_SIZE = Object.freeze({ width: 600, height: 420 });
+export const PROMPT_GRID_ITEM_COLORS = Object.freeze({
+    red: Object.freeze({ label: "红", hex: "#ef5350" }),
+    orange: Object.freeze({ label: "橙", hex: "#fb8c00" }),
+    yellow: Object.freeze({ label: "黄", hex: "#fdd835" }),
+    green: Object.freeze({ label: "绿", hex: "#43a047" }),
+    cyan: Object.freeze({ label: "青", hex: "#26c6da" }),
+    blue: Object.freeze({ label: "蓝", hex: "#42a5f5" }),
+    purple: Object.freeze({ label: "紫", hex: "#ab47bc" }),
+    pink: Object.freeze({ label: "粉", hex: "#ec407a" }),
+    gray: Object.freeze({ label: "灰", hex: "#78909c" }),
+    white: Object.freeze({ label: "白", hex: "#f5f5f5" }),
+    black: Object.freeze({ label: "黑", hex: "#212121" }),
+});
 const MIN_ARCHIVE_NODE_WIDTH = 600;
 const MIN_ARCHIVE_NODE_HEIGHT = 234;
 const MAX_ARCHIVE_NODE_SIZE = 10_000;
+
+export function normalizePromptGridItemColor(value) {
+    return typeof value === "string"
+        && Object.prototype.hasOwnProperty.call(PROMPT_GRID_ITEM_COLORS, value)
+        ? value
+        : null;
+}
+
+function archiveItem(item) {
+    const color = normalizePromptGridItemColor(item?.color);
+    return {
+        id: item.id,
+        enabled: item.enabled,
+        title: item.title,
+        prompt: item.prompt,
+        ...(color ? { color } : {}),
+    };
+}
 
 export function normalizeArchiveNodeSize(value) {
     // LiteGraph/Nodes 2.0 may expose size as an Array, Float32Array, or
@@ -28,12 +59,7 @@ export function snapshotFromState(state, nodeSize = DEFAULT_ARCHIVE_NODE_SIZE) {
         version: 1,
         columns: state.columns,
         node_size: normalizeArchiveNodeSize(nodeSize),
-        items: state.items.map((item) => ({
-            id: item.id,
-            enabled: item.enabled,
-            title: item.title,
-            prompt: item.prompt,
-        })),
+        items: state.items.map(archiveItem),
     };
 }
 
@@ -41,23 +67,22 @@ export function configFromArchiveSnapshot(snapshot) {
     return {
         version: 1,
         columns: snapshot.columns,
-        items: snapshot.items.map((item) => ({
-            id: item.id,
-            enabled: item.enabled,
-            title: item.title,
-            prompt: item.prompt,
-        })),
+        items: snapshot.items.map(archiveItem),
     };
 }
 
 function gridSemantics(snapshot) {
     return {
         columns: snapshot.columns,
-        items: snapshot.items.map((item) => ({
-            enabled: item.enabled,
-            title: item.title,
-            prompt: item.prompt,
-        })),
+        items: snapshot.items.map((item) => {
+            const color = normalizePromptGridItemColor(item?.color);
+            return {
+                enabled: item.enabled,
+                title: item.title,
+                prompt: item.prompt,
+                ...(color ? { color } : {}),
+            };
+        }),
     };
 }
 

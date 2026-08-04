@@ -21,6 +21,9 @@ DEFAULT_NODE_HEIGHT = 420
 MIN_NODE_WIDTH = 600
 MIN_NODE_HEIGHT = 234
 MAX_NODE_SIZE = 10_000
+ITEM_COLORS = frozenset(
+    {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray", "white", "black"}
+)
 DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000"
 DEFAULT_ARCHIVE_NAME = "默认存档"
 
@@ -179,6 +182,8 @@ def validate_snapshot(value):
         enabled = item.get("enabled")
         title = item.get("title")
         prompt = item.get("prompt")
+        has_color = "color" in item
+        color = item.get("color")
         if not isinstance(enabled, bool):
             raise ArchiveValidationError(f"snapshot items[{index}].enabled must be a boolean")
         if not isinstance(title, str) or len(title) > MAX_TITLE_LENGTH:
@@ -189,9 +194,19 @@ def validate_snapshot(value):
             raise ArchiveValidationError(
                 f"snapshot items[{index}].prompt must be a string up to {MAX_PROMPT_LENGTH} characters"
             )
-        normalized_items.append(
-            {"id": item_id, "enabled": enabled, "title": title, "prompt": prompt}
-        )
+        if has_color and (not isinstance(color, str) or color not in ITEM_COLORS):
+            raise ArchiveValidationError(
+                f"snapshot items[{index}].color must be a supported color"
+            )
+        normalized_item = {
+            "id": item_id,
+            "enabled": enabled,
+            "title": title,
+            "prompt": prompt,
+        }
+        if has_color:
+            normalized_item["color"] = color
+        normalized_items.append(normalized_item)
 
     snapshot = {
         "version": FORMAT_VERSION,
