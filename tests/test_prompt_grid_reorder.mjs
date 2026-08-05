@@ -14,6 +14,7 @@ const {
     computeInsertionIndex,
     edgeScrollVelocity,
     findDropTarget,
+    movePromptGridItemToEdge,
     resolveImmediateInsertionSide,
 } = await import(moduleUrl);
 
@@ -66,6 +67,16 @@ test("insertion index models insert-and-shift semantics without repeat movement"
     assert.equal(computeInsertionIndex(2, 0, "after", 4), 1);
     assert.equal(computeInsertionIndex(1, 2, "before", 4), 1);
     assert.equal(computeInsertionIndex(2, 2, "after", 4), 2);
+});
+
+test("context menu ordering moves one item to either edge without mutating the input", () => {
+    const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    assert.deepEqual(movePromptGridItemToEdge(items, "b", "start").map((item) => item.id), ["b", "a", "c"]);
+    assert.deepEqual(movePromptGridItemToEdge(items, "b", "end").map((item) => item.id), ["a", "c", "b"]);
+    assert.deepEqual(movePromptGridItemToEdge(items, "a", "start"), items);
+    assert.deepEqual(movePromptGridItemToEdge(items, "c", "end"), items);
+    assert.deepEqual(movePromptGridItemToEdge(items, "missing", "start"), items);
+    assert.deepEqual(items.map((item) => item.id), ["a", "b", "c"]);
 });
 
 test("edge scrolling starts only inside the 24px edge band", () => {

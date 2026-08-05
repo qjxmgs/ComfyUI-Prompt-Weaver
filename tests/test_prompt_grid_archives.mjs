@@ -9,6 +9,7 @@ const moduleSource = await readFile(
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,
+    PROMPT_GRID_ITEM_COLORS,
     PromptGridArchiveClient,
     applyArchiveManagerSelectionGesture,
     archiveManagerSelectionAvailability,
@@ -21,6 +22,7 @@ const {
     formatArchiveOptionLabel,
     normalizeArchiveNodeSize,
     normalizeArchiveManagerSelection,
+    normalizePromptGridItemColor,
     reorderArchiveIds,
     resolveArchiveInitialization,
     resolveArchiveStatus,
@@ -42,6 +44,35 @@ test("snapshot extraction keeps only execution state", () => {
         columns: 2,
         node_size: { width: 600, height: 420 },
         items: [{ id: "one", enabled: true, title: "画质", prompt: "masterpiece" }],
+    });
+});
+
+test("item colors survive archive round trips and participate in dirty state", () => {
+    const coloredState = structuredClone(state);
+    coloredState.items[0].color = "blue";
+    const saved = snapshotFromState(coloredState);
+    assert.equal(saved.items[0].color, "blue");
+    assert.equal(configFromArchiveSnapshot(saved).items[0].color, "blue");
+    assert.notEqual(semanticFingerprint(saved), semanticFingerprint(snapshotFromState(state)));
+
+    coloredState.items[0].color = "unknown";
+    assert.equal(snapshotFromState(coloredState).items[0].color, undefined);
+    assert.equal(normalizePromptGridItemColor("unknown"), null);
+    assert.equal(normalizePromptGridItemColor("red"), "red");
+    assert.deepEqual(Object.fromEntries(
+        Object.entries(PROMPT_GRID_ITEM_COLORS).map(([key, definition]) => [key, definition.hex]),
+    ), {
+        red: "#ef5350",
+        orange: "#fb8c00",
+        yellow: "#fdd835",
+        green: "#43a047",
+        cyan: "#26c6da",
+        blue: "#42a5f5",
+        purple: "#ab47bc",
+        pink: "#ec407a",
+        gray: "#78909c",
+        white: "#f5f5f5",
+        black: "#212121",
     });
 });
 
@@ -329,6 +360,28 @@ test("archive manager places load between save and rename and supports row doubl
     );
     assert.match(managerSource, /row\.addEventListener\("dblclick",/);
     assert.match(managerSource, /async function loadSelectedArchive\(\)[\s\S]*?return requestArchiveLoad\(archive\);/);
+});
+
+test("prompt grid cards expose the item context menu while text inputs keep native menus", async () => {
+    const widgetSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(widgetSource, /card\.addEventListener\("contextmenu",/);
+    assert.match(widgetSource, /input\[type="text"\], textarea, \[contenteditable="true"\]/);
+    assert.match(widgetSource, /makeAction\("置顶"/);
+    assert.match(widgetSource, /"置底",/);
+    assert.match(widgetSource, /document\.addEventListener\("pointerdown", onDocumentPointerDown, true\)/);
+    assert.match(widgetSource, /document\.addEventListener\("scroll", onViewportChange, true\)/);
+    assert.match(widgetSource, /window\.addEventListener\("resize", onViewportChange\)/);
+    assert.match(widgetSource, /keyEvent\.key === "Escape"/);
+    assert.match(styleSource, /\.cpw-prompt-grid__card--colored\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-grid__item-menu\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-grid__item-color\s*\{/);
 });
 
 test("export bundle and preview use the stable portable format", () => {

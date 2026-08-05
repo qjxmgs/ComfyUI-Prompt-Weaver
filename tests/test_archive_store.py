@@ -142,6 +142,9 @@ class ArchiveStoreTests(unittest.TestCase):
         legacy_value = snapshot("legacy")
         legacy_value.pop("node_size")
         self.assertEqual(validate_snapshot(legacy_value), snapshot("legacy"))
+        colored_value = snapshot("colored")
+        colored_value["items"][0]["color"] = "pink"
+        self.assertEqual(validate_snapshot(colored_value), colored_value)
         invalid_values = [
             {"version": 2, "columns": 2, "items": []},
             {"version": 1, "columns": 0, "items": []},
@@ -159,6 +162,20 @@ class ArchiveStoreTests(unittest.TestCase):
                 "items": [],
             },
             {"version": 1, "columns": 2, "items": [{"id": "x", "enabled": 1, "title": "", "prompt": ""}]},
+            {
+                "version": 1,
+                "columns": 2,
+                "items": [
+                    {"id": "x", "enabled": True, "title": "", "prompt": "", "color": "magenta"},
+                ],
+            },
+            {
+                "version": 1,
+                "columns": 2,
+                "items": [
+                    {"id": "x", "enabled": True, "title": "", "prompt": "", "color": None},
+                ],
+            },
             {
                 "version": 1,
                 "columns": 2,
