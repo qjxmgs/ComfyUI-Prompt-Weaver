@@ -9,7 +9,19 @@
 
 ## 安装与升级
 
-将整个 `ComfyUI-Prompt-Weaver` 目录复制到 ComfyUI 的 `custom_nodes` 目录，然后重启 ComfyUI，并在浏览器中按 `Ctrl+F5` 强制刷新页面。
+在 ComfyUI 的 `custom_nodes` 目录中克隆本仓库：
+
+```powershell
+git clone --branch master https://github.com/qjxmgs/ComfyUI-Prompt-Weaver.git
+```
+
+也可以下载源码压缩包，将整个 `ComfyUI-Prompt-Weaver` 目录复制到 `custom_nodes`。安装后重启 ComfyUI，并在浏览器中按 `Ctrl+F5` 强制刷新页面。
+
+通过 Git 安装时，在插件目录中执行下面的命令升级：
+
+```powershell
+git pull --ff-only origin master
+```
 
 桌面端目前只会在目标目录不存在时安装插件，不会覆盖已经安装的旧版本。升级时必须手动覆盖原目录；如果节点未出现，请确认下面这些新文件已经复制：
 
@@ -120,3 +132,18 @@ API-format Prompt 的 `inputs.config` 必须是 JSON 编码后的**字符串**�
 ## Workflow 打开桥接
 
 已经打开的 ComfyUI 前端会通过心跳向插件注册。桌面端发送 `/prompt-weaver/open-workflow` 后，插件优先把 Workflow 投递给最近活跃的页面并调用 `app.loadGraphData()`；只有没有可用前端时才打开新的浏览器页面。
+
+## 开发与测试
+
+插件运行时只依赖 ComfyUI 自带的 Python、aiohttp 和前端环境，不需要安装额外的 Python 或 JavaScript 包。仓库中的回归测试可独立运行：
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+node --test tests/*.mjs
+```
+
+测试覆盖节点配置解析、插件注册与路由、全局存档、网格排序、提示词编辑器以及 Prompt Assistant 标签补全。
+
+## 许可
+
+本项目采用 [MIT License](LICENSE) 开源。
