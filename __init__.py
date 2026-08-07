@@ -23,7 +23,7 @@ NODE_CLASS_MAPPINGS = {
     "PromptWeaverPromptToggleGrid": PromptWeaverPromptToggleGrid,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "PromptWeaverPromptToggleGrid": "提示词开关网格",
+    "PromptWeaverPromptToggleGrid": "Prompt Toggle Grid",
 }
 
 __all__ = [

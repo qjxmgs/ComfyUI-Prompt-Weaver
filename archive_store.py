@@ -73,7 +73,7 @@ def default_snapshot():
             {
                 "id": f"prompt-{index}",
                 "enabled": True,
-                "title": f"提示词 {index}",
+                "title": f"Prompt {index}",
                 "prompt": "",
             }
             for index in range(1, 5)

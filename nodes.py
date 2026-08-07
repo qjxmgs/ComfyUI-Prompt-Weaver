@@ -11,7 +11,7 @@ DEFAULT_CONFIG = json.dumps(
         "items": [
             {
                 "id": f"prompt-{index}",
-                "title": f"提示词 {index}",
+                "title": f"Prompt {index}",
                 "prompt": "",
                 "enabled": True,
             }
@@ -112,7 +112,8 @@ class PromptWeaverPromptToggleGrid:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("prompt",)
     FUNCTION = "combine"
-    CATEGORY = "Prompt Weaver/提示词"
+    CATEGORY = "Prompt Weaver/Prompt"
+    DESCRIPTION = "Combine enabled prompt cards into one comma-separated prompt."
 
     def combine(self, config):
         return (combine_prompt_grid_config(config),)
