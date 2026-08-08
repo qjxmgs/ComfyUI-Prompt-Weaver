@@ -1,0 +1,16 @@
+{
+  "PromptWeaverPromptToggleGrid": {
+    "display_name": "提示词开关网格",
+    "description": "将已启用的提示词卡片合并为一个以逗号分隔的提示词。",
+    "inputs": {
+      "config": {
+        "name": "提示词网格配置"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "提示词"
+      }
+    }
+  }
+}
