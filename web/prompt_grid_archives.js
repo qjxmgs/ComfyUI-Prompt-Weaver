@@ -1,20 +1,22 @@
+import { t } from "./prompt_weaver_i18n.js";
+
 export const ARCHIVE_EXPORT_FORMAT = "prompt-weaver-prompt-grid-archives";
 export const ARCHIVE_FORMAT_VERSION = 1;
 export const DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000";
 export const DEFAULT_ARCHIVE_NAME = "默认存档";
 export const DEFAULT_ARCHIVE_NODE_SIZE = Object.freeze({ width: 600, height: 420 });
 export const PROMPT_GRID_ITEM_COLORS = Object.freeze({
-    red: Object.freeze({ label: "红", hex: "#ef5350" }),
-    orange: Object.freeze({ label: "橙", hex: "#fb8c00" }),
-    yellow: Object.freeze({ label: "黄", hex: "#fdd835" }),
-    green: Object.freeze({ label: "绿", hex: "#43a047" }),
-    cyan: Object.freeze({ label: "青", hex: "#26c6da" }),
-    blue: Object.freeze({ label: "蓝", hex: "#42a5f5" }),
-    purple: Object.freeze({ label: "紫", hex: "#ab47bc" }),
-    pink: Object.freeze({ label: "粉", hex: "#ec407a" }),
-    gray: Object.freeze({ label: "灰", hex: "#78909c" }),
-    white: Object.freeze({ label: "白", hex: "#f5f5f5" }),
-    black: Object.freeze({ label: "黑", hex: "#212121" }),
+    red: Object.freeze({ label: "Red", hex: "#ef5350" }),
+    orange: Object.freeze({ label: "Orange", hex: "#fb8c00" }),
+    yellow: Object.freeze({ label: "Yellow", hex: "#fdd835" }),
+    green: Object.freeze({ label: "Green", hex: "#43a047" }),
+    cyan: Object.freeze({ label: "Cyan", hex: "#26c6da" }),
+    blue: Object.freeze({ label: "Blue", hex: "#42a5f5" }),
+    purple: Object.freeze({ label: "Purple", hex: "#ab47bc" }),
+    pink: Object.freeze({ label: "Pink", hex: "#ec407a" }),
+    gray: Object.freeze({ label: "Gray", hex: "#78909c" }),
+    white: Object.freeze({ label: "White", hex: "#f5f5f5" }),
+    black: Object.freeze({ label: "Black", hex: "#212121" }),
 });
 const MIN_ARCHIVE_NODE_WIDTH = 600;
 const MIN_ARCHIVE_NODE_HEIGHT = 234;
@@ -71,14 +73,44 @@ export function configFromArchiveSnapshot(snapshot) {
     };
 }
 
+export function isPristineDefaultSnapshot(snapshot) {
+    const size = normalizeArchiveNodeSize(snapshot?.node_size);
+    return snapshot?.version === 1
+        && snapshot?.columns === 2
+        && size.width === DEFAULT_ARCHIVE_NODE_SIZE.width
+        && size.height === DEFAULT_ARCHIVE_NODE_SIZE.height
+        && Array.isArray(snapshot?.items)
+        && snapshot.items.length === 4
+        && snapshot.items.every((item, index) => {
+            const number = index + 1;
+            return item?.id === `prompt-${number}`
+                && item.enabled === true
+                && item.prompt === ""
+                && !normalizePromptGridItemColor(item.color)
+                && (item.title === `Prompt ${number}` || item.title === `提示词 ${number}`);
+        });
+}
+
+export function localizePristineDefaultSnapshot(snapshot, titleFactory) {
+    if (!isPristineDefaultSnapshot(snapshot) || typeof titleFactory !== "function") return snapshot;
+    return {
+        ...snapshot,
+        items: snapshot.items.map((item, index) => ({
+            ...item,
+            title: titleFactory(index + 1),
+        })),
+    };
+}
+
 function gridSemantics(snapshot) {
+    const pristineDefault = isPristineDefaultSnapshot(snapshot);
     return {
         columns: snapshot.columns,
-        items: snapshot.items.map((item) => {
+        items: snapshot.items.map((item, index) => {
             const color = normalizePromptGridItemColor(item?.color);
             return {
                 enabled: item.enabled,
-                title: item.title,
+                title: pristineDefault ? `__prompt_weaver_default_${index + 1}__` : item.title,
                 prompt: item.prompt,
                 ...(color ? { color } : {}),
             };
@@ -270,13 +302,13 @@ export function buildArchiveExportBundle(archives, exportedAt = new Date().toISO
 
 export function validateImportBundlePreview(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new Error("导入文件顶层必须是对象");
+        throw new Error(t("The top level of the import file must be an object"));
     }
     if (value.format !== ARCHIVE_EXPORT_FORMAT || value.format_version !== ARCHIVE_FORMAT_VERSION) {
-        throw new Error("不支持的存档文件格式");
+        throw new Error(t("Unsupported archive file format"));
     }
     if (!Array.isArray(value.archives) || !value.archives.length) {
-        throw new Error("导入文件不包含存档");
+        throw new Error(t("The import file does not contain any archives"));
     }
     return {
         bundle: value,
@@ -290,7 +322,8 @@ export function validateImportBundlePreview(value) {
 
 export function defaultArchiveName(date = new Date()) {
     const pad = (value) => String(value).padStart(2, "0");
-    return `存档 ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+    const timestamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+    return t("Archive {timestamp}", { timestamp });
 }
 
 export class PromptGridArchiveClient {
@@ -308,7 +341,12 @@ export class PromptGridArchiveClient {
             // Preserve the HTTP status when the server returns a non-JSON error.
         }
         if (!response.ok) {
-            throw new Error(payload?.error || `存档请求失败（HTTP ${response.status}）`);
+            const error = new Error(
+                payload?.error || t("Archive request failed (HTTP {status})", { status: response.status }),
+            );
+            error.status = response.status;
+            error.serverMessage = payload?.error ?? null;
+            throw error;
         }
         return payload;
     }

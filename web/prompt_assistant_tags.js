@@ -1,3 +1,5 @@
+import { t } from "./prompt_weaver_i18n.js";
+
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_RESULT_LIMIT = 12;
 const EXTENSION_MODULE_PATTERN = /^\/extensions\/([^/]+)\/modules\/tag\.js$/i;
@@ -13,11 +15,11 @@ function responseIsOk(response) {
 }
 
 async function readJsonResponse(response, label) {
-    if (!responseIsOk(response)) throw new Error(`${label} 请求失败。`);
+    if (!responseIsOk(response)) throw new Error(t("{label} request failed.", { label }));
     try {
         return await response.json();
     } catch (_error) {
-        throw new Error(`${label} 返回了无效 JSON。`);
+        throw new Error(t("{label} returned invalid JSON.", { label }));
     }
 }
 
@@ -60,7 +62,7 @@ export function findPromptAssistantApiBases(extensionEntries) {
 
 export function validatePromptAssistantTagFiles(payload) {
     if (!isPlainObject(payload) || payload.success !== true || !Array.isArray(payload.files)) {
-        throw new Error("Prompt Assistant 标签文件列表格式无效。");
+        throw new Error(t("The Prompt Assistant tag file list is invalid."));
     }
     const files = [];
     const seen = new Set();
@@ -72,7 +74,7 @@ export function validatePromptAssistantTagFiles(payload) {
             || file.includes("\\")
             || file.includes("\0")
         ) {
-            throw new Error("Prompt Assistant 返回了无效标签文件名。");
+            throw new Error(t("Prompt Assistant returned an invalid tag file name."));
         }
         if (!seen.has(file)) {
             seen.add(file);
@@ -83,12 +85,12 @@ export function validatePromptAssistantTagFiles(payload) {
 }
 
 export function flattenPromptAssistantTagData(data, sourceFile = "") {
-    if (!isPlainObject(data)) throw new Error("Prompt Assistant 标签数据必须是对象。");
+    if (!isPlainObject(data)) throw new Error(t("Prompt Assistant tag data must be an object."));
     const records = [];
 
     const visit = (value, path) => {
         if (typeof value === "string") {
-            if (!path.length) throw new Error("Prompt Assistant 标签名称缺失。");
+            if (!path.length) throw new Error(t("A Prompt Assistant tag name is missing."));
             const name = path[path.length - 1].trim();
             const promptValue = value.trim();
             if (name && promptValue) {
@@ -103,11 +105,11 @@ export function flattenPromptAssistantTagData(data, sourceFile = "") {
             return;
         }
         if (!isPlainObject(value)) {
-            throw new Error("Prompt Assistant 标签数据包含非对象分组或非字符串标签。");
+            throw new Error(t("Prompt Assistant tag data contains a non-object group or non-string tag."));
         }
         for (const [key, child] of Object.entries(value)) {
             if (typeof key !== "string" || !key.trim()) {
-                throw new Error("Prompt Assistant 标签数据包含无效名称。");
+                throw new Error(t("Prompt Assistant tag data contains an invalid name."));
             }
             visit(child, [...path, key]);
         }
@@ -190,7 +192,7 @@ export function formatPromptAssistantTagOption(record) {
     if (!value || normalizePromptAssistantSearchText(name) === normalizePromptAssistantSearchText(value)) {
         return name;
     }
-    return `${value}（${name}）`;
+    return t("{value} ({name})", { value, name });
 }
 
 export function movePromptAssistantSuggestionIndex(currentIndex, resultCount, direction) {
@@ -220,22 +222,22 @@ export class PromptAssistantTagCatalog {
 
     async fetchJson(path, label) {
         if (!this.api || typeof this.api.fetchApi !== "function") {
-            throw new Error("ComfyUI API 客户端不可用。");
+            throw new Error(t("The ComfyUI API client is unavailable."));
         }
         return readJsonResponse(await this.api.fetchApi(path), label);
     }
 
     async discover() {
-        const entries = await this.fetchJson("/extensions", "ComfyUI 扩展列表");
+        const entries = await this.fetchJson("/extensions", t("ComfyUI extension list"));
         for (const apiBase of findPromptAssistantApiBases(entries)) {
             try {
                 const payload = await this.fetchJson(
                     `${apiBase}/config/tags_files`,
-                    "Prompt Assistant 标签文件列表",
+                    t("Prompt Assistant tag file list"),
                 );
                 return { apiBase, files: validatePromptAssistantTagFiles(payload) };
             } catch (error) {
-                this.diagnoseOnce(`无法使用 Prompt Assistant 标签接口：${apiBase}`, error);
+                this.diagnoseOnce(t("Could not use the Prompt Assistant tag API: {base}", { base: apiBase }), error);
             }
         }
         return null;
@@ -246,7 +248,7 @@ export class PromptAssistantTagCatalog {
         try {
             discovered = await this.discover();
         } catch (error) {
-            this.diagnoseOnce("无法读取 ComfyUI 扩展列表，标签自动补全已隐藏。", error);
+            this.diagnoseOnce(t("Could not read the ComfyUI extension list; tag autocomplete is hidden."), error);
             return [];
         }
         if (!discovered || !discovered.files.length) return [];
@@ -254,10 +256,10 @@ export class PromptAssistantTagCatalog {
         const settled = await Promise.allSettled(discovered.files.map(async (file) => {
             const payload = await this.fetchJson(
                 `${discovered.apiBase}/config/tags_csv/${encodeURIComponent(file)}`,
-                `Prompt Assistant 标签文件 ${file}`,
+                t("Prompt Assistant tag file {file}", { file }),
             );
             if (!isPlainObject(payload) || payload.success !== true || !isPlainObject(payload.data)) {
-                throw new Error(`Prompt Assistant 标签文件 ${file} 格式无效。`);
+                throw new Error(t("Prompt Assistant tag file {file} is invalid.", { file }));
             }
             return flattenPromptAssistantTagData(payload.data, file);
         }));
@@ -266,7 +268,9 @@ export class PromptAssistantTagCatalog {
         for (let index = 0; index < settled.length; index += 1) {
             const result = settled[index];
             if (result.status === "fulfilled") records.push(...result.value);
-            else this.diagnoseOnce(`无法加载 Prompt Assistant 标签文件：${discovered.files[index]}`, result.reason);
+            else this.diagnoseOnce(t("Could not load Prompt Assistant tag file: {file}", {
+                file: discovered.files[index],
+            }), result.reason);
         }
         return mergePromptAssistantTagRecords(records);
     }
