@@ -13,6 +13,7 @@ import {
     configFromArchiveSnapshot,
     defaultArchiveName,
     formatArchiveOptionLabel,
+    localizePristineDefaultSnapshot,
     normalizeArchiveNodeSize,
     normalizeArchiveManagerSelection,
     normalizePromptGridItemColor,
@@ -21,6 +22,15 @@ import {
     snapshotFromState,
     validateImportBundlePreview,
 } from "./prompt_grid_archives.js?v=20260812-item-context-menu-pink";
+import {
+    connectLocale,
+    formatDateTime,
+    formatList,
+    subscribeLocale,
+    syncLocale,
+    t,
+    tp,
+} from "./prompt_weaver_i18n.js";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -93,6 +103,7 @@ const promptAssistantTagCatalog = new PromptAssistantTagCatalog(api, {
 });
 const loadedPromptGridNodes = new WeakSet();
 const promptGridArchiveControllers = new WeakMap();
+const promptGridLocaleControllers = new Set();
 const archiveChannel = typeof BroadcastChannel === "function"
     ? new BroadcastChannel(ARCHIVE_CHANNEL_NAME)
     : null;
@@ -114,6 +125,11 @@ if (archiveChannel) {
 
 let fallbackId = 0;
 
+connectLocale(app);
+subscribeLocale(() => {
+    for (const controller of [...promptGridLocaleControllers]) controller.refreshLocale?.();
+});
+
 function createId() {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     fallbackId += 1;
@@ -127,14 +143,14 @@ function createDefaultConfig() {
         items: Array.from({ length: DEFAULT_CARD_COUNT }, (_, index) => ({
             id: `prompt-${index + 1}`,
             enabled: true,
-            title: `提示词 ${index + 1}`,
+            title: t("Prompt {index}", { index: index + 1 }),
             prompt: "",
         })),
     };
 }
 
 function configError(message) {
-    return new Error(`提示词网格配置错误：${message}`);
+    return new Error(t("Prompt grid configuration error: {message}", { message }));
 }
 
 function normalizeConfigValue(value) {
@@ -154,20 +170,20 @@ function normalizeConfigValue(value) {
         try {
             raw = JSON.parse(raw);
         } catch (error) {
-            throw configError(`JSON 无法解析（${error.message}）`);
+            throw configError(t("JSON could not be parsed ({message})", { message: error.message }));
         }
     }
 
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        throw configError("顶层值必须是对象");
+        throw configError(t("The top-level value must be an object"));
     }
 
     const hasVersion = Object.prototype.hasOwnProperty.call(raw, "version");
     const version = hasVersion ? raw.version : CONFIG_VERSION;
     if (typeof version !== "number" || !Number.isFinite(version) || version !== CONFIG_VERSION) {
-        throw configError(`不支持的版本 ${String(version)}`);
+        throw configError(t("Unsupported version {version}", { version: String(version) }));
     }
-    if (!Array.isArray(raw.items)) throw configError("items 必须是数组");
+    if (!Array.isArray(raw.items)) throw configError(t("items must be an array"));
 
     const columns = Number.isInteger(raw.columns)
         && raw.columns >= MIN_COLUMNS
@@ -178,26 +194,26 @@ function normalizeConfigValue(value) {
     const usedIds = new Set();
     const items = raw.items.map((item, index) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) {
-            throw configError(`items[${index}] 必须是对象`);
+            throw configError(t("items[{index}] must be an object", { index }));
         }
         const hasEnabled = Object.prototype.hasOwnProperty.call(item, "enabled");
         if (hasEnabled && typeof item.enabled !== "boolean") {
-            throw configError(`items[${index}].enabled 必须是布尔值`);
+            throw configError(t("items[{index}].enabled must be a boolean", { index }));
         }
         const hasPrompt = Object.prototype.hasOwnProperty.call(item, "prompt");
         if (hasPrompt && typeof item.prompt !== "string") {
-            throw configError(`items[${index}].prompt 必须是字符串`);
+            throw configError(t("items[{index}].prompt must be a string", { index }));
         }
 
         if (Object.prototype.hasOwnProperty.call(item, "id") && typeof item.id !== "string") {
-            throw configError(`items[${index}].id 必须是字符串`);
+            throw configError(t("items[{index}].id must be a string", { index }));
         }
         if (Object.prototype.hasOwnProperty.call(item, "title") && typeof item.title !== "string") {
-            throw configError(`items[${index}].title 必须是字符串`);
+            throw configError(t("items[{index}].title must be a string", { index }));
         }
 
         let id = typeof item.id === "string" && item.id.trim() ? item.id : createId();
-        if (usedIds.has(id)) throw configError(`items[${index}].id 与其他卡片重复`);
+        if (usedIds.has(id)) throw configError(t("items[{index}].id duplicates another card", { index }));
         if (id !== item.id) normalized = true;
         usedIds.add(id);
         const hasColor = Object.prototype.hasOwnProperty.call(item, "color");
@@ -208,7 +224,9 @@ function normalizeConfigValue(value) {
             ...itemWithoutColor,
             id,
             enabled: hasEnabled ? item.enabled : false,
-            title: typeof item.title === "string" ? item.title : `提示词 ${index + 1}`,
+            title: typeof item.title === "string"
+                ? item.title
+                : t("Prompt {index}", { index: index + 1 }),
             prompt: hasPrompt ? item.prompt : "",
             ...(color ? { color } : {}),
         };
@@ -524,14 +542,37 @@ function notifyWidgetChanged(node, widget, inputName, nextValue, previousValue, 
     if (captureHistory) captureCanvasState();
 }
 
+function archiveDisplayName(archive) {
+    if (archive?.is_default || archive?.id === DEFAULT_ARCHIVE_ID) return t("Default Archive");
+    return archive?.name || t("Current Archive");
+}
+
+function archiveErrorMessage(error) {
+    const messages = {
+        400: "Archive data is invalid.",
+        404: "The requested archive was not found.",
+        409: "An archive with the same name already exists.",
+        413: "The archive request is too large.",
+        500: "The archive store could not be read.",
+    };
+    if (error?.status >= 500 && error?.serverMessage) {
+        console.warn("[Prompt Weaver] Archive server error:", error.serverMessage);
+    }
+    return messages[error?.status]
+        ? t(messages[error.status])
+        : (error instanceof Error ? error.message : String(error));
+}
+
 function createPromptGridWidget(node, inputName, inputData) {
+    syncLocale(app);
     ensureStylesheet();
 
     const root = element("div", "cpw-prompt-grid");
     const toolbar = element("div", "cpw-prompt-grid__toolbar");
     const columnGroup = element("div", "cpw-prompt-grid__columns");
-    columnGroup.append(element("span", "", "列数"));
-    const columnSelect = createCustomSelect("", "网格列数");
+    const columnLabel = element("span", "", t("Columns"));
+    columnGroup.append(columnLabel);
+    const columnSelect = createCustomSelect("", t("Grid columns"));
     columnSelect.customSelect.setOptions(
         Array.from({ length: MAX_COLUMNS - MIN_COLUMNS + 1 }, (_, index) => {
             const columns = MIN_COLUMNS + index;
@@ -541,18 +582,21 @@ function createPromptGridWidget(node, inputName, inputData) {
     columnGroup.append(columnSelect);
 
     const archiveGroup = element("div", "cpw-prompt-grid__archives");
-    const archiveSelect = createCustomSelect("cpw-prompt-grid__archive-select", "快速切换提示词存档");
+    const archiveSelect = createCustomSelect(
+        "cpw-prompt-grid__archive-select",
+        t("Quickly switch prompt archives"),
+    );
     const quickSaveArchiveButton = element(
         "button",
         "cpw-prompt-grid__button cpw-prompt-grid__archive-save",
-        "保存",
+        t("Save"),
     );
     const restoreArchiveButton = element(
         "button",
         "cpw-prompt-grid__button cpw-prompt-grid__archive-restore",
-        "还原",
+        t("Restore"),
     );
-    const manageArchivesButton = element("button", "cpw-prompt-grid__button", "存档管理");
+    const manageArchivesButton = element("button", "cpw-prompt-grid__button", t("Archive Manager"));
     quickSaveArchiveButton.type = "button";
     restoreArchiveButton.type = "button";
     manageArchivesButton.type = "button";
@@ -564,18 +608,22 @@ function createPromptGridWidget(node, inputName, inputData) {
     );
 
     const actions = element("div", "cpw-prompt-grid__actions");
-    const addButton = element("button", "cpw-prompt-grid__button cpw-prompt-grid__button--primary", "＋ 新增提示词");
-    const enableAllButton = element("button", "cpw-prompt-grid__button", "全开");
-    const disableAllButton = element("button", "cpw-prompt-grid__button", "全关");
+    const addButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__button--primary",
+        t("+ Add Prompt"),
+    );
+    const enableAllButton = element("button", "cpw-prompt-grid__button", t("Enable All"));
+    const disableAllButton = element("button", "cpw-prompt-grid__button", t("Disable All"));
     for (const button of [addButton, enableAllButton, disableAllButton]) button.type = "button";
     actions.append(addButton, enableAllButton, disableAllButton);
     toolbar.append(columnGroup, archiveGroup, actions);
 
     const errorPanel = element("div", "cpw-prompt-grid__error");
     errorPanel.hidden = true;
-    const errorTitle = element("strong", "", "配置无法读取");
+    const errorTitle = element("strong", "", t("Configuration could not be read"));
     const errorMessage = element("div", "cpw-prompt-grid__error-message");
-    const resetButton = element("button", "cpw-prompt-grid__button", "重置为默认");
+    const resetButton = element("button", "cpw-prompt-grid__button", t("Reset to Default"));
     resetButton.type = "button";
     errorPanel.append(errorTitle, errorMessage, resetButton);
 
@@ -611,6 +659,63 @@ function createPromptGridWidget(node, inputName, inputData) {
     const cardElements = new Map();
     const reorderAnimations = new WeakMap();
     const archiveReorderAnimations = new WeakMap();
+
+    function refreshLocale() {
+        if (disposed) return;
+        syncLocale(app);
+        columnLabel.textContent = t("Columns");
+        columnSelect.querySelector("button")?.setAttribute("aria-label", t("Grid columns"));
+        archiveSelect.querySelector("button")?.setAttribute(
+            "aria-label",
+            t("Quickly switch prompt archives"),
+        );
+        quickSaveArchiveButton.textContent = t("Save");
+        restoreArchiveButton.textContent = t("Restore");
+        manageArchivesButton.textContent = t("Archive Manager");
+        addButton.textContent = t("+ Add Prompt");
+        enableAllButton.textContent = t("Enable All");
+        disableAllButton.textContent = t("Disable All");
+        errorTitle.textContent = t("Configuration could not be read");
+        resetButton.textContent = t("Reset to Default");
+        for (const card of root.querySelectorAll(".cpw-prompt-grid__card")) {
+            const drag = card.querySelector(".cpw-prompt-grid__drag");
+            if (drag) {
+                drag.title = t("Drag to reorder");
+                drag.setAttribute("aria-label", t("Drag this card to reorder it"));
+            }
+            card.querySelector(".cpw-prompt-grid__switch input")?.setAttribute(
+                "aria-label",
+                t("Enable this prompt"),
+            );
+            const titleInput = card.querySelector(".cpw-prompt-grid__title");
+            if (titleInput) {
+                titleInput.placeholder = t("Prompt title");
+                titleInput.setAttribute("aria-label", t("Prompt title"));
+            }
+            const deleteButton = card.querySelector(".cpw-prompt-grid__delete");
+            if (deleteButton) {
+                const deleteMessage = deleteButton.classList.contains("cpw-prompt-grid__delete--confirm")
+                    ? t("Click again to delete a non-empty prompt")
+                    : t("Delete this prompt");
+                deleteButton.title = deleteMessage;
+                deleteButton.setAttribute("aria-label", t("Delete this prompt"));
+            }
+            const promptInput = card.querySelector(".cpw-prompt-grid__prompt");
+            if (promptInput) {
+                promptInput.placeholder = t("Enter a prompt…");
+                promptInput.setAttribute("aria-label", t("Prompt content"));
+            }
+            const editButton = card.querySelector(".cpw-prompt-grid__prompt-edit");
+            if (editButton) {
+                editButton.title = t("Split and select prompts");
+                editButton.setAttribute("aria-label", t("Open the prompt tag editor"));
+            }
+        }
+        activePromptEditor?.refreshLocale?.();
+        renderArchiveSelect();
+        activeArchiveManager?.refreshLocale?.();
+        if (!activePromptEditor && !activeArchiveManager && !activeArchiveConfirmation) render();
+    }
 
     function readValue(value) {
         try {
@@ -664,8 +769,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             await archiveClient.select(archiveId);
             publishArchiveSync();
         } catch (error) {
-            console.warn("[Prompt Weaver] 无法保存最后选择的存档", error);
-            setArchiveManagerMessage(error.message || String(error), true);
+            console.warn(`[Prompt Weaver] ${t("Could not save the last selected archive")}`, error);
+            setArchiveManagerMessage(archiveErrorMessage(error), true);
         }
     }
 
@@ -737,6 +842,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function renderQuickArchiveSaveButton() {
         const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
+        const archiveName = archiveDisplayName(archive);
         const enabled = canQuickSaveArchive(archive, {
             dirty: archiveDirty,
             hasState: Boolean(state),
@@ -747,18 +853,19 @@ function createPromptGridWidget(node, inputName, inputData) {
         quickSaveArchiveButton.classList.toggle("cpw-prompt-grid__archive-save--ready", enabled);
         quickSaveArchiveButton.setAttribute("aria-busy", String(archiveQuickSaveBusy));
         if (archiveQuickSaveBusy) {
-            quickSaveArchiveButton.title = `正在保存“${archive?.name ?? "当前存档"}”…`;
+            quickSaveArchiveButton.title = t("Saving \"{name}\"…", { name: archiveName });
         } else if (!archive) {
-            quickSaveArchiveButton.title = "当前没有可保存的关联存档";
+            quickSaveArchiveButton.title = t("There is no associated archive to save");
         } else if (!archiveDirty) {
-            quickSaveArchiveButton.title = `“${archive.name}”没有需要保存的变更`;
+            quickSaveArchiveButton.title = t("\"{name}\" has no changes to save", { name: archiveName });
         } else {
-            quickSaveArchiveButton.title = `保存当前变更到“${archive.name}”`;
+            quickSaveArchiveButton.title = t("Save current changes to \"{name}\"", { name: archiveName });
         }
     }
 
     function renderRestoreArchiveButton() {
         const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
+        const archiveName = archiveDisplayName(archive);
         const enabled = canRestoreArchive(archive, {
             dirty: archiveDirty,
             hasState: Boolean(state),
@@ -767,13 +874,15 @@ function createPromptGridWidget(node, inputName, inputData) {
         });
         restoreArchiveButton.disabled = !enabled;
         if (archiveQuickSaveBusy) {
-            restoreArchiveButton.title = "保存完成后才能还原存档";
+            restoreArchiveButton.title = t("Finish saving before restoring an archive");
         } else if (!archive) {
-            restoreArchiveButton.title = "当前没有可还原的关联存档";
+            restoreArchiveButton.title = t("There is no associated archive to restore");
         } else if (!archiveDirty) {
-            restoreArchiveButton.title = `“${archive.name}”没有需要还原的变更`;
+            restoreArchiveButton.title = t("\"{name}\" has no changes to restore", { name: archiveName });
         } else {
-            restoreArchiveButton.title = `放弃当前变更并还原到“${archive.name}”`;
+            restoreArchiveButton.title = t("Discard current changes and restore \"{name}\"", {
+                name: archiveName,
+            });
         }
     }
 
@@ -790,7 +899,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             visibleArchives.map((archive) => ({
                 value: archive.id,
                 label: formatArchiveOptionLabel(
-                    archive.name,
+                    archiveDisplayName(archive),
                     archive.id === activeArchiveId && archiveDirty,
                 ),
             })),
@@ -827,12 +936,16 @@ function createPromptGridWidget(node, inputName, inputData) {
             reconcileArchiveSelection();
             renderArchiveManagerList();
             publishArchiveSync();
-            showArchiveToast("success", "存档已保存", `已保存到“${archive.name}”。`);
+            showArchiveToast(
+                "success",
+                t("Archive Saved"),
+                t("Saved to \"{name}\".", { name: archiveDisplayName(archive) }),
+            );
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error("[Prompt Weaver] 快捷保存存档失败", error);
-            showArchiveToast("error", "存档保存失败", message);
-            quickSaveArchiveButton.title = `保存失败：${message}`;
+            const message = archiveErrorMessage(error);
+            console.error(`[Prompt Weaver] ${t("Quick archive save failed")}`, error);
+            showArchiveToast("error", t("Archive Save Failed"), message);
+            quickSaveArchiveButton.title = t("Save failed: {message}", { message });
         } finally {
             archiveQuickSaveBusy = false;
             reconcileArchiveSelection();
@@ -930,7 +1043,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderArchiveManagerList();
             return true;
         } catch (error) {
-            if (reportError) setArchiveManagerMessage(error.message || String(error), true);
+            if (reportError) setArchiveManagerMessage(archiveErrorMessage(error), true);
             return false;
         } finally {
             archivesLoading = false;
@@ -951,7 +1064,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         confirmation.resolve(result);
     }
 
-    function askArchiveConfirmation({ title, message, confirmText = "确认", danger = false }) {
+    function askArchiveConfirmation({ title, message, confirmText = t("Confirm"), danger = false }) {
         if (activeArchiveConfirmation) closeArchiveConfirmation(false);
         return new Promise((resolve) => {
             const overlay = element("div", "cpw-archive-confirm__overlay");
@@ -961,7 +1074,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             const heading = element("h3", "cpw-archive-confirm__title", title);
             const body = element("p", "cpw-archive-confirm__message", message);
             const actionsRow = element("div", "cpw-archive-confirm__actions");
-            const cancelButton = element("button", "cpw-archive-manager__button", "取消");
+            const cancelButton = element("button", "cpw-archive-manager__button", t("Cancel"));
             const confirmButton = element(
                 "button",
                 `cpw-archive-manager__button ${danger ? "cpw-archive-manager__button--danger" : "cpw-archive-manager__button--primary"}`,
@@ -1002,7 +1115,13 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function loadArchive(archive, { captureHistory = true, persistGlobal = true } = {}) {
         if (!archive || disposed) return;
-        const normalized = normalizeConfigValue(JSON.stringify(configFromArchiveSnapshot(archive.snapshot)));
+        const snapshot = archive.id === DEFAULT_ARCHIVE_ID || archive.is_default
+            ? localizePristineDefaultSnapshot(
+                archive.snapshot,
+                (index) => t("Prompt {index}", { index }),
+            )
+            : archive.snapshot;
+        const normalized = normalizeConfigValue(JSON.stringify(configFromArchiveSnapshot(snapshot)));
         state = normalized.state;
         parseError = null;
         setActiveArchive(archive.id, { persistGlobal });
@@ -1021,16 +1140,22 @@ function createPromptGridWidget(node, inputName, inputData) {
             saving: archiveQuickSaveBusy,
         })) return;
         loadArchive(archive);
-        showArchiveToast("success", "存档已还原", `已恢复到“${archive.name}”。`);
+        showArchiveToast(
+            "success",
+            t("Archive Restored"),
+            t("Restored \"{name}\".", { name: archiveDisplayName(archive) }),
+        );
     }
 
     async function requestArchiveLoad(archive) {
         if (!archive || (archive.id === activeArchiveId && !archiveDirty)) return false;
         if (archiveDirty) {
             const proceed = await askArchiveConfirmation({
-                title: "放弃当前修改？",
-                message: `加载“${archive.name}”会完整替换当前网格状态。`,
-                confirmText: "放弃并加载",
+                title: t("Discard current changes?"),
+                message: t("Loading \"{name}\" will completely replace the current grid state.", {
+                    name: archiveDisplayName(archive),
+                }),
+                confirmText: t("Discard and Load"),
                 danger: true,
             });
             if (!proceed) {
@@ -1044,8 +1169,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function formatArchiveTime(value) {
-        const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? String(value ?? "") : date.toLocaleString("zh-CN", { hour12: false });
+        return formatDateTime(value);
     }
 
     function downloadArchiveBundle(selectedArchives, filename) {
@@ -1064,7 +1188,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     async function importArchiveFile(file) {
         if (!file) return;
         if (file.size > MAX_ARCHIVE_IMPORT_BYTES) {
-            setArchiveManagerMessage("导入文件不能超过 2 MB。", true);
+            setArchiveManagerMessage(t("The import file cannot exceed 2 MB."), true);
             return;
         }
         try {
@@ -1072,15 +1196,20 @@ function createPromptGridWidget(node, inputName, inputData) {
             const preview = validateImportBundlePreview(bundle);
             const policy = await askImportPolicy(preview);
             if (!policy) return;
-            setArchiveManagerMessage("正在导入…");
+            setArchiveManagerMessage(t("Importing…"));
             const result = await archiveClient.import(bundle, policy);
             await refreshArchives({ reportError: true });
             publishArchiveSync();
             setArchiveManagerMessage(
-                `导入完成：新增 ${result.imported ?? 0}，覆盖 ${result.overwritten ?? 0}，跳过 ${result.skipped ?? 0}，自动重命名 ${result.renamed ?? 0}。`,
+                t("Import complete: {imported} added, {overwritten} overwritten, {skipped} skipped, {renamed} automatically renamed.", {
+                    imported: result.imported ?? 0,
+                    overwritten: result.overwritten ?? 0,
+                    skipped: result.skipped ?? 0,
+                    renamed: result.renamed ?? 0,
+                }),
             );
         } catch (error) {
-            setArchiveManagerMessage(error.message || String(error), true);
+            setArchiveManagerMessage(archiveErrorMessage(error), true);
         }
     }
 
@@ -1091,21 +1220,32 @@ function createPromptGridWidget(node, inputName, inputData) {
             const dialog = element("section", "cpw-archive-confirm");
             dialog.setAttribute("role", "dialog");
             dialog.setAttribute("aria-modal", "true");
-            const heading = element("h3", "cpw-archive-confirm__title", "导入存档");
+            const heading = element("h3", "cpw-archive-confirm__title", t("Import Archives"));
             const summary = element(
                 "p",
                 "cpw-archive-confirm__message",
-                `文件包含 ${preview.archiveCount} 个存档、${preview.itemCount} 张提示词卡片。请选择同名冲突处理方式。`,
+                t("The file contains {archives} archives and {items} prompt cards. Choose how to handle name conflicts.", {
+                    archives: preview.archiveCount,
+                    items: preview.itemCount,
+                }),
             );
             const policy = element("select", "cpw-archive-manager__input");
-            for (const [value, label] of [["skip", "跳过（推荐）"], ["overwrite", "覆盖本地存档"], ["rename", "自动重命名"]]) {
+            for (const [value, label] of [
+                ["skip", t("Skip (Recommended)")],
+                ["overwrite", t("Overwrite Local Archives")],
+                ["rename", t("Automatically Rename")],
+            ]) {
                 const option = element("option", "", label);
                 option.value = value;
                 policy.append(option);
             }
             const actionsRow = element("div", "cpw-archive-confirm__actions");
-            const cancelButton = element("button", "cpw-archive-manager__button", "取消");
-            const confirmButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "开始导入");
+            const cancelButton = element("button", "cpw-archive-manager__button", t("Cancel"));
+            const confirmButton = element(
+                "button",
+                "cpw-archive-manager__button cpw-archive-manager__button--primary",
+                t("Start Import"),
+            );
             actionsRow.append(cancelButton, confirmButton);
             dialog.append(heading, summary, policy, actionsRow);
             overlay.append(dialog);
@@ -1143,7 +1283,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     async function runArchiveMutation(operation, successMessage) {
         if (!activeArchiveManager || activeArchiveManager.busy) return null;
         setArchiveManagerBusy(true);
-        setArchiveManagerMessage("正在保存…");
+        setArchiveManagerMessage(t("Saving…"));
         try {
             const result = await operation();
             await refreshArchives({ reportError: true });
@@ -1151,7 +1291,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             setArchiveManagerMessage(successMessage);
             return result;
         } catch (error) {
-            setArchiveManagerMessage(error.message || String(error), true);
+            setArchiveManagerMessage(archiveErrorMessage(error), true);
             return null;
         } finally {
             setArchiveManagerBusy(false);
@@ -1163,7 +1303,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!state || !activeArchiveManager) return;
         const name = activeArchiveManager.nameInput.value.trim();
         if (!name) {
-            setArchiveManagerMessage("请输入存档名称。", true);
+            setArchiveManagerMessage(t("Enter an archive name."), true);
             activeArchiveManager.nameInput.focus();
             return;
         }
@@ -1171,20 +1311,22 @@ function createPromptGridWidget(node, inputName, inputData) {
         let result;
         if (existing) {
             const overwrite = await askArchiveConfirmation({
-                title: "保存到同名存档？",
-                message: `“${existing.name}”已存在，是否将当前网格状态保存到该存档？原有内容将被替换。`,
-                confirmText: "保存",
+                title: t("Save to an archive with the same name?"),
+                message: t("\"{name}\" already exists. Save the current grid state to it and replace its contents?", {
+                    name: archiveDisplayName(existing),
+                }),
+                confirmText: t("Save"),
                 danger: true,
             });
             if (!overwrite) return;
             result = await runArchiveMutation(
                 () => archiveClient.update(existing.id, { snapshot: currentSnapshot() }),
-                `已保存到“${existing.name}”。`,
+                t("Saved to \"{name}\".", { name: archiveDisplayName(existing) }),
             );
         } else {
             result = await runArchiveMutation(
                 () => archiveClient.create(name, currentSnapshot()),
-                `已保存“${name}”。`,
+                t("Saved \"{name}\".", { name }),
             );
         }
         const saved = result?.archive;
@@ -1462,7 +1604,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     async function persistArchiveOrder(manager, session, archiveIds) {
         if (activeArchiveManager === manager) {
             setArchiveManagerBusy(true);
-            setArchiveManagerMessage("正在保存排序…");
+            setArchiveManagerMessage(t("Saving archive order…"));
         }
         try {
             const payload = await archiveClient.reorder(archiveIds);
@@ -1473,13 +1615,15 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderArchiveSelect();
             renderArchiveManagerList();
             publishArchiveSync();
-            setArchiveManagerMessage("存档顺序已保存。");
+            setArchiveManagerMessage(t("Archive order saved."));
         } catch (error) {
             archives = session.originalArchives;
             renderArchiveSelect();
             renderArchiveManagerList();
             await refreshArchives();
-            setArchiveManagerMessage(`排序保存失败：${error.message || String(error)}`, true);
+            setArchiveManagerMessage(t("Could not save archive order: {message}", {
+                message: archiveErrorMessage(error),
+            }), true);
         } finally {
             if (activeArchiveManager === manager) {
                 setArchiveManagerBusy(false);
@@ -1676,13 +1820,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!manager || !archive || manager.renameId !== archive.id || manager.busy) return;
         const nextName = manager.renameInput?.value.trim() ?? "";
         if (!nextName) {
-            setArchiveManagerMessage("存档名称不能为空。", true);
+            setArchiveManagerMessage(t("Archive name cannot be empty."), true);
             manager.renameInput?.focus();
             return;
         }
         const result = await runArchiveMutation(
             () => archiveClient.update(archive.id, { name: nextName }),
-            `已重命名为“${nextName}”。`,
+            t("Renamed to \"{name}\".", { name: nextName }),
         );
         if (result && activeArchiveManager) {
             activeArchiveManager.renameId = null;
@@ -1696,15 +1840,17 @@ function createPromptGridWidget(node, inputName, inputData) {
         const archive = singleSelectedArchiveForManager(manager);
         if (!manager || !archive || manager.busy || manager.dragSession || !state) return;
         const save = await askArchiveConfirmation({
-            title: archive.is_default ? "保存默认存档？" : "保存存档？",
-            message: `是否将当前网格状态和窗口大小保存到“${archive.name}”？原有内容将被替换。`,
-            confirmText: "保存",
+            title: archive.is_default ? t("Save the default archive?") : t("Save the archive?"),
+            message: t("Save the current grid state and window size to \"{name}\" and replace its contents?", {
+                name: archiveDisplayName(archive),
+            }),
+            confirmText: t("Save"),
             danger: true,
         });
         if (!save) return;
         const result = await runArchiveMutation(
             () => archiveClient.update(archive.id, { snapshot: currentSnapshot() }),
-            `已保存到“${archive.name}”。`,
+            t("Saved to \"{name}\".", { name: archiveDisplayName(archive) }),
         );
         if (!result) return;
         if (activeArchiveManager) {
@@ -1741,8 +1887,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!selectedArchives.length) return;
         if (selectedArchives.length === 1) {
             const [archive] = selectedArchives;
-            downloadArchiveBundle([archive], `${archive.name}.prompt-grid-archives.json`);
-            setArchiveManagerMessage(`已导出“${archive.name}”。`);
+            downloadArchiveBundle(
+                [archive],
+                `${archiveDisplayName(archive)}.prompt-grid-archives.json`,
+            );
+            setArchiveManagerMessage(t("Exported \"{name}\".", { name: archiveDisplayName(archive) }));
             return;
         }
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -1750,7 +1899,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             selectedArchives,
             `prompt-grid-archives-selection-${timestamp}.json`,
         );
-        setArchiveManagerMessage(`已导出 ${selectedArchives.length} 个选中存档。`);
+        setArchiveManagerMessage(t("Exported {count} selected archives.", {
+            count: selectedArchives.length,
+        }));
     }
 
     async function deleteSelectedArchives() {
@@ -1758,18 +1909,26 @@ function createPromptGridWidget(node, inputName, inputData) {
         const selectedArchives = selectedArchivesForManager(manager);
         if (!manager || !selectedArchives.length || manager.busy || manager.dragSession) return;
         if (selectedArchives.some((archive) => archive.is_default || archive.id === DEFAULT_ARCHIVE_ID)) {
-            setArchiveManagerMessage("默认存档不能删除。", true);
+            setArchiveManagerMessage(t("The default archive cannot be deleted."), true);
             return;
         }
-        const nameSummary = selectedArchives
-            .slice(0, 5)
-            .map((archive) => `“${archive.name}”`)
-            .join("、");
+        const nameSummary = formatList(
+            selectedArchives.slice(0, 5).map((archive) => archiveDisplayName(archive)),
+        );
         const extraCount = Math.max(0, selectedArchives.length - 5);
         const remove = await askArchiveConfirmation({
-            title: selectedArchives.length === 1 ? "删除存档？" : `删除 ${selectedArchives.length} 个存档？`,
-            message: `${nameSummary}${extraCount ? ` 等 ${selectedArchives.length} 个存档` : ""}删除后无法恢复，当前节点状态不会改变。`,
-            confirmText: "删除",
+            title: selectedArchives.length === 1
+                ? t("Delete archive?")
+                : t("Delete {count} archives?", { count: selectedArchives.length }),
+            message: extraCount
+                ? t("{names} and {count} archives in total cannot be recovered after deletion. The current node state will not change.", {
+                    names: nameSummary,
+                    count: selectedArchives.length,
+                })
+                : t("{names} cannot be recovered after deletion. The current node state will not change.", {
+                    names: nameSummary,
+                }),
+            confirmText: t("Delete"),
             danger: true,
         });
         if (!remove) return;
@@ -1781,8 +1940,8 @@ function createPromptGridWidget(node, inputName, inputData) {
                 ? archiveClient.delete(selectedIds[0])
                 : archiveClient.deleteMany(selectedIds),
             selectedIds.length === 1
-                ? `已删除“${selectedArchives[0].name}”。`
-                : `已删除 ${selectedIds.length} 个存档。`,
+                ? t("Deleted \"{name}\".", { name: archiveDisplayName(selectedArchives[0]) })
+                : t("Deleted {count} archives.", { count: selectedIds.length }),
         );
         if (!result) {
             if (activeArchiveManager) {
@@ -1810,11 +1969,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         const archive = selectedArchives.length === 1 ? selectedArchives[0] : null;
 
         if (manager.renameId && archive?.id === manager.renameId) {
-            const cancelButton = element("button", "cpw-archive-manager__button", "取消");
+            const cancelButton = element("button", "cpw-archive-manager__button", t("Cancel"));
             const saveNameButton = element(
                 "button",
                 "cpw-archive-manager__button cpw-archive-manager__button--primary",
-                "保存名称",
+                t("Save Name"),
             );
             cancelButton.type = "button";
             saveNameButton.type = "button";
@@ -1834,32 +1993,35 @@ function createPromptGridWidget(node, inputName, inputData) {
             loadable: Boolean(archive) && (archive.id !== activeArchiveId || archiveDirty),
         });
         const definitions = [
-            ["保存", "将当前网格状态保存到所选存档", availability.save, saveSelectedArchive],
-            ["加载", "加载所选存档", availability.load, loadSelectedArchive],
+            [t("Save"), t("Save the current grid state to the selected archive"), availability.save, saveSelectedArchive],
+            [t("Load"), t("Load the selected archive"), availability.load, loadSelectedArchive],
             [
-                "重命名",
-                archive?.is_default ? "默认存档不能重命名" : "重命名所选存档",
+                t("Rename"),
+                archive?.is_default
+                    ? t("The default archive cannot be renamed")
+                    : t("Rename the selected archive"),
                 availability.rename,
                 beginArchiveRename,
             ],
-            ["导出", "导出选中的存档", availability.export, exportSelectedArchives],
+            [t("Export"), t("Export the selected archives"), availability.export, exportSelectedArchives],
             [
-                "删除",
+                t("Delete"),
                 selectedArchives.some((item) => item.is_default || item.id === DEFAULT_ARCHIVE_ID)
-                    ? "默认存档不能删除"
-                    : "删除选中的存档",
+                    ? t("The default archive cannot be deleted.")
+                    : t("Delete the selected archives"),
                 availability.delete,
                 deleteSelectedArchives,
+                true,
             ],
         ];
-        for (const [label, title, enabled, handler] of definitions) {
+        for (const [label, title, enabled, handler, danger = false] of definitions) {
             const button = element(
                 "button",
-                `cpw-archive-manager__button${label === "删除" ? " cpw-archive-manager__button--danger-text" : ""}`,
+                `cpw-archive-manager__button${danger ? " cpw-archive-manager__button--danger-text" : ""}`,
                 label,
             );
             button.type = "button";
-            button.title = selectedArchives.length ? title : "请先选择存档";
+            button.title = selectedArchives.length ? title : t("Select an archive first");
             button.disabled = !enabled;
             button.addEventListener("click", handler);
             actions.append(button);
@@ -1872,7 +2034,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         manager.list.replaceChildren();
         manager.renameInput = null;
         if (!archives.length) {
-            manager.list.append(element("div", "cpw-archive-manager__empty", "还没有存档。可在上方新建存档。"));
+            manager.list.append(element(
+                "div",
+                "cpw-archive-manager__empty",
+                t("There are no archives yet. Create one above."),
+            ));
             renderArchiveManagerActions();
             return;
         }
@@ -1887,12 +2053,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         selectedArchivesForManager(manager);
         for (const archive of archives) {
+            const displayName = archiveDisplayName(archive);
             const row = element("article", "cpw-archive-manager__row");
             row.dataset.archiveId = archive.id;
             row.dataset.archiveDefault = String(Boolean(archive.is_default));
             row.tabIndex = 0;
             row.setAttribute("role", "option");
-            row.setAttribute("aria-label", `${archive.name}存档`);
+            row.setAttribute("aria-label", t("{name} archive", { name: displayName }));
             if (manager.selectedArchiveIds.has(archive.id)) {
                 row.classList.add("cpw-archive-manager__row--selected");
                 row.setAttribute("aria-selected", "true");
@@ -1904,8 +2071,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 : element("button", "cpw-archive-manager__drag", "⠿");
             if (!archive.is_default) {
                 dragControl.type = "button";
-                dragControl.title = "拖拽调整存档顺序";
-                dragControl.setAttribute("aria-label", `拖拽“${archive.name}”调整顺序`);
+                dragControl.title = t("Drag to reorder archives");
+                dragControl.setAttribute("aria-label", t("Drag \"{name}\" to reorder it", {
+                    name: displayName,
+                }));
                 dragControl.setAttribute("aria-grabbed", "false");
                 dragControl.addEventListener("pointerdown", (event) => {
                     beginArchiveReorder(event, archive, row, dragControl);
@@ -1919,20 +2088,27 @@ function createPromptGridWidget(node, inputName, inputData) {
             }
             dragControl.disabled = manager.busy || Boolean(manager.renameId);
             const main = element("div", "cpw-archive-manager__row-main");
-            const name = element("strong", "cpw-archive-manager__row-name", archive.name);
+            const name = element("strong", "cpw-archive-manager__row-name", displayName);
             const nameRow = element("div", "cpw-archive-manager__row-name-line");
             nameRow.append(name);
             if (archive.is_default) {
-                nameRow.append(element("span", "cpw-archive-manager__default-badge", "默认"));
+                nameRow.append(element("span", "cpw-archive-manager__default-badge", t("Default")));
             }
             if (archive.id === activeArchiveId) {
-                nameRow.append(element("span", "cpw-archive-manager__current-badge", "当前"));
+                nameRow.append(element("span", "cpw-archive-manager__current-badge", t("Current")));
             }
             const enabledCount = archive.snapshot.items.filter((item) => item.enabled).length;
             const meta = element(
                 "span",
                 "cpw-archive-manager__row-meta",
-                `${archive.snapshot.columns} 列 · ${archive.snapshot.items.length} 张卡片 · ${enabledCount} 张启用 · ${archive.snapshot.node_size.width}×${archive.snapshot.node_size.height} · ${formatArchiveTime(archive.updated_at)}`,
+                t("{columns} columns · {cards} cards · {enabled} enabled · {width}×{height} · {time}", {
+                    columns: archive.snapshot.columns,
+                    cards: archive.snapshot.items.length,
+                    enabled: enabledCount,
+                    width: archive.snapshot.node_size.width,
+                    height: archive.snapshot.node_size.height,
+                    time: formatArchiveTime(archive.updated_at),
+                }),
             );
             main.append(nameRow, meta);
 
@@ -1941,7 +2117,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 renameInput.type = "text";
                 renameInput.maxLength = 80;
                 renameInput.value = archive.name;
-                renameInput.setAttribute("aria-label", "新的存档名称");
+                renameInput.setAttribute("aria-label", t("New archive name"));
                 renameInput.addEventListener("keydown", (event) => {
                     if (event.key === "Enter") {
                         event.preventDefault();
@@ -2005,14 +2181,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         const dialog = element("section", "cpw-archive-manager");
         dialog.setAttribute("role", "dialog");
         dialog.setAttribute("aria-modal", "true");
-        dialog.setAttribute("aria-label", "提示词网格存档管理");
+        dialog.setAttribute("aria-label", t("Prompt Grid Archive Manager"));
 
         const header = element("header", "cpw-archive-manager__header");
-        const title = element("h2", "cpw-archive-manager__title", "提示词网格存档");
+        const title = element("h2", "cpw-archive-manager__title", t("Prompt Grid Archives"));
         const closeButton = element("button", "cpw-archive-manager__close", "×");
         closeButton.type = "button";
-        closeButton.title = "关闭";
-        closeButton.setAttribute("aria-label", "关闭存档管理");
+        closeButton.title = t("Close");
+        closeButton.setAttribute("aria-label", t("Close archive manager"));
         header.append(title, closeButton);
 
         const saveRow = element("div", "cpw-archive-manager__save-row");
@@ -2020,9 +2196,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         nameInput.type = "text";
         nameInput.maxLength = 80;
         nameInput.value = defaultArchiveName();
-        nameInput.placeholder = "存档名称";
-        nameInput.setAttribute("aria-label", "新存档名称");
-        const saveButton = element("button", "cpw-archive-manager__button cpw-archive-manager__button--primary", "新建存档");
+        nameInput.placeholder = t("Archive name");
+        nameInput.setAttribute("aria-label", t("New archive name"));
+        const saveButton = element(
+            "button",
+            "cpw-archive-manager__button cpw-archive-manager__button--primary",
+            t("New Archive"),
+        );
         saveButton.type = "button";
         saveRow.append(nameInput, saveButton);
 
@@ -2030,11 +2210,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         message.hidden = true;
         const list = element("div", "cpw-archive-manager__list");
         list.setAttribute("role", "listbox");
-        list.setAttribute("aria-label", "存档列表");
+        list.setAttribute("aria-label", t("Archive list"));
         list.setAttribute("aria-multiselectable", "true");
         const footer = element("footer", "cpw-archive-manager__footer");
-        const importButton = element("button", "cpw-archive-manager__button", "导入存档");
-        const exportAllButton = element("button", "cpw-archive-manager__button", "导出全部");
+        const importButton = element("button", "cpw-archive-manager__button", t("Import Archives"));
+        const exportAllButton = element("button", "cpw-archive-manager__button", t("Export All"));
         const selectedActions = element("div", "cpw-archive-manager__selected-actions");
         for (const button of [importButton, exportAllButton]) button.type = "button";
         const footerSpacer = element("span", "cpw-archive-manager__footer-spacer");
@@ -2077,6 +2257,19 @@ function createPromptGridWidget(node, inputName, inputData) {
             renameInput: null,
             busy: false,
             dragSession: null,
+            refreshLocale() {
+                dialog.setAttribute("aria-label", t("Prompt Grid Archive Manager"));
+                title.textContent = t("Prompt Grid Archives");
+                closeButton.title = t("Close");
+                closeButton.setAttribute("aria-label", t("Close archive manager"));
+                nameInput.placeholder = t("Archive name");
+                nameInput.setAttribute("aria-label", t("New archive name"));
+                saveButton.textContent = t("New Archive");
+                list.setAttribute("aria-label", t("Archive list"));
+                importButton.textContent = t("Import Archives");
+                exportAllButton.textContent = t("Export All");
+                if (!this.dragSession && !this.renameId) renderArchiveManagerList();
+            },
         };
         overlay.addEventListener("pointerdown", (event) => {
             if (event.target === overlay && !activeArchiveConfirmation) closeArchiveManager();
@@ -2094,12 +2287,12 @@ function createPromptGridWidget(node, inputName, inputData) {
         });
         exportAllButton.addEventListener("click", () => {
             if (!archives.length) {
-                setArchiveManagerMessage("当前没有可导出的存档。", true);
+                setArchiveManagerMessage(t("There are no archives to export."), true);
                 return;
             }
             const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
             downloadArchiveBundle(archives, `prompt-grid-archives-${timestamp}.json`);
-            setArchiveManagerMessage(`已导出 ${archives.length} 个存档。`);
+            setArchiveManagerMessage(t("Exported {count} archives.", { count: archives.length }));
         });
         document.addEventListener("keydown", onKeyDown, true);
         document.body.append(overlay);
@@ -2111,10 +2304,10 @@ function createPromptGridWidget(node, inputName, inputData) {
     function nextTitle() {
         let highest = 0;
         for (const item of state?.items ?? []) {
-            const match = /^提示词\s+(\d+)$/.exec(item.title.trim());
+            const match = /^(?:Prompt|提示词)\s+(\d+)$/i.exec(item.title.trim());
             if (match) highest = Math.max(highest, Number(match[1]));
         }
-        return `提示词 ${highest + 1}`;
+        return t("Prompt {index}", { index: highest + 1 });
     }
 
     function updateItem(id, patch, captureHistory = true) {
@@ -2188,7 +2381,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (currentIndex < 0) return;
         const menu = element("div", "cpw-prompt-grid__item-menu");
         menu.setAttribute("role", "menu");
-        menu.setAttribute("aria-label", `${item.title || "提示词"} 菜单`);
+        menu.setAttribute("aria-label", t("{name} menu", { name: item.title || t("Prompt") }));
         menu.tabIndex = -1;
 
         const makeAction = (label, disabled, action) => {
@@ -2199,24 +2392,26 @@ function createPromptGridWidget(node, inputName, inputData) {
             button.addEventListener("click", () => action());
             return button;
         };
-        const topButton = makeAction("置顶", currentIndex === 0, () => moveItemToEdge(item.id, "start"));
+        const topButton = makeAction(t("Move to Top"), currentIndex === 0, () => (
+            moveItemToEdge(item.id, "start")
+        ));
         const bottomButton = makeAction(
-            "置底",
+            t("Move to Bottom"),
             currentIndex === state.items.length - 1,
             () => moveItemToEdge(item.id, "end"),
         );
         const separator = element("div", "cpw-prompt-grid__item-menu-separator");
         separator.setAttribute("role", "separator");
-        const colorLabel = element("div", "cpw-prompt-grid__item-menu-label", "颜色");
+        const colorLabel = element("div", "cpw-prompt-grid__item-menu-label", t("Color"));
         const colorGroup = element("div", "cpw-prompt-grid__item-menu-colors");
         colorGroup.setAttribute("role", "group");
-        colorGroup.setAttribute("aria-label", "卡片颜色");
+        colorGroup.setAttribute("aria-label", t("Card color"));
         const currentColor = normalizePromptGridItemColor(item.color);
         const colorOptions = [
-            { key: null, label: "无色", hex: null },
+            { key: null, label: t("No Color"), hex: null },
             ...Object.entries(PROMPT_GRID_ITEM_COLORS).map(([key, definition]) => ({
                 key,
-                label: definition.label,
+                label: t(definition.label),
                 hex: definition.hex,
             })),
         ];
@@ -2226,7 +2421,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 `cpw-prompt-grid__item-color${option.key ? "" : " cpw-prompt-grid__item-color--none"}`,
             );
             colorButton.type = "button";
-            colorButton.setAttribute("aria-label", option.key ? `颜色：${option.label}` : option.label);
+            colorButton.setAttribute(
+                "aria-label",
+                option.key ? t("Color: {color}", { color: option.label }) : option.label,
+            );
             colorButton.setAttribute("aria-pressed", String(currentColor === option.key));
             colorButton.title = option.label;
             if (option.hex) colorButton.style.setProperty("--cpw-item-color", option.hex);
@@ -2732,8 +2930,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         const header = element("header", "cpw-prompt-editor__header");
         const title = element("h2", "cpw-prompt-editor__title");
         const activeCount = element("span", "cpw-prompt-editor__active-count", "0");
-        activeCount.setAttribute("aria-label", "当前激活 0 个提示词");
-        title.append("编辑提示词（", activeCount, "）");
+        activeCount.setAttribute("aria-label", tp("{count} prompt active", "{count} prompts active", 0));
+        title.append(t("Edit Prompts ("), activeCount, t(")"));
         title.id = `cpw-prompt-editor-${createId()}`;
         dialog.setAttribute("aria-labelledby", title.id);
         const headerMain = element("div", "cpw-prompt-editor__header-main");
@@ -2741,9 +2939,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
         freeModeInput.type = "checkbox";
         freeModeInput.checked = false;
-        freeModeInput.setAttribute("aria-label", "自由模式");
+        freeModeInput.setAttribute("aria-label", t("Free Mode"));
         const freeModeIndicator = element("span", "cpw-prompt-editor__free-mode-indicator");
-        const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", "自由模式");
+        const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", t("Free Mode"));
         freeModeLabel.append(freeModeInput, freeModeIndicator, freeModeText);
         const fontSizeControl = element("div", "cpw-prompt-editor__font-size-control");
         const fontSizeInput = element("input", "cpw-prompt-editor__font-size-input");
@@ -2753,8 +2951,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         fontSizeInput.step = "1";
         fontSizeInput.value = String(promptFontSize);
         fontSizeInput.id = `cpw-prompt-editor-font-size-${createId()}`;
-        fontSizeInput.setAttribute("aria-label", "提示词字号");
-        fontSizeInput.setAttribute("aria-valuetext", `${promptFontSize} 像素`);
+        fontSizeInput.setAttribute("aria-label", t("Prompt font size"));
+        fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
         const fontSizeValue = element(
             "output",
             "cpw-prompt-editor__font-size-value",
@@ -2765,13 +2963,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         headerMain.append(title, freeModeLabel, fontSizeControl);
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
-        closeButton.title = "关闭且不保存";
-        closeButton.setAttribute("aria-label", "关闭提示词编辑窗口且不保存");
+        closeButton.title = t("Close without saving");
+        closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
         header.append(headerMain, closeButton);
 
         const content = element("div", "cpw-prompt-editor__content");
         const tokenList = element("div", "cpw-prompt-editor__tokens");
-        tokenList.setAttribute("aria-label", "提示词标签");
+        tokenList.setAttribute("aria-label", t("Prompt tags"));
         const addStatus = element("div", "cpw-prompt-editor__add-status");
         addStatus.setAttribute("role", "status");
         addStatus.setAttribute("aria-live", "polite");
@@ -2780,30 +2978,30 @@ function createPromptGridWidget(node, inputName, inputData) {
 
         const footer = element("footer", "cpw-prompt-editor__footer");
         const selectionActions = element("div", "cpw-prompt-editor__selection-actions");
-        const enableAllButton = element("button", "cpw-prompt-editor__action", "全开");
-        const disableAllButton = element("button", "cpw-prompt-editor__action", "全关");
+        const enableAllButton = element("button", "cpw-prompt-editor__action", t("Enable All"));
+        const disableAllButton = element("button", "cpw-prompt-editor__action", t("Disable All"));
         const confirmButton = element(
             "button",
             "cpw-prompt-editor__action cpw-prompt-editor__action--primary",
-            "确认",
+            t("Confirm"),
         );
         enableAllButton.type = "button";
-        enableAllButton.title = "启用全部提示词";
+        enableAllButton.title = t("Enable all prompts");
         disableAllButton.type = "button";
-        disableAllButton.title = "停用全部提示词";
+        disableAllButton.title = t("Disable all prompts");
         confirmButton.type = "button";
         selectionActions.append(enableAllButton, disableAllButton);
         footer.append(selectionActions, confirmButton);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
-        resizeHandle.setAttribute("aria-label", "拖拽调整提示词编辑窗口大小");
+        resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
         dialog.append(header, content, footer, resizeHandle);
         overlay.append(dialog);
 
         fontSizeInput.addEventListener("input", (event) => {
             promptFontSize = normalizeStoredPromptEditorFontSize(event.currentTarget.value);
             fontSizeInput.value = String(promptFontSize);
-            fontSizeInput.setAttribute("aria-valuetext", `${promptFontSize} 像素`);
+            fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
             fontSizeValue.textContent = `${promptFontSize}px`;
             dialog.style.setProperty("--cpw-prompt-editor-font-size", `${promptFontSize}px`);
             persistPromptEditorFontSize(promptFontSize);
@@ -3058,7 +3256,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 ? promptSelectionFromFreeText(freePromptText).tokens.length
                 : countActivePromptTokens(selected);
             activeCount.textContent = String(count);
-            activeCount.setAttribute("aria-label", `当前激活 ${count} 个提示词`);
+            activeCount.setAttribute(
+                "aria-label",
+                tp("{count} prompt active", "{count} prompts active", count),
+            );
         };
         const promptTokenIndexFromElement = (target) => {
             const button = target?.closest?.(".cpw-prompt-editor__token");
@@ -3179,14 +3380,17 @@ function createPromptGridWidget(node, inputName, inputData) {
             enableAllButton.disabled = freeMode;
             disableAllButton.disabled = freeMode;
             tokenList.classList.toggle("cpw-prompt-editor__tokens--free", freeMode);
-            tokenList.setAttribute("aria-label", freeMode ? "自由模式提示词文本" : "提示词标签");
+            tokenList.setAttribute(
+                "aria-label",
+                freeMode ? t("Free-mode prompt text") : t("Prompt tags"),
+            );
 
             if (freeMode) {
                 freeTextArea = element("textarea", "cpw-prompt-editor__free-text");
                 freeTextArea.value = freePromptText;
-                freeTextArea.placeholder = "输入完整提示词";
+                freeTextArea.placeholder = t("Enter the full prompt");
                 freeTextArea.spellcheck = false;
-                freeTextArea.setAttribute("aria-label", "自由模式提示词文本");
+                freeTextArea.setAttribute("aria-label", t("Free-mode prompt text"));
                 freeTextArea.addEventListener("input", (event) => {
                     freePromptText = event.currentTarget.value;
                     renderActivePromptCount();
@@ -3227,7 +3431,11 @@ function createPromptGridWidget(node, inputName, inputData) {
                     tokenList.append(button);
                 }
             } else {
-                tokenList.append(element("div", "cpw-prompt-editor__empty", "当前没有提示词，可点击 + 添加。"));
+                tokenList.append(element(
+                    "div",
+                    "cpw-prompt-editor__empty",
+                    t("There are no prompts. Click + to add one."),
+                ));
             }
 
             if (adding) {
@@ -3235,15 +3443,15 @@ function createPromptGridWidget(node, inputName, inputData) {
                 addInput = element("textarea", "cpw-prompt-editor__add-input");
                 addInput.rows = 1;
                 addInput.value = addDraft;
-                addInput.placeholder = "输入提示词，支持中文或英文标签匹配";
-                addInput.setAttribute("aria-label", "新增提示词");
+                addInput.placeholder = t("Enter a prompt; Chinese and English tag matching are supported");
+                addInput.setAttribute("aria-label", t("Add prompt"));
                 addInput.setAttribute("role", "combobox");
                 addInput.setAttribute("aria-autocomplete", "list");
                 addInput.setAttribute("aria-expanded", "false");
                 suggestionList = element("div", "cpw-prompt-editor__suggestions");
                 suggestionList.id = `cpw-prompt-editor-suggestions-${createId()}`;
                 suggestionList.setAttribute("role", "listbox");
-                suggestionList.setAttribute("aria-label", "Prompt Assistant 标签匹配结果");
+                suggestionList.setAttribute("aria-label", t("Prompt Assistant tag matches"));
                 suggestionList.hidden = true;
                 addInput.setAttribute("aria-controls", suggestionList.id);
                 addComposer.append(addInput);
@@ -3293,8 +3501,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             } else {
                 addButton = element("button", "cpw-prompt-editor__add", "+");
                 addButton.type = "button";
-                addButton.title = "添加提示词";
-                addButton.setAttribute("aria-label", "添加提示词");
+                addButton.title = t("Add prompt");
+                addButton.setAttribute("aria-label", t("Add prompt"));
                 addButton.addEventListener("click", () => {
                     adding = true;
                     addDraft = "";
@@ -3309,13 +3517,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         };
         const formatAddStatus = ({ addedCount, mergedCount, reactivatedCount }, hadInput) => {
             if (!addedCount && !mergedCount) {
-                return hadInput ? "未检测到可添加的提示词。" : "";
+                return hadInput ? t("No prompt text was detected.") : "";
             }
             const parts = [];
-            if (addedCount) parts.push(`已添加 ${addedCount} 个`);
-            if (mergedCount) parts.push(`合并 ${mergedCount} 个重复项`);
-            if (reactivatedCount) parts.push(`重新启用 ${reactivatedCount} 个`);
-            return `${parts.join("，")}。`;
+            if (addedCount) parts.push(t("Added {count}", { count: addedCount }));
+            if (mergedCount) parts.push(t("Merged {count} duplicates", { count: mergedCount }));
+            if (reactivatedCount) parts.push(t("Re-enabled {count}", { count: reactivatedCount }));
+            return t("{parts}.", { parts: parts.join(t(", ")) });
         };
         function commitAddInput({ focusAddButton = false, render = true } = {}) {
             if (!adding || !addInput) return false;
@@ -3381,7 +3589,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             freeModeInput.checked = false;
             promptRequiresRebuild = true;
             renderTokens();
-            setAddStatus(tokens.length ? `已格式化为 ${tokens.length} 个提示词。` : "");
+            setAddStatus(tokens.length ? t("Formatted as {count} prompts.", { count: tokens.length }) : "");
         };
 
         const setAllPromptTokensActive = (active) => {
@@ -3390,7 +3598,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (adding && addInput) commitAddInput({ render: false });
             selected = setAllPromptTokenSelection(selected, active);
             renderTokens();
-            setAddStatus(tokens.length ? (active ? "已全部启用。" : "已全部停用。") : "");
+            setAddStatus(tokens.length
+                ? (active ? t("All prompts enabled.") : t("All prompts disabled."))
+                : "");
         };
 
         const cleanupPromptEditor = () => {
@@ -3402,7 +3612,45 @@ function createPromptGridWidget(node, inputName, inputData) {
             window.removeEventListener("resize", handlePromptEditorViewportResize);
             overlay.removeEventListener("scroll", handleSuggestionAnchorChange, true);
         };
-        activePromptEditor = { overlay, opener, cancelPendingAdd: cleanupPromptEditor };
+        const refreshPromptEditorLocale = () => {
+            title.childNodes[0].textContent = t("Edit Prompts (");
+            title.childNodes[2].textContent = t(")");
+            renderActivePromptCount();
+            freeModeInput.setAttribute("aria-label", t("Free Mode"));
+            freeModeText.textContent = t("Free Mode");
+            fontSizeInput.setAttribute("aria-label", t("Prompt font size"));
+            fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
+            closeButton.title = t("Close without saving");
+            closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
+            enableAllButton.textContent = t("Enable All");
+            disableAllButton.textContent = t("Disable All");
+            enableAllButton.title = t("Enable all prompts");
+            disableAllButton.title = t("Disable all prompts");
+            confirmButton.textContent = t("Confirm");
+            resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
+            tokenList.setAttribute(
+                "aria-label",
+                freeMode ? t("Free-mode prompt text") : t("Prompt tags"),
+            );
+            if (freeTextArea) {
+                freeTextArea.placeholder = t("Enter the full prompt");
+                freeTextArea.setAttribute("aria-label", t("Free-mode prompt text"));
+            }
+            if (addInput) {
+                addInput.placeholder = t("Enter a prompt; Chinese and English tag matching are supported");
+                addInput.setAttribute("aria-label", t("Add prompt"));
+            }
+            if (addButton) {
+                addButton.title = t("Add prompt");
+                addButton.setAttribute("aria-label", t("Add prompt"));
+            }
+        };
+        activePromptEditor = {
+            overlay,
+            opener,
+            cancelPendingAdd: cleanupPromptEditor,
+            refreshLocale: refreshPromptEditorLocale,
+        };
         window.addEventListener("resize", handlePromptEditorViewportResize);
         overlay.addEventListener("scroll", handleSuggestionAnchorChange, true);
         header.addEventListener("pointerdown", beginPromptEditorDrag);
@@ -3422,7 +3670,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         tokenList.addEventListener("lostpointercapture", endPromptTokenToggleGesture);
         renderTokens();
         if (promptNeedsDeduplication) {
-            setAddStatus(`已自动合并 ${parsedTokens.length - initialTokens.length} 个重复项。`);
+            setAddStatus(t("Automatically merged {count} duplicates.", {
+                count: parsedTokens.length - initialTokens.length,
+            }));
         }
         closeButton.addEventListener("click", () => closePromptEditor());
         enableAllButton.addEventListener("click", () => setAllPromptTokensActive(true));
@@ -3491,26 +3741,26 @@ function createPromptGridWidget(node, inputName, inputData) {
         const header = element("div", "cpw-prompt-grid__card-header");
         const dragHandle = element("button", "cpw-prompt-grid__drag", "⠿");
         dragHandle.type = "button";
-        dragHandle.title = "拖拽排序";
-        dragHandle.setAttribute("aria-label", "拖拽此卡片排序");
+        dragHandle.title = t("Drag to reorder");
+        dragHandle.setAttribute("aria-label", t("Drag this card to reorder it"));
 
         const toggleLabel = element("label", "cpw-prompt-grid__switch");
         const toggle = element("input", "");
         toggle.type = "checkbox";
         toggle.checked = item.enabled;
-        toggle.setAttribute("aria-label", "启用此提示词");
+        toggle.setAttribute("aria-label", t("Enable this prompt"));
         toggleLabel.append(toggle, element("span", "cpw-prompt-grid__switch-track"));
 
         const title = element("input", "cpw-prompt-grid__title");
         title.type = "text";
         title.value = item.title;
-        title.placeholder = "提示词标题";
-        title.setAttribute("aria-label", "提示词标题");
+        title.placeholder = t("Prompt title");
+        title.setAttribute("aria-label", t("Prompt title"));
 
         const deleteButton = element("button", "cpw-prompt-grid__delete", "×");
         deleteButton.type = "button";
-        deleteButton.title = "删除此提示词";
-        deleteButton.setAttribute("aria-label", "删除此提示词");
+        deleteButton.title = t("Delete this prompt");
+        deleteButton.setAttribute("aria-label", t("Delete this prompt"));
         const cardActions = element("div", "cpw-prompt-grid__card-actions");
         cardActions.append(deleteButton, dragHandle);
         header.append(toggleLabel, title, cardActions);
@@ -3518,12 +3768,12 @@ function createPromptGridWidget(node, inputName, inputData) {
         const prompt = element("input", "cpw-prompt-grid__prompt");
         prompt.type = "text";
         prompt.value = item.prompt;
-        prompt.placeholder = "输入提示词…";
-        prompt.setAttribute("aria-label", "提示词内容");
+        prompt.placeholder = t("Enter a prompt…");
+        prompt.setAttribute("aria-label", t("Prompt content"));
         const promptEditButton = element("button", "cpw-prompt-grid__prompt-edit", "✎");
         promptEditButton.type = "button";
-        promptEditButton.title = "拆分并选择提示词";
-        promptEditButton.setAttribute("aria-label", "打开提示词标签编辑窗口");
+        promptEditButton.title = t("Split and select prompts");
+        promptEditButton.setAttribute("aria-label", t("Open the prompt tag editor"));
         const promptRow = element("div", "cpw-prompt-grid__prompt-row");
         promptRow.append(prompt, promptEditButton);
         card.append(header, promptRow);
@@ -3534,7 +3784,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         function resetDeleteConfirmation() {
             deleteArmed = false;
             deleteButton.textContent = "×";
-            deleteButton.title = "删除此提示词";
+            deleteButton.title = t("Delete this prompt");
             deleteButton.classList.remove("cpw-prompt-grid__delete--confirm");
         }
 
@@ -3551,7 +3801,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (prompt.value.trim() && !deleteArmed) {
                 deleteArmed = true;
                 deleteButton.textContent = "!";
-                deleteButton.title = "再次点击确认删除非空提示词";
+                deleteButton.title = t("Click again to delete a non-empty prompt");
                 deleteButton.classList.add("cpw-prompt-grid__delete--confirm");
                 clearTimeout(deleteResetTimer);
                 deleteResetTimer = setTimeout(resetDeleteConfirmation, 3000);
@@ -3574,6 +3824,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function render() {
         if (disposed) return;
+        syncLocale(app);
         closeItemContextMenu();
         if (activePromptEditor) closePromptEditor(false);
         if (dragSession) endPointerDrag(true);
@@ -3582,7 +3833,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         scroll.hidden = invalid;
         errorPanel.hidden = !invalid;
         if (invalid) {
-            errorMessage.textContent = parseError || "未知配置错误";
+            errorMessage.textContent = parseError || t("Unknown configuration error");
             cardElements.clear();
             grid.replaceChildren();
             reconcileArchiveSelection();
@@ -3596,7 +3847,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (cards.length) {
             grid.replaceChildren(...cards);
         } else {
-            grid.replaceChildren(element("div", "cpw-prompt-grid__empty", "暂无提示词，点击“新增提示词”开始编辑。"));
+            grid.replaceChildren(element(
+                "div",
+                "cpw-prompt-grid__empty",
+                t("There are no prompts. Click \"Add Prompt\" to begin."),
+            ));
         }
         reconcileArchiveSelection();
     }
@@ -3667,6 +3922,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             reconcileLoadedArchiveAssociation();
         },
     });
+    const localeController = { node, refreshLocale };
+    promptGridLocaleControllers.add(localeController);
     const sizeObserver = typeof ResizeObserver === "function"
         ? new ResizeObserver(scheduleArchiveSizeReconcile)
         : null;
@@ -3678,7 +3935,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         return result;
     };
     node.onResize = promptGridOnResize;
-    readValue(inputData?.[1]?.default ?? JSON.stringify(createDefaultConfig()));
+    readValue(JSON.stringify(createDefaultConfig()));
     widget = node.addDOMWidget(inputName, WIDGET_TYPE, root, {
         serialize: true,
         hideInPanel: true,
@@ -3711,6 +3968,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         columnSelect.customSelect.destroy();
         archiveSelect.customSelect.destroy();
         promptGridArchiveControllers.delete(node);
+        promptGridLocaleControllers.delete(localeController);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;

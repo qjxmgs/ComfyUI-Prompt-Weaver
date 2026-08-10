@@ -26,6 +26,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 8px;
     flex: 0 0 auto;
     padding: 6px;
@@ -44,6 +45,7 @@
 }
 
 .cpw-prompt-grid__actions {
+    flex: 1 1 auto;
     justify-content: flex-end;
     flex-wrap: wrap;
 }
@@ -54,13 +56,14 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    flex: 1 1 230px;
+    flex: 1 1 330px;
+    flex-wrap: wrap;
 }
 
 .cpw-prompt-grid__archive-select {
     min-width: 74px;
-    max-width: 120px;
-    flex: 1 1 94px;
+    max-width: 180px;
+    flex: 1 1 130px;
 }
 
 .cpw-prompt-grid__button,
@@ -88,6 +91,7 @@
 
 .cpw-prompt-grid__button {
     padding: 3px 9px;
+    white-space: nowrap;
 }
 
 .cpw-prompt-grid__button:disabled {
@@ -1082,6 +1086,7 @@
 
 .cpw-prompt-editor__footer {
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 10px;
     padding-right: 30px;
     border-top: 1px solid var(--border-color, #4b4d52);
@@ -1092,6 +1097,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .cpw-prompt-editor__action {
@@ -1480,6 +1486,7 @@
 .cpw-archive-manager__selected-actions {
     display: flex;
     justify-content: flex-end;
+    flex-wrap: wrap;
     gap: 6px;
     margin-left: auto;
 }
