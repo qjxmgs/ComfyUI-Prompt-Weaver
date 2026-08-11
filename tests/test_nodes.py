@@ -28,7 +28,7 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
         self.assertEqual(NODES.PromptWeaverPromptToggleGrid.FUNCTION, "combine")
         self.assertEqual(
             NODES.PromptWeaverPromptToggleGrid.CATEGORY,
-            "Prompt Weaver/提示词",
+            "Prompt Weaver/Prompt",
         )
 
         default = json.loads(options["default"])
@@ -41,7 +41,7 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["title"] for item in default["items"]],
-            ["提示词 1", "提示词 2", "提示词 3", "提示词 4"],
+            ["Prompt 1", "Prompt 2", "Prompt 3", "Prompt 4"],
         )
         self.assertTrue(all(item["enabled"] for item in default["items"]))
         self.assertTrue(all(item["prompt"] == "" for item in default["items"]))

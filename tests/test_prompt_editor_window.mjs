@@ -70,7 +70,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
         new URL("../web/prompt_toggle_grid.css", import.meta.url),
         "utf8",
     );
-    assert.match(uiSource, /title\.append\("编辑提示词（", activeCount, "）"\)/);
+    assert.match(uiSource, /title\.append\(t\("Edit Prompts \("\), activeCount, t\("\)"\)\)/);
     assert.match(uiSource, /header\.addEventListener\("pointerdown", beginPromptEditorDrag\)/);
     assert.match(uiSource, /resizeHandle\.addEventListener\("pointerdown", beginPromptEditorResize\)/);
     assert.match(uiSource, /localStorage\?\.setItem\([\s\S]*?PROMPT_EDITOR_SIZE_STORAGE_KEY/);

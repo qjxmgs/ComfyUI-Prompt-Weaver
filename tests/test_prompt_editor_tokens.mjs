@@ -188,8 +188,8 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
         new URL("../web/prompt_toggle_grid.css", import.meta.url),
         "utf8",
     );
-    assert.match(uiSource, /cpw-prompt-editor__action", "全开"/);
-    assert.match(uiSource, /cpw-prompt-editor__action", "全关"/);
+    assert.match(uiSource, /cpw-prompt-editor__action", t\("Enable All"\)/);
+    assert.match(uiSource, /cpw-prompt-editor__action", t\("Disable All"\)/);
     assert.doesNotMatch(uiSource, /resetSelectionButton/);
     assert.match(uiSource, /tokenList\.setPointerCapture\(event\.pointerId\)/);
     assert.match(uiSource, /tokenList\.addEventListener\("pointermove", movePromptTokenToggleGesture\)/);
@@ -207,7 +207,7 @@ test("prompt editor UI exposes non-persistent free mode with raw confirmation", 
         "utf8",
     );
     assert.match(uiSource, /freeModeInput\.checked = false/);
-    assert.match(uiSource, /cpw-prompt-editor__free-mode-text", "自由模式"/);
+    assert.match(uiSource, /cpw-prompt-editor__free-mode-text", t\("Free Mode"\)/);
     assert.match(uiSource, /cpw-prompt-editor__free-text/);
     assert.match(uiSource, /enableAllButton\.disabled = freeMode/);
     assert.match(uiSource, /disableAllButton\.disabled = freeMode/);

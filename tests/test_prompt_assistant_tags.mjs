@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const moduleSource = await readFile(
-    new URL("../web/prompt_assistant_tags.js", import.meta.url),
+const i18nSource = await readFile(
+    new URL("../web/prompt_weaver_i18n.js", import.meta.url),
     "utf8",
 );
+const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString("base64")}`;
+const moduleSource = (await readFile(
+    new URL("../web/prompt_assistant_tags.js", import.meta.url),
+    "utf8",
+)).replace("./prompt_weaver_i18n.js", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     PromptAssistantTagCatalog,
@@ -54,9 +59,9 @@ test("validates and deduplicates safe CSV file names", () => {
     );
     assert.throws(
         () => validatePromptAssistantTagFiles({ success: true, files: ["../标签.csv"] }),
-        /无效标签文件名/,
+        /invalid tag file name/,
     );
-    assert.throws(() => validatePromptAssistantTagFiles({ files: [] }), /格式无效/);
+    assert.throws(() => validatePromptAssistantTagFiles({ files: [] }), /file list is invalid/);
 });
 
 test("flattens nested CSV data while preserving source order and category paths", () => {
@@ -100,7 +105,7 @@ test("flattens nested CSV data while preserving source order and category paths"
     );
     assert.throws(
         () => flattenPromptAssistantTagData({ 分类: ["invalid"] }, "错误.csv"),
-        /非对象分组或非字符串标签/,
+        /non-object group or non-string tag/,
     );
 });
 
@@ -113,7 +118,7 @@ test("merges duplicate English values but keeps every Chinese alias searchable",
     assert.equal(records.length, 2);
     assert.deepEqual(records[0].aliases, ["杰作", "大师作品"]);
     assert.equal(searchPromptAssistantTags(records, "大师")[0], records[0]);
-    assert.equal(formatPromptAssistantTagOption(records[0]), "masterpiece（杰作）");
+    assert.equal(formatPromptAssistantTagOption(records[0]), "masterpiece (杰作)");
 });
 
 test("matches Chinese from one character and English from two characters", () => {

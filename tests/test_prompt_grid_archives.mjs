@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const moduleSource = await readFile(
-    new URL("../web/prompt_grid_archives.js", import.meta.url),
+const i18nSource = await readFile(
+    new URL("../web/prompt_weaver_i18n.js", import.meta.url),
     "utf8",
 );
+const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString("base64")}`;
+const moduleSource = (await readFile(
+    new URL("../web/prompt_grid_archives.js", import.meta.url),
+    "utf8",
+)).replace("./prompt_weaver_i18n.js", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,
@@ -20,6 +25,8 @@ const {
     defaultArchiveName,
     findMatchingArchive,
     formatArchiveOptionLabel,
+    isPristineDefaultSnapshot,
+    localizePristineDefaultSnapshot,
     normalizeArchiveNodeSize,
     normalizeArchiveManagerSelection,
     normalizePromptGridItemColor,
@@ -345,7 +352,7 @@ test("archive toolbar places restore between save and manager and narrows the se
     );
     assert.match(
         styleSource,
-        /\.cpw-prompt-grid__archive-select\s*\{[^}]*max-width:\s*120px;/s,
+        /\.cpw-prompt-grid__archive-select\s*\{[^}]*max-width:\s*180px;/s,
     );
 });
 
@@ -356,7 +363,7 @@ test("archive manager places load between save and rename and supports row doubl
     );
     assert.match(
         managerSource,
-        /\["保存",[^\n]+saveSelectedArchive\],\s*\["加载",[^\n]+loadSelectedArchive\],\s*\[\s*"重命名",/s,
+        /\[t\("Save"\),[^\n]+saveSelectedArchive\],\s*\[t\("Load"\),[^\n]+loadSelectedArchive\],\s*\[\s*t\("Rename"\),/s,
     );
     assert.match(managerSource, /row\.addEventListener\("dblclick",/);
     assert.match(managerSource, /async function loadSelectedArchive\(\)[\s\S]*?return requestArchiveLoad\(archive\);/);
@@ -373,8 +380,8 @@ test("prompt grid cards expose the item context menu while text inputs keep nati
     );
     assert.match(widgetSource, /card\.addEventListener\("contextmenu",/);
     assert.match(widgetSource, /input\[type="text"\], textarea, \[contenteditable="true"\]/);
-    assert.match(widgetSource, /makeAction\("置顶"/);
-    assert.match(widgetSource, /"置底",/);
+    assert.match(widgetSource, /makeAction\(t\("Move to Top"\)/);
+    assert.match(widgetSource, /t\("Move to Bottom"\),/);
     assert.match(widgetSource, /document\.addEventListener\("pointerdown", onDocumentPointerDown, true\)/);
     assert.match(widgetSource, /document\.addEventListener\("scroll", onViewportChange, true\)/);
     assert.match(widgetSource, /window\.addEventListener\("resize", onViewportChange\)/);
@@ -397,7 +404,33 @@ test("export bundle and preview use the stable portable format", () => {
 });
 
 test("default names are deterministic and filesystem friendly", () => {
-    assert.equal(defaultArchiveName(new Date(2026, 7, 10, 9, 8, 7)), "存档 2026-08-10 09-08-07");
+    assert.equal(defaultArchiveName(new Date(2026, 7, 10, 9, 8, 7)), "Archive 2026-08-10 09-08-07");
+});
+
+test("pristine English and legacy Chinese default snapshots localize without becoming dirty", () => {
+    const english = {
+        version: 1,
+        columns: 2,
+        node_size: { width: 600, height: 420 },
+        items: Array.from({ length: 4 }, (_, index) => ({
+            id: `prompt-${index + 1}`,
+            enabled: true,
+            title: `Prompt ${index + 1}`,
+            prompt: "",
+        })),
+    };
+    const chinese = localizePristineDefaultSnapshot(english, (index) => `提示词 ${index}`);
+    assert.equal(isPristineDefaultSnapshot(english), true);
+    assert.equal(isPristineDefaultSnapshot(chinese), true);
+    assert.equal(semanticFingerprint(english), semanticFingerprint(chinese));
+    assert.equal(resolveArchiveStatus([
+        { id: DEFAULT_ARCHIVE_ID, snapshot: english },
+    ], chinese, DEFAULT_ARCHIVE_ID).dirty, false);
+
+    const edited = structuredClone(chinese);
+    edited.items[0].prompt = "masterpiece";
+    assert.equal(isPristineDefaultSnapshot(edited), false);
+    assert.notEqual(semanticFingerprint(english), semanticFingerprint(edited));
 });
 
 test("API client preserves paths, methods, payloads, and server errors", async () => {
@@ -438,5 +471,8 @@ test("API client preserves paths, methods, payloads, and server errors", async (
             return { ok: false, status: 409, async json() { return { error: "duplicate" }; } };
         },
     });
-    await assert.rejects(() => failing.list(), /duplicate/);
+    await assert.rejects(
+        () => failing.list(),
+        (error) => error.message === "duplicate" && error.status === 409 && error.serverMessage === "duplicate",
+    );
 });
