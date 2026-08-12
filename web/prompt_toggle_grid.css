@@ -89,7 +89,7 @@
     width: 100%;
     min-height: 38px;
     display: grid;
-    grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto minmax(54px, auto);
+    grid-template-columns: minmax(0, 1fr) minmax(72px, auto) auto minmax(54px, auto);
     align-items: center;
     gap: 9px;
     padding: 5px 8px;

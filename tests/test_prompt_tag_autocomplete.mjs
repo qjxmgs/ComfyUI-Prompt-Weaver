@@ -20,10 +20,13 @@ const moduleSource = (await readFile(
     .replace("./prompt_assistant_tags.js", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
+    DEFAULT_AUTOCOMPLETE_LIMIT,
     DanbooruTagProvider,
+    PromptAssistantTagProvider,
     PromptTagAutocompleteProvider,
     applyPromptCompletion,
     autocompleteQueryIsEligible,
+    autocompleteTranslationText,
     formatAutocompleteCount,
     mergeAutocompleteResults,
     normalizeAutocompleteInsertionKey,
@@ -126,6 +129,45 @@ test("dual-source merge ranks matches, prefers Prompt Assistant, and deduplicate
     assert.deepEqual(merged.map((record) => record.tag), ["杰作", "蓝眼睛", "blush"]);
 });
 
+test("Prompt Assistant maps English above Chinese while preserving English insertion and category", async () => {
+    const provider = new PromptAssistantTagProvider(null, {
+        catalog: {
+            async load() {
+                return [{
+                    name: "蓝眼睛",
+                    value: "blue eyes",
+                    aliases: ["蓝眼睛"],
+                    categoryPath: ["人物", "眼睛"],
+                }];
+            },
+        },
+    });
+    const [record] = await provider.search("蓝");
+    assert.equal(record.tag, "blue eyes");
+    assert.equal(record.translation, "蓝眼睛");
+    assert.equal(record.insertText, "blue eyes");
+    assert.deepEqual(record.categoryPath, ["人物", "眼睛"]);
+    assert.equal(record.postCount, 0);
+});
+
+test("translation display uses an em dash when Chinese text is unavailable", () => {
+    assert.equal(autocompleteTranslationText({ tag: "blue_eyes", translation: "蓝眼睛" }), "蓝眼睛");
+    assert.equal(autocompleteTranslationText({ tag: "blue_eyes", translation: "" }), "—");
+    assert.equal(autocompleteTranslationText({ tag: "blue eyes", translation: "blue eyes" }), "—");
+});
+
+test("autocomplete defaults to twenty results", () => {
+    const records = Array.from({ length: 25 }, (_value, index) => ({
+        source: "danbooru",
+        tag: `test_${index}`,
+        insertText: `test ${index}`,
+        matchRank: 1,
+        postCount: 25 - index,
+    }));
+    assert.equal(DEFAULT_AUTOCOMPLETE_LIMIT, 20);
+    assert.equal(mergeAutocompleteResults([records]).length, 20);
+});
+
 test("Danbooru provider keeps status local, maps rows, and starts updates", async () => {
     const calls = [];
     const api = {
@@ -193,6 +235,20 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /id:\s*DANBOORU_SETTING_ID/);
     assert.match(source, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
     assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260813-unified-layout-v2/);
+});
+
+test("result DOM and CSS use prompt, category, source, and count columns", async () => {
+    const autocompleteSource = await readFile(
+        new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
+        "utf8",
+    );
+    const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
+    assert.match(autocompleteSource, /option\.append\(main, category, source, count\)/);
+    assert.match(
+        cssSource,
+        /grid-template-columns:\s*minmax\(0, 1fr\) minmax\(72px, auto\) auto minmax\(54px, auto\)/,
+    );
 });
 
 test("handled keys stay inside autocomplete and inserted text does not reopen results", async () => {

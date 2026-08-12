@@ -151,9 +151,9 @@ test("ranks exact before prefix before substring and applies a stable result lim
         ["杰作", "杰作风格", "超级杰作"],
     );
     const limited = searchPromptAssistantTags(records, "test");
-    assert.equal(limited.length, 12);
+    assert.equal(limited.length, 20);
     assert.equal(limited[0].value, "test tag 0");
-    assert.equal(limited[11].value, "test tag 11");
+    assert.equal(limited[19].value, "test tag 19");
 });
 
 test("keyboard suggestion navigation starts unselected and wraps", () => {

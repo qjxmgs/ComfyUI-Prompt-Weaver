@@ -121,6 +121,19 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([record["tag"] for record in chinese], ["blue_eyes", "blue_hair"])
         self.assertEqual(chinese[0]["translation"], "蓝眼睛")
 
+    async def test_search_defaults_to_twenty_results(self):
+        self.base_payload = base_csv([
+            (f"test_tag_{index:02d}", 0, 10_000 - index, "")
+            for index in range(25)
+        ])
+        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-20-limit")
+        await self.store.update("en")
+
+        results = self.store.search("test", "en")
+        self.assertEqual(len(results), 20)
+        self.assertEqual(results[0]["tag"], "test_tag_00")
+        self.assertEqual(results[-1]["tag"], "test_tag_19")
+
     async def test_failed_refresh_keeps_last_good_files_and_reports_error(self):
         await self.store.update("zh-CN")
         original = (self.root / "user" / "danbooru.base.csv").read_bytes()

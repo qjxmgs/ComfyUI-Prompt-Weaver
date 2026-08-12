@@ -220,7 +220,7 @@ async def update_tag_autocomplete(request):
 async def search_tag_autocomplete(request):
     query = request.query.get("q", "")
     locale = request.query.get("locale", "en")
-    limit = request.query.get("limit", "12")
+    limit = request.query.get("limit", "20")
     if len(query) > MAX_QUERY_LENGTH:
         return _tag_autocomplete_error_response(
             TagAutocompleteValidationError("tag autocomplete query is too long")

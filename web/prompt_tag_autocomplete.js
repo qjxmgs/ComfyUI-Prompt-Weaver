@@ -10,7 +10,7 @@ import {
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
 export const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssistant";
 export const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
-export const DEFAULT_AUTOCOMPLETE_LIMIT = 12;
+export const DEFAULT_AUTOCOMPLETE_LIMIT = 20;
 export const DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS = 120;
 
 const TOP_LEVEL_SEPARATORS = new Set([",", "，", "\n", "\r"]);
@@ -347,7 +347,7 @@ export class PromptAssistantTagProvider {
         ensureNotAborted(signal);
         return searchPromptAssistantTags(records, query, limit).map((record) => ({
             source: "prompt-assistant",
-            tag: String(record.name || record.value || ""),
+            tag: String(record.value || ""),
             insertText: String(record.value || ""),
             translation: String(record.name || ""),
             category: null,
@@ -474,6 +474,19 @@ export function formatAutocompleteCount(value, locale = getLocale()) {
         notation: "compact",
         maximumFractionDigits: 1,
     }).format(number);
+}
+
+
+export function autocompleteTranslationText(record) {
+    const tag = String(record?.tag || "").trim();
+    const translation = String(record?.translation || "").trim();
+    if (
+        translation
+        && normalizeAutocompleteText(translation) !== normalizeAutocompleteText(tag)
+    ) {
+        return translation;
+    }
+    return "—";
 }
 
 
@@ -642,20 +655,17 @@ export class PromptAutocompleteController {
             const category = createElement("span", "cpw-tag-autocomplete__category", categoryLabel(record));
             const main = createElement("span", "cpw-tag-autocomplete__main");
             main.append(createElement("span", "cpw-tag-autocomplete__tag", record.tag));
-            const secondaryText = record.translation
-                && normalizeAutocompleteText(record.translation) !== normalizeAutocompleteText(record.tag)
-                ? record.translation
-                : categoryLabel(record);
-            main.append(createElement("span", "cpw-tag-autocomplete__translation", secondaryText));
+            main.append(createElement(
+                "span",
+                "cpw-tag-autocomplete__translation",
+                autocompleteTranslationText(record),
+            ));
             const source = createElement("span", "cpw-tag-autocomplete__source", sourceLabel(record));
-            option.append(category, main, source);
-            if (record.postCount > 0) {
-                option.append(createElement(
-                    "span",
-                    "cpw-tag-autocomplete__count",
-                    formatAutocompleteCount(record.postCount),
-                ));
-            }
+            const countText = record.source === "danbooru" && record.postCount > 0
+                ? formatAutocompleteCount(record.postCount)
+                : "";
+            const count = createElement("span", "cpw-tag-autocomplete__count", countText);
+            option.append(main, category, source, count);
             const keepInputFocused = (event) => {
                 event.preventDefault();
                 event.stopPropagation();

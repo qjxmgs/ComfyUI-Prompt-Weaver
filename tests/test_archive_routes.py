@@ -360,6 +360,24 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.payload, {"updating": True, "locale": "zh-CN"})
         self.assertEqual(store.calls, [("zh-CN", True)])
 
+    def test_tag_autocomplete_search_route_defaults_to_twenty_results(self):
+        class _FakeStore:
+            def __init__(self):
+                self.calls = []
+
+            def search(self, query, locale, limit):
+                self.calls.append((query, locale, limit))
+                return []
+
+        store = _FakeStore()
+        with mock.patch.object(self.module, "_tag_autocomplete_store", return_value=store):
+            response = self.run_async(self.module.search_tag_autocomplete(
+                _Request(user="alice", query={"q": "bl"})
+            ))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload, {"results": []})
+        self.assertEqual(store.calls, [("bl", "en", "20")])
+
 
 if __name__ == "__main__":
     unittest.main()

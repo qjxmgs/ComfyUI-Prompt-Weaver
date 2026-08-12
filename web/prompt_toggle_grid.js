@@ -53,7 +53,7 @@ import {
     PROMPT_ASSISTANT_SETTING_ID,
     PromptAutocompleteController,
     PromptTagAutocompleteProvider,
-} from "./prompt_tag_autocomplete.js?v=20260813-dual-source-v1";
+} from "./prompt_tag_autocomplete.js?v=20260813-unified-layout-v2";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
