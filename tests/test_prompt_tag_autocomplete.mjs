@@ -30,6 +30,8 @@ const {
     formatAutocompleteCount,
     mergeAutocompleteResults,
     normalizeAutocompleteInsertionKey,
+    promptTokenHasHanText,
+    promptTokenLookupText,
     promptPresenceKeys,
     resolveAutocompletePopupPosition,
     resolvePromptCompletionContext,
@@ -76,6 +78,14 @@ test("completion context preserves separators, wrappers, weights, and apostrophe
 
     const apostrophe = "artist's_style, blue_ey";
     assert.equal(resolvePromptCompletionContext(apostrophe, 6).query, "artist's_style");
+});
+
+test("editor token lookup strips wrappers and weights and detects Chinese tokens", () => {
+    assert.equal(promptTokenLookupText("((blue_eyes:1.25))"), "blue_eyes");
+    assert.equal(promptTokenLookupText('"blue eyes"'), "blue eyes");
+    assert.equal(promptTokenHasHanText("blue eyes"), false);
+    assert.equal(promptTokenHasHanText("蓝眼睛"), true);
+    assert.equal(promptTokenHasHanText("blue 蓝"), true);
 });
 
 test("presence keys normalize underscores and spaces without touching protected commas", () => {
@@ -151,6 +161,20 @@ test("Prompt Assistant maps English above Chinese while preserving English inser
     assert.equal(record.postCount, 0);
 });
 
+test("Prompt Assistant batch resolution is exact and preserves missing entries", async () => {
+    const provider = new PromptAssistantTagProvider(null, {
+        catalog: {
+            async load() {
+                return [{ name: "蓝眼睛", value: "blue eyes", aliases: ["蓝眼睛"] }];
+            },
+        },
+    });
+    const results = await provider.resolve(["blue_eyes", "blue"]);
+    assert.equal(results[0].translation, "蓝眼睛");
+    assert.equal(results[0].insertText, "blue eyes");
+    assert.equal(results[1], null);
+});
+
 test("translation display uses an em dash when Chinese text is unavailable", () => {
     assert.equal(autocompleteTranslationText({ tag: "blue_eyes", translation: "蓝眼睛" }), "蓝眼睛");
     assert.equal(autocompleteTranslationText({ tag: "blue_eyes", translation: "" }), "—");
@@ -203,6 +227,17 @@ test("Danbooru provider keeps status local, maps rows, and starts updates", asyn
                     }],
                 });
             }
+            if (path === "/prompt-weaver/tag-autocomplete/resolve") {
+                return jsonResponse({
+                    results: [{
+                        tag: "blue_eyes",
+                        insert_text: "blue eyes",
+                        translation: "蓝眼睛",
+                        category: 0,
+                        post_count: 1_409_152,
+                    }],
+                });
+            }
             if (path === "/prompt-weaver/tag-autocomplete/update") {
                 return jsonResponse({ updating: true }, true, 202);
             }
@@ -214,7 +249,63 @@ test("Danbooru provider keeps status local, maps rows, and starts updates", asyn
     assert.equal(result.results[0].insertText, "blue eyes");
     assert.equal(result.results[0].translation, "蓝眼睛");
     assert.match(calls[1][0], /q=%E8%93%9D/);
+    const resolved = await provider.resolve(["blue eyes"], "zh-CN");
+    assert.equal(resolved.results[0].translation, "蓝眼睛");
+    assert.equal(JSON.parse(calls.at(-1)[1].body).locale, "zh-CN");
     assert.equal(formatAutocompleteCount(2_535_113, "en"), "2.5M");
+});
+
+test("translation resolution prefers Prompt Assistant, follows source toggles, and caches", async () => {
+    let promptAssistantEnabled = true;
+    let assistantCalls = 0;
+    let danbooruCalls = 0;
+    const provider = new PromptTagAutocompleteProvider(null, {
+        danbooruEnabled: () => true,
+        promptAssistantEnabled: () => promptAssistantEnabled,
+    });
+    provider.danbooru = {
+        async resolve(tags) {
+            danbooruCalls += 1;
+            return {
+                results: tags.map(() => ({
+                    source: "danbooru",
+                    tag: "blue_eyes",
+                    insertText: "blue eyes",
+                    translation: "丹博鲁翻译",
+                })),
+            };
+        },
+    };
+    provider.promptAssistant = {
+        async resolve(tags) {
+            assistantCalls += 1;
+            return tags.map(() => ({
+                source: "prompt-assistant",
+                tag: "blue eyes",
+                insertText: "blue eyes",
+                translation: "自定义翻译",
+            }));
+        },
+    };
+    assert.equal((await provider.resolveTagTranslations(["blue eyes"]))[0].translation, "自定义翻译");
+    assert.equal((await provider.resolveTagTranslations(["blue_eyes"]))[0].translation, "自定义翻译");
+    assert.equal(assistantCalls, 1);
+    assert.equal(danbooruCalls, 1);
+
+    promptAssistantEnabled = false;
+    assert.equal((await provider.resolveTagTranslations(["blue eyes"]))[0].translation, "丹博鲁翻译");
+    assert.equal(assistantCalls, 1);
+    assert.equal(danbooruCalls, 2);
+});
+
+test("translation resolution honors cancellation before starting provider work", async () => {
+    const provider = new PromptTagAutocompleteProvider(null);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+        provider.resolveTagTranslations(["blue eyes"], "zh-CN", { signal: controller.signal }),
+        (error) => error?.name === "AbortError",
+    );
 });
 
 test("provider toggles let either source work independently", async () => {
@@ -250,7 +341,23 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /id:\s*DANBOORU_SETTING_ID/);
     assert.match(source, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
     assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260814-caret-anchor-v3/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260814-bilingual-tokens-v2/);
+});
+
+test("non-free editor renders every token as two rows and keeps add button square", async () => {
+    const source = await readFile(new URL("../web/prompt_toggle_grid.js", import.meta.url), "utf8");
+    const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
+    assert.match(source, /cpw-prompt-editor__token-prompt/);
+    assert.match(source, /cpw-prompt-editor__token-translation/);
+    assert.match(source, /"cpw-prompt-editor__token-translation",\s*"—"/);
+    assert.match(source, /resolveTagTranslations/);
+    assert.match(source, /generation !== tokenTranslationGeneration/);
+    assert.match(cssSource, /\.cpw-prompt-editor__token\s*\{[\s\S]*flex-direction:\s*column/);
+    assert.match(cssSource, /\.cpw-prompt-editor__token-translation/);
+    assert.match(
+        cssSource,
+        /\.cpw-prompt-editor__add\s*\{[\s\S]*width:\s*44px;[\s\S]*height:\s*44px;[\s\S]*aspect-ratio:\s*1;/,
+    );
 });
 
 test("result DOM and CSS use prompt, category, source, and count columns", async () => {

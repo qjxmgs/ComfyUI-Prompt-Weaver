@@ -53,8 +53,11 @@ import {
     PROMPT_ASSISTANT_SETTING_ID,
     PromptAutocompleteController,
     PromptTagAutocompleteProvider,
+    autocompleteTranslationText,
+    promptTokenHasHanText,
+    promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260814-caret-anchor-v3";
+} from "./prompt_tag_autocomplete.js?v=20260814-bilingual-tokens-v2";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -577,7 +580,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260812-item-context-menu", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260814-bilingual-tokens-v2", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2961,6 +2964,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         let addDraft = "";
         let addBlurTimer = 0;
         let editorAutocompleteController = null;
+        let tokenTranslationAbortController = null;
+        let tokenTranslationGeneration = 0;
         let editorDragSession = null;
         let editorResizeSession = null;
         let tokenToggleGesture = null;
@@ -3272,7 +3277,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 lastY: event.clientY,
             };
             tokenList.classList.add("cpw-prompt-editor__tokens--toggling");
-            event.target.focus?.({ preventScroll: true });
+            event.target.closest?.(".cpw-prompt-editor__token")?.focus({ preventScroll: true });
             event.preventDefault();
             try {
                 tokenList.setPointerCapture(event.pointerId);
@@ -3305,11 +3310,76 @@ function createPromptGridWidget(node, inputName, inputData) {
             scheduleTokenClickSuppressionEnd();
             event.preventDefault();
         };
+        const cancelPromptTokenTranslations = () => {
+            tokenTranslationGeneration += 1;
+            tokenTranslationAbortController?.abort();
+            tokenTranslationAbortController = null;
+        };
+        const resolvePromptTokenTranslations = async () => {
+            cancelPromptTokenTranslations();
+            if (freeMode || !tokens.length) return;
+            for (const button of tokenList.querySelectorAll(".cpw-prompt-editor__token")) {
+                const token = tokens[Number(button.dataset.promptTokenIndex)] || "";
+                const translationLine = button.querySelector(".cpw-prompt-editor__token-translation");
+                if (translationLine) translationLine.textContent = "—";
+                button.title = token;
+                button.setAttribute("aria-label", token);
+            }
+            const generation = tokenTranslationGeneration;
+            const controller = new AbortController();
+            tokenTranslationAbortController = controller;
+            const pending = [];
+            for (let index = 0; index < tokens.length; index += 1) {
+                const token = tokens[index];
+                if (promptTokenHasHanText(token)) continue;
+                const lookupText = promptTokenLookupText(token);
+                if (lookupText) pending.push({ index, lookupText, token });
+            }
+            if (!pending.length) {
+                tokenTranslationAbortController = null;
+                return;
+            }
+            try {
+                const results = await promptTagAutocompleteProvider.resolveTagTranslations(
+                    pending.map((entry) => entry.lookupText),
+                    "zh-CN",
+                    { signal: controller.signal },
+                );
+                if (controller.signal.aborted || generation !== tokenTranslationGeneration) return;
+                for (let resultIndex = 0; resultIndex < pending.length; resultIndex += 1) {
+                    const { index, token } = pending[resultIndex];
+                    const button = tokenList.querySelector(
+                        `.cpw-prompt-editor__token[data-prompt-token-index="${index}"]`,
+                    );
+                    if (!button) continue;
+                    const translation = autocompleteTranslationText(results[resultIndex]);
+                    const translationLine = button.querySelector(".cpw-prompt-editor__token-translation");
+                    if (translationLine) translationLine.textContent = translation;
+                    button.title = translation === "—" ? token : `${token}\n${translation}`;
+                    button.setAttribute(
+                        "aria-label",
+                        translation === "—" ? token : `${token}, ${translation}`,
+                    );
+                }
+            } catch (error) {
+                if (error?.name !== "AbortError") {
+                    console.warn("[Prompt Weaver] Could not resolve prompt tag translations", error);
+                }
+            } finally {
+                if (tokenTranslationAbortController === controller) {
+                    tokenTranslationAbortController = null;
+                }
+            }
+        };
+        const handlePromptTokenTranslationSettings = () => {
+            if (!freeMode) void resolvePromptTokenTranslations();
+        };
         const renderTokens = ({
             focusInput = false,
             focusAddButton = false,
             focusFreeText = false,
         } = {}) => {
+            cancelPromptTokenTranslations();
             renderActivePromptCount();
             editorAutocompleteController?.destroy();
             editorAutocompleteController = null;
@@ -3361,13 +3431,23 @@ function createPromptGridWidget(node, inputName, inputData) {
                     const button = element(
                         "button",
                         `cpw-prompt-editor__token cpw-prompt-editor__token--color-${index % 5}`,
-                        token,
                     );
                     button.type = "button";
                     button.title = token;
+                    button.setAttribute("aria-label", token);
                     button.dataset.promptTokenIndex = String(index);
                     button.setAttribute("aria-pressed", String(selected[index]));
                     button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
+                    button.append(element(
+                        "span",
+                        "cpw-prompt-editor__token-prompt",
+                        token,
+                    ));
+                    button.append(element(
+                        "span",
+                        "cpw-prompt-editor__token-translation",
+                        "—",
+                    ));
                     button.addEventListener("click", (event) => {
                         if (suppressTokenClick) {
                             suppressTokenClick = false;
@@ -3454,6 +3534,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 tokenList.append(addButton);
             }
 
+            void resolvePromptTokenTranslations();
             if (focusInput) queueMicrotask(() => addInput?.focus());
             if (focusAddButton) queueMicrotask(() => addButton?.focus());
         };
@@ -3553,6 +3634,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             cleanupPromptTokenToggleGesture();
             editorAutocompleteController?.destroy();
             editorAutocompleteController = null;
+            cancelPromptTokenTranslations();
+            globalThis.removeEventListener(
+                AUTOCOMPLETE_SETTINGS_EVENT,
+                handlePromptTokenTranslationSettings,
+            );
             window.removeEventListener("resize", handlePromptEditorViewportResize);
         };
         const refreshPromptEditorLocale = () => {
@@ -3596,6 +3682,10 @@ function createPromptGridWidget(node, inputName, inputData) {
             refreshLocale: refreshPromptEditorLocale,
         };
         window.addEventListener("resize", handlePromptEditorViewportResize);
+        globalThis.addEventListener(
+            AUTOCOMPLETE_SETTINGS_EVENT,
+            handlePromptTokenTranslationSettings,
+        );
         header.addEventListener("pointerdown", beginPromptEditorDrag);
         header.addEventListener("pointermove", movePromptEditorDrag);
         header.addEventListener("pointerup", endPromptEditorDrag);

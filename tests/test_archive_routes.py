@@ -378,6 +378,25 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.payload, {"results": []})
         self.assertEqual(store.calls, [("bl", "en", "20")])
 
+    def test_tag_autocomplete_resolve_route_preserves_batch_and_locale(self):
+        class _FakeStore:
+            def __init__(self):
+                self.calls = []
+
+            def resolve(self, tags, locale):
+                self.calls.append((tags, locale))
+                return [{"tag": "blue_eyes", "translation": "蓝眼睛"}, None]
+
+        store = _FakeStore()
+        with mock.patch.object(self.module, "_tag_autocomplete_store", return_value=store):
+            response = self.run_async(self.module.resolve_tag_autocomplete(
+                _Request({"tags": ["blue eyes", "blue"], "locale": "zh-CN"})
+            ))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["results"][0]["tag"], "blue_eyes")
+        self.assertIsNone(response.payload["results"][1])
+        self.assertEqual(store.calls, [(["blue eyes", "blue"], "zh-CN")])
+
 
 if __name__ == "__main__":
     unittest.main()

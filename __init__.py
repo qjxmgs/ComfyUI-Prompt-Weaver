@@ -20,6 +20,7 @@ from .archive_store import (
 from .nodes import PromptWeaverPromptToggleGrid
 from .tag_autocomplete import (
     MAX_QUERY_LENGTH,
+    MAX_RESOLVE_TAGS,
     TagAutocompleteError,
     TagAutocompleteStore,
     TagAutocompleteUnavailableError,
@@ -233,6 +234,25 @@ async def search_tag_autocomplete(request):
             limit,
         )
         return web.json_response({"results": results})
+    except TagAutocompleteError as error:
+        return _tag_autocomplete_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/tag-autocomplete/resolve")
+async def resolve_tag_autocomplete(request):
+    try:
+        payload = await _request_json(request, 64 * 1024)
+        tags = payload.get("tags")
+        if isinstance(tags, list) and len(tags) > MAX_RESOLVE_TAGS:
+            raise TagAutocompleteValidationError("too many tags to resolve")
+        results = await asyncio.to_thread(
+            _tag_autocomplete_store(request).resolve,
+            tags,
+            payload.get("locale", "zh-CN"),
+        )
+        return web.json_response({"results": results})
+    except (ArchiveValidationError, ArchiveCapacityError) as error:
+        return _archive_error_response(error)
     except TagAutocompleteError as error:
         return _tag_autocomplete_error_response(error)
 

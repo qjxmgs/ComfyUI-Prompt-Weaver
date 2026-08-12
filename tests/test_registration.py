@@ -79,6 +79,7 @@ class PluginRegistrationTests(unittest.TestCase):
                 ("GET", "/prompt-weaver/tag-autocomplete/status", "get_tag_autocomplete_status"),
                 ("POST", "/prompt-weaver/tag-autocomplete/update", "update_tag_autocomplete"),
                 ("GET", "/prompt-weaver/tag-autocomplete/search", "search_tag_autocomplete"),
+                ("POST", "/prompt-weaver/tag-autocomplete/resolve", "resolve_tag_autocomplete"),
                 ("GET", "/prompt-weaver/prompt-grid-archives", "list_prompt_grid_archives"),
                 ("POST", "/prompt-weaver/prompt-grid-archives", "create_prompt_grid_archive"),
                 ("PATCH", "/prompt-weaver/prompt-grid-archives/selection", "select_prompt_grid_archive"),

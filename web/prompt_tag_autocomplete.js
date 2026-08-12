@@ -12,11 +12,13 @@ export const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssi
 export const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
 export const DEFAULT_AUTOCOMPLETE_LIMIT = 20;
 export const DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS = 120;
+const RESOLVE_BATCH_SIZE = 256;
 
 const TOP_LEVEL_SEPARATORS = new Set([",", "，", "\n", "\r"]);
 const OPENING_BRACKETS = new Map([["(", ")"], ["[", "]"], ["{", "}"]]);
 const CLOSING_BRACKETS = new Set(OPENING_BRACKETS.values());
 const WEIGHT_SUFFIX_PATTERN = /:\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*$/u;
+const HAN_CHARACTER_PATTERN = /\p{Script=Han}/u;
 const CATEGORY_NAMES = Object.freeze({
     0: "General",
     1: "Artist",
@@ -214,6 +216,18 @@ export function resolvePromptCompletionContext(value, selectionStart, selectionE
 }
 
 
+export function promptTokenLookupText(value) {
+    const text = typeof value === "string" ? value : "";
+    if (!text) return "";
+    return resolvePromptCompletionContext(text, 0, text.length).query.trim();
+}
+
+
+export function promptTokenHasHanText(value) {
+    return HAN_CHARACTER_PATTERN.test(String(value || ""));
+}
+
+
 export function applyPromptCompletion(value, context, insertion) {
     const text = typeof value === "string" ? value : "";
     const replacement = typeof insertion === "string" ? insertion : "";
@@ -310,6 +324,41 @@ export class DanbooruTagProvider {
         };
     }
 
+    async resolve(tags, locale = "zh-CN", { signal } = {}) {
+        const status = await this.status(locale, { signal });
+        if (!status?.available) return { results: tags.map(() => null), status };
+        ensureNotAborted(signal);
+        const payload = await this.fetchJson(
+            "/prompt-weaver/tag-autocomplete/resolve",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tags, locale: "zh-CN" }),
+                signal,
+            },
+            t("Danbooru tag resolution"),
+        );
+        ensureNotAborted(signal);
+        const rows = Array.isArray(payload?.results) ? payload.results : [];
+        return {
+            status,
+            results: tags.map((_tag, index) => {
+                const record = rows[index];
+                if (!record) return null;
+                return {
+                    source: "danbooru",
+                    tag: String(record.tag || ""),
+                    insertText: String(record.insert_text || ""),
+                    translation: String(record.translation || ""),
+                    category: Number(record.category),
+                    categoryPath: [],
+                    postCount: Number(record.post_count) || 0,
+                    matchRank: 0,
+                };
+            }),
+        };
+    }
+
     async update(locale = getLocale(), { signal } = {}) {
         const normalizedLocale = locale === "zh" ? "zh-CN" : locale;
         await this.fetchJson(
@@ -355,6 +404,30 @@ export class PromptAssistantTagProvider {
             postCount: 0,
             matchRank: matchingRank([record.value, ...(record.aliases || [])], query),
         })).filter((record) => record.tag && record.insertText);
+    }
+
+    async resolve(tags, { signal } = {}) {
+        ensureNotAborted(signal);
+        const records = await this.catalog.load();
+        ensureNotAborted(signal);
+        const exact = new Map();
+        for (const record of records) {
+            const mapped = {
+                source: "prompt-assistant",
+                tag: String(record.value || ""),
+                insertText: String(record.value || ""),
+                translation: String(record.name || ""),
+                category: null,
+                categoryPath: Array.isArray(record.categoryPath) ? record.categoryPath : [],
+                postCount: 0,
+                matchRank: 0,
+            };
+            for (const value of [record.value, ...(record.aliases || [])]) {
+                const key = normalizeAutocompleteInsertionKey(value);
+                if (key) exact.set(key, mapped);
+            }
+        }
+        return tags.map((tag) => exact.get(normalizeAutocompleteInsertionKey(tag)) || null);
     }
 }
 
@@ -404,6 +477,7 @@ export class PromptTagAutocompleteProvider {
         this.onDiagnostic = typeof onDiagnostic === "function" ? onDiagnostic : null;
         this.danbooru = new DanbooruTagProvider(api);
         this.promptAssistant = new PromptAssistantTagProvider(api, { onDiagnostic });
+        this.translationCache = new Map();
     }
 
     async search(query, locale = getLocale(), limit = DEFAULT_AUTOCOMPLETE_LIMIT, { signal } = {}) {
@@ -441,7 +515,60 @@ export class PromptTagAutocompleteProvider {
     }
 
     async updateDanbooru(locale = getLocale(), options = {}) {
-        return this.danbooru.update(locale, options);
+        const status = await this.danbooru.update(locale, options);
+        this.translationCache.clear();
+        return status;
+    }
+
+    async resolveTagTranslations(values, locale = "zh-CN", { signal } = {}) {
+        ensureNotAborted(signal);
+        const danbooruEnabled = this.danbooruEnabled();
+        const promptAssistantEnabled = this.promptAssistantEnabled();
+        const sourceKey = `${promptAssistantEnabled ? 1 : 0}:${danbooruEnabled ? 1 : 0}`;
+        const inputKeys = values.map(normalizeAutocompleteInsertionKey);
+        const missing = [];
+        const seen = new Set();
+        for (const key of inputKeys) {
+            const cacheKey = `${sourceKey}:${key}`;
+            if (!key || this.translationCache.has(cacheKey) || seen.has(key)) continue;
+            seen.add(key);
+            missing.push(key);
+        }
+
+        for (let offset = 0; offset < missing.length; offset += RESOLVE_BATCH_SIZE) {
+            const batch = missing.slice(offset, offset + RESOLVE_BATCH_SIZE);
+            let danbooruResults = batch.map(() => null);
+            let promptAssistantResults = batch.map(() => null);
+            const tasks = [];
+            if (danbooruEnabled) {
+                tasks.push(this.danbooru.resolve(batch, "zh-CN", { signal })
+                    .then(({ results }) => { danbooruResults = results; })
+                    .catch((error) => {
+                        if (error?.name === "AbortError") throw error;
+                        this.onDiagnostic?.(error.message, error);
+                    }));
+            }
+            if (promptAssistantEnabled) {
+                tasks.push(this.promptAssistant.resolve(batch, { signal })
+                    .then((results) => { promptAssistantResults = results; })
+                    .catch((error) => {
+                        if (error?.name === "AbortError") throw error;
+                        this.onDiagnostic?.(error.message, error);
+                    }));
+            }
+            await Promise.all(tasks);
+            ensureNotAborted(signal);
+            for (let index = 0; index < batch.length; index += 1) {
+                this.translationCache.set(
+                    `${sourceKey}:${batch[index]}`,
+                    promptAssistantResults[index] || danbooruResults[index] || null,
+                );
+            }
+        }
+
+        return inputKeys.map((key) => (
+            key ? this.translationCache.get(`${sourceKey}:${key}`) || null : null
+        ));
     }
 }
 

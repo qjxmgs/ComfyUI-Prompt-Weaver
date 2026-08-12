@@ -121,6 +121,26 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([record["tag"] for record in chinese], ["blue_eyes", "blue_hair"])
         self.assertEqual(chinese[0]["translation"], "蓝眼睛")
 
+        resolved = self.store.resolve(
+            ["blue eyes", "blue_eyes", "azure eyes", "blue", "blue archive"],
+            "zh-CN",
+        )
+        self.assertEqual([record["tag"] for record in resolved[:3]], ["blue_eyes"] * 3)
+        self.assertEqual(resolved[0]["translation"], "蓝眼睛")
+        self.assertIsNone(resolved[3])
+        self.assertEqual(resolved[4]["translation"], "")
+
+    async def test_exact_resolve_preserves_input_order_and_rejects_invalid_values(self):
+        await self.store.update("zh-CN")
+        resolved = self.store.resolve(["blush", "missing", "red face"], "zh-CN")
+        self.assertEqual(resolved[0]["tag"], "blush")
+        self.assertIsNone(resolved[1])
+        self.assertEqual(resolved[2]["tag"], "blush")
+        with self.assertRaisesRegex(TagAutocompleteValidationError, "must be an array"):
+            self.store.resolve("blush", "zh-CN")
+        with self.assertRaisesRegex(TagAutocompleteValidationError, "must be strings"):
+            self.store.resolve([123], "zh-CN")
+
     async def test_search_defaults_to_twenty_results(self):
         self.base_payload = base_csv([
             (f"test_tag_{index:02d}", 0, 10_000 - index, "")

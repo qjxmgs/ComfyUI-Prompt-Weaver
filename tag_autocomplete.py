@@ -16,6 +16,7 @@ CHECK_INTERVAL_SECONDS = 7 * 24 * 60 * 60
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_DATASET_BYTES = 8 * 1024 * 1024
 MAX_QUERY_LENGTH = 128
+MAX_RESOLVE_TAGS = 256
 DEFAULT_RESULT_LIMIT = 20
 MAX_RESULT_LIMIT = 50
 MANIFEST_SCHEMA_VERSION = 1
@@ -286,6 +287,8 @@ class TagAutocompleteStore:
         self._cache_lock = threading.RLock()
         self._search_cache_key = None
         self._search_records = []
+        self._resolve_cache_key = None
+        self._resolve_index = {}
         self._last_error = ""
 
     def bundled_manifest(self):
@@ -516,6 +519,8 @@ class TagAutocompleteStore:
                     with self._cache_lock:
                         self._search_cache_key = None
                         self._search_records = []
+                        self._resolve_cache_key = None
+                        self._resolve_index = {}
                 return self.status(normalized_locale)
             except Exception as error:
                 self._last_error = str(error)
@@ -602,7 +607,62 @@ class TagAutocompleteStore:
             if cache_key != self._search_cache_key:
                 self._search_records = self._load_records(locale)
                 self._search_cache_key = cache_key
+                self._resolve_cache_key = None
+                self._resolve_index = {}
             return self._search_records
+
+    def _exact_index_for_locale(self, locale):
+        cache_key = self._cache_key(locale)
+        with self._cache_lock:
+            if cache_key != self._search_cache_key:
+                self._search_records = self._load_records(locale)
+                self._search_cache_key = cache_key
+                self._resolve_cache_key = None
+                self._resolve_index = {}
+            if cache_key != self._resolve_cache_key:
+                index = {}
+                for record in self._search_records:
+                    for key in (record["_canonical"], *record["_aliases"]):
+                        if key:
+                            index.setdefault(key, record)
+                self._resolve_index = index
+                self._resolve_cache_key = cache_key
+            return self._resolve_index
+
+    def resolve(self, tags, locale="zh-CN"):
+        if not isinstance(tags, list):
+            raise TagAutocompleteValidationError("tag autocomplete resolve tags must be an array")
+        if len(tags) > MAX_RESOLVE_TAGS:
+            raise TagAutocompleteValidationError("too many tags to resolve")
+
+        normalized_values = []
+        for value in tags:
+            if not isinstance(value, str):
+                raise TagAutocompleteValidationError("tag autocomplete resolve values must be strings")
+            normalized = _normalize_search_text(value)
+            if len(normalized) > MAX_QUERY_LENGTH:
+                raise TagAutocompleteValidationError("tag autocomplete resolve value is too long")
+            normalized_values.append(normalized)
+        if not normalized_values:
+            return []
+
+        normalized_locale = normalize_locale(locale)
+        exact_index = self._exact_index_for_locale(normalized_locale)
+        results = []
+        for normalized in normalized_values:
+            record = exact_index.get(normalized.replace(" ", "_")) if normalized else None
+            if record is None:
+                results.append(None)
+                continue
+            results.append({
+                "tag": record["tag"],
+                "insert_text": record["insert_text"],
+                "translation": record["translation"],
+                "category": record["category"],
+                "post_count": record["post_count"],
+                "source": "danbooru",
+            })
+        return results
 
     @staticmethod
     def _match_rank(record, query, canonical_query):
