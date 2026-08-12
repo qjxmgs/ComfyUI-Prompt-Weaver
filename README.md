@@ -1,94 +1,102 @@
 # ComfyUI Prompt Weaver
 
-该插件包含两个能力：
+**English** | [简体中文](README.zh-CN.md)
 
-- Prompt Weaver 桌面端与 ComfyUI 之间的 Workflow 打开桥接。
-- `提示词开关网格` 节点，用网格卡片快速启用、停用和组合提示词。
+ComfyUI Prompt Weaver provides two features:
 
-插件不需要额外 Python 或 JavaScript 依赖。
+- A workflow-opening bridge between the Prompt Weaver desktop application and ComfyUI.
+- A **Prompt Toggle Grid** node for quickly enabling, disabling, arranging, and combining prompt cards.
 
-## 安装与升级
+The plugin has no additional Python or JavaScript dependencies.
 
-在 ComfyUI 的 `custom_nodes` 目录中克隆本仓库：
+## Installation and upgrades
+
+Clone this repository into ComfyUI's `custom_nodes` directory:
 
 ```powershell
 git clone --branch master https://github.com/qjxmgs/ComfyUI-Prompt-Weaver.git
 ```
 
-也可以下载源码压缩包，将整个 `ComfyUI-Prompt-Weaver` 目录复制到 `custom_nodes`。安装后重启 ComfyUI，并在浏览器中按 `Ctrl+F5` 强制刷新页面。
+Alternatively, download the source archive and copy the complete `ComfyUI-Prompt-Weaver` directory into `custom_nodes`. Restart ComfyUI after installation, then press `Ctrl+F5` in the browser to force a full refresh.
 
-通过 Git 安装时，在插件目录中执行下面的命令升级：
+For a Git installation, update from inside the plugin directory:
 
 ```powershell
 git pull --ff-only origin master
 ```
 
-桌面端目前只会在目标目录不存在时安装插件，不会覆盖已经安装的旧版本。升级时必须手动覆盖原目录；如果节点未出现，请确认下面这些新文件已经复制：
+The desktop application currently installs the plugin only when the target directory does not exist. It does not overwrite an older installation. Upgrade that installation manually and make sure the following files and directories are present if the node does not appear:
 
-- `nodes.py`
-- `archive_store.py`
-- `__init__.py`
-- `web/prompt_toggle_grid.js`
-- `web/prompt_toggle_grid.css`
-- `web/prompt_grid_archives.js`
-- `web/prompt_grid_reorder.js`
-- `web/prompt_editor_tokens.js`
-- `web/prompt_assistant_tags.js`
+- `nodes.py`, `archive_store.py`, and `__init__.py`
+- `locales/en` and `locales/zh`
+- `web/prompt_toggle_grid.js` and `web/prompt_toggle_grid.css`
+- `web/prompt_weaver_i18n.js`
+- `web/prompt_grid_archives.js` and `web/prompt_grid_reorder.js`
+- `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, and `web/prompt_assistant_tags.js`
 
-## 提示词开关网格
+## Language support
 
-在节点菜单的 `Prompt Weaver/提示词` 分类中添加“提示词开关网格”。节点输出标准 `STRING`，可直接连接到 `CLIPTextEncode.text` 或其他字符串输入。
+The node automatically follows **Settings → Language** (`Comfy.Locale`) in ComfyUI. English and Simplified Chinese are included; every other locale falls back to English. Changing the ComfyUI language updates existing Prompt Weaver nodes without changing their serialized configuration, current selection, unsaved prompt-editor draft, or focus.
 
-每张卡片包含：
+Only plugin-provided interface text is translated. Prompt text, Prompt Assistant tags, user-created archive names, card titles, and existing workflow data are never translated or rewritten. A newly created node uses localized default card titles. Headless/API usage uses the canonical English defaults `Prompt 1` through `Prompt 4`.
 
-- 启用开关。
-- 可编辑标题；标题只用于界面识别，不参与输出。
-- 固定单行、不可拉伸的提示词输入框，以及右侧的标签编辑按钮。
-- 带实时让位动画的拖拽排序和删除按钮；拖拽时按 `Esc` 可取消并恢复原顺序。
+The built-in default archive is identified by its stable ID and is displayed as **Default Archive** or **默认存档**. Its historical stored name remains unchanged for compatibility. An untouched empty default snapshot can display localized generated titles without becoming dirty; after it is edited or saved, its titles are treated as user data.
 
-工具栏支持新增提示词、全开、全关，以及固定选择 1–6 列。新节点默认 2 列、4 张已启用的空卡片。数组/视觉顺序就是最终汇总顺序；改变列数不会改变顺序。
+## Prompt Toggle Grid
 
-点击 Prompt 输入框右侧的编辑按钮会把当前内容按顶层中英文逗号和换行拆成标签；括号、方括号、花括号、引号及转义内容内部不会被拆分。编辑器会忽略大小写自动合并重复标签，保留首次出现项的原始文本和顺序。标签列表末尾的“+”可展开输入框，按 Enter、输入框失焦或直接点击“确认”时，会使用相同规则自动拆分并添加多个提示词；重复项不会再次添加，未选中的重复标签会被重新启用。点击标签可切换选择状态，未选中标签会置灰。关闭按钮、弹窗级 `Esc` 或点击遮罩均不保存；输入框中的 `Esc` 只取消本次添加；“重置”恢复弹窗打开后的去重状态并移除本次新增；“确认”只保留选中标签并使用 `, ` 回填。
+Add **Prompt Toggle Grid** from the `Prompt Weaver/Prompt` node category. The node outputs a standard `STRING`, which can connect directly to `CLIPTextEncode.text` or any other string input.
 
-如果本机安装并启用了 [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant)，上述“+”输入框还会从该扩展的全部 CSV 标签文件中提供自动补全。输入中文 1 个字或英文/数字 2 个字符后开始匹配，候选按“英文 Prompt（中文）”显示且最多 12 项；候选使用脱离弹窗布局的浮层显示，不会改变编辑窗口大小，并会根据可用空间自动向上或向下展开。精确匹配、前缀匹配和子串匹配依次排序。上下方向键可移动候选，存在键盘高亮项时按 Enter 选择；未高亮候选时 Enter 仍按原方式自由添加。选择复合标签时会继续按顶层逗号拆分并自动去重。此集成只读取用户本机 Prompt Assistant 的标签接口，不复制其代码或数据，也不会写入其标签配置；未安装、未启用或接口不可用时不会显示候选，原有自由输入功能保持不变。
+Each card contains:
 
-## 全局存档
+- An enable switch.
+- An editable title used only for identification; it is not included in the output.
+- A fixed single-line prompt field and a tag-editor button.
+- Drag-to-reorder with live displacement animation, plus a delete button. Press `Esc` while dragging to restore the original order.
+- An optional card color selected from the card context menu. Right-clicking a text field keeps the browser's native menu.
 
-工具栏中的存档下拉框用于加载和切换完整网格状态；“存档管理”用于新建、保存、重命名、删除、导入和导出存档。普通点击存档行会只选中该项；按住 `Ctrl` 点击可追加或取消单项，按住 `Shift` 点击可从最近的选择锚点连续选择一个范围，`Ctrl+Shift` 则把该范围追加到已有选择。管理列表中的选择只决定右下角“保存 / 重命名 / 导出 / 删除”的操作目标，不会加载或切换节点内容。一个存档包含节点宽高、列数、卡片顺序、开关、标题和 Prompt，但不包含画布位置或连线。通过工具栏切换存档时会自动恢复对应节点尺寸。
+The toolbar can add prompts, enable or disable every card, and select a fixed layout of 1–6 columns. A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
 
-存档下拉框右侧的“保存”按钮用于把当前网格和节点尺寸快速写回关联存档，仅在当前状态有变更时启用；快捷保存不会再次弹出确认窗口，成功后按钮立即恢复禁用。若保存过程中继续编辑，尚未写入的新变更仍会保持待保存状态。
+The editor button next to a prompt splits its text at top-level English or Chinese commas and line breaks. Separators inside parentheses, square or curly brackets, quotes, and escaped content are preserved. The editor deduplicates tags case-insensitively while retaining the first spelling and original order. Its `+` composer accepts multiple prompts using the same splitting rules and commits on Enter, blur, or Confirm. Existing inactive duplicates are re-enabled instead of added again. Clicking or painting across tags toggles their selection. The close button, dialog-level `Esc`, or backdrop discards changes; `Esc` inside the composer cancels only that addition. Confirm writes only selected tags back with `, ` separators. Free Mode edits the complete raw prompt without making a persistent workflow setting.
 
-- 固定置顶的“默认存档”初始为 2 列、4 张已启用空卡片；它可以保存当前状态和参与导入导出，但不能重命名或删除，也不占用普通存档数量限制。
-- 每个节点独立记住最后关联的存档。网格内容或节点尺寸发生修改后不会自动切换到内容相同的其他存档，而是在原名称前显示 `*`，例如 `* 常用`；所有选项预留相同标记宽度，不再显示“未保存”。切换存档前会先确认是否放弃当前修改。
-- 旧 Workflow 没有关联信息时会先尝试按列数及有序的开关、标题和 Prompt 精确匹配；无法匹配时关联为 `* 默认存档`。当前存档被删除时也保留节点内容并回退到 `* 默认存档`。
-- 插件按 ComfyUI 用户保存全局最后选择；新建节点自动加载它。已有节点不会因其他节点或浏览器标签页切换存档而改变关联。
-- “新建存档”使用输入的名称保存当前状态；名称去除外围空白后必须为 1–80 个字符且不区分大小写唯一。同名新建会先询问是否将当前状态保存到已有存档。
-- 默认存档固定在列表顶部且不可拖拽；普通存档初始按加入本地存档库的顺序排列，先创建的在上，新建或新导入的追加到底部。管理列表左侧的拖拽手柄可以持久化调整顺序，调整结果会同步用于工具栏的快速切换下拉框。
-- 单选普通存档时可以保存、重命名、导出或删除；多选时只允许批量导出或删除。默认存档可以参与批量导出，但只要选择中包含默认存档，删除操作就会被禁用。拖拽排序、列表刷新和跨标签同步不会改变仍然有效的选择项。
-- 保存、重命名和修改存档内容只更新存档本身，不会改变列表位置；导入覆盖同样保留原位置，导入新增项按导入文件中的顺序追加。
-- 保存到已有存档和删除必须二次确认。
-- 同一页面中的所有网格节点会同步存档列表；其他浏览器标签页通过 `BroadcastChannel` 收到通知，下拉框获得焦点时也会重新获取列表。
+If [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant) is installed and enabled, the composer offers autocomplete from all of that extension's CSV tag files. Matching starts after one Chinese character or two English letters/digits and returns at most 12 results, ordered by exact, prefix, then substring matches. The detached suggestion panel opens above or below according to available space. Arrow keys move the active result; Enter selects it only when a result is highlighted and otherwise keeps the normal free-entry behavior. Composite results are split and deduplicated. The integration reads only Prompt Assistant's local API, does not copy or modify its code or data, and disappears cleanly when the extension or API is unavailable.
 
-存档写入 ComfyUI 当前用户目录下的 `ComfyUI-Prompt-Weaver/prompt-grid-archives.json`，因此可跨 Workflow 和浏览器使用，并按 ComfyUI 多用户隔离。旧文件会自动补齐默认存档、600×420 的默认节点尺寸和全局选择；后端通过临时文件和原子替换写入，文件损坏时会返回错误，不会静默覆盖。除默认存档外最多保存 100 个普通存档，每个存档最多 500 张卡片，并设有快照、导入文件和总文件大小限制。
+## Global archives
 
-单个、选中的多个或全部存档均可导出为统一 JSON 包，批量导出保持当前列表顺序。批量删除使用一次确认和一次原子写入，任一目标无效时整批不删除。导入前会显示存档数和卡片数，并可选择同名冲突策略：默认“跳过”、覆盖本地存档或自动重命名。服务端会先完整校验整批记录，任何非法记录都会取消整批导入。
+The archive selector loads and switches complete grid states. **Archive Manager** creates, saves, renames, deletes, imports, and exports archives. A normal click selects one archive, `Ctrl` adds or removes individual selections, `Shift` selects a range from the latest anchor, and `Ctrl+Shift` adds a range. Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content. An archive contains node size, column count, card order, switches, titles, colors, and prompts, but not canvas position or links. Loading from the toolbar also restores the saved node size.
 
-存档快照不写入节点执行 `config`；Workflow 节点属性只保存一个关联存档 ID，不改变 Queue Prompt、Python 节点或桌面端 C++ 解析契约。新增、修改或删除存档后需要保持 ComfyUI 服务运行；安装此版本后因为新增了 Python 路由，必须重启 ComfyUI。
+The Save button next to the selector writes the current grid and node size back to the associated archive. It is enabled only while the state is dirty and does not ask for confirmation. Changes made while a save is in progress remain dirty if they were not part of the saved snapshot.
 
-## 汇总规则
+- The pinned **Default Archive** starts with two columns and four enabled empty cards. It can be updated, imported, and exported, but cannot be renamed or deleted and does not count toward the regular archive limit.
+- Every node remembers its associated archive independently. Editing grid content or node size keeps that association and prefixes its name with `*`, for example `* Common`; every option reserves the same marker width. Switching archives asks before discarding changes.
+- A legacy workflow without an archive association first tries an exact match using columns and the ordered switches, titles, colors, and prompts. If no match exists, it associates with `* Default Archive`. Deleting an associated archive preserves node content and falls back in the same way.
+- ComfyUI stores the last globally selected archive per user, and a new node automatically loads it. Existing nodes do not change association when another node or browser tab switches archives.
+- Archive names are trimmed, must contain 1–80 characters, and are unique without regard to case. Creating a duplicate name asks whether to overwrite the existing archive.
+- The default archive is fixed at the top and cannot be dragged. Regular archives preserve insertion order; new or newly imported archives are appended. Drag handles persist a new order that is also used by the toolbar selector.
+- One regular archive may be saved, renamed, exported, or deleted. Multiple archives may be exported or deleted together. The default archive may be part of an export selection, but any selection containing it disables deletion.
+- Updating or renaming an archive keeps its list position. Import overwrite also preserves position; imported additions retain their order and are appended.
+- Saving over an archive and deleting archives require confirmation.
+- Nodes on the same page synchronize archive changes immediately. Other tabs use `BroadcastChannel`, and focusing the selector also refreshes the list.
 
-节点按顺序处理所有启用卡片：
+Archives are stored under the current ComfyUI user's data directory at `ComfyUI-Prompt-Weaver/prompt-grid-archives.json`, so they can be shared across workflows and browser sessions while remaining isolated between ComfyUI users. Older files are upgraded with the default archive, a 600×420 default node size, and the global selection. Writes use a temporary file and atomic replacement; corrupt files return an error and are never silently replaced. The limits are 100 regular archives, 500 cards per archive, and bounded snapshot, import, and total file sizes.
 
-1. 去除 Prompt 外围空白。
-2. 去除连续的首尾英文逗号 `,`，再去除一次外围空白。
-3. 跳过清理后为空的 Prompt。
-4. 使用英文逗号加空格 `, ` 连接剩余内容。
+One archive, the selected archives, or all archives can be exported in the same portable JSON format; batch export retains list order. Batch deletion uses one confirmation and one atomic write, and an invalid target cancels the entire operation. Import preview shows archive and card counts and supports Skip, Overwrite Local Archives, or Automatically Rename for name conflicts. The server validates the whole batch before writing anything.
 
-Prompt 内部的逗号、换行和全角逗号不会被修改。全部关闭或全部为空时输出空字符串。
+Archive snapshots are not written into the execution `config`. Workflow node properties store only the associated archive ID, leaving Queue Prompt, the Python node contract, and desktop C++ parsing unchanged. ComfyUI must remain running while archive operations are used. Restart ComfyUI after upgrading because the plugin registers Python routes.
 
-## 配置与 API Workflow
+## Combination rules
 
-网格使用唯一的 `config` widget 保存版本化 JSON 字符串。示例：
+The node processes enabled cards in order:
+
+1. Trim surrounding whitespace from the prompt.
+2. Remove consecutive leading and trailing ASCII commas `,`, then trim once more.
+3. Skip the prompt if it is empty after cleanup.
+4. Join the remaining values with an ASCII comma and space: `, `.
+
+Internal commas, line breaks, and full-width commas remain unchanged. The result is an empty string when every card is disabled or empty.
+
+## Configuration and API workflows
+
+The grid stores a versioned JSON string in its single `config` widget:
 
 ```json
 {
@@ -98,52 +106,52 @@ Prompt 内部的逗号、换行和全角逗号不会被修改。全部关闭或�
     {
       "id": "prompt-1",
       "enabled": true,
-      "title": "画质",
+      "title": "Quality",
       "prompt": "masterpiece, best quality"
     }
   ]
 }
 ```
 
-API-format Prompt 的 `inputs.config` 必须是 JSON 编码后的**字符串**，不是直接嵌套的对象。例如：
+In an API-format prompt, `inputs.config` must be a JSON-encoded **string**, not a nested object:
 
 ```json
 {
   "1": {
     "class_type": "PromptWeaverPromptToggleGrid",
     "inputs": {
-      "config": "{\"version\":1,\"columns\":2,\"items\":[{\"id\":\"prompt-1\",\"enabled\":true,\"title\":\"画质\",\"prompt\":\"masterpiece, best quality\"}]}"
+      "config": "{\"version\":1,\"columns\":2,\"items\":[{\"id\":\"prompt-1\",\"enabled\":true,\"title\":\"Quality\",\"prompt\":\"masterpiece, best quality\"}]}"
     }
   }
 }
 ```
 
-非空但无法解析、根结构错误、`version`/`items`/`enabled`/`prompt` 类型错误或版本不受支持的配置会阻止 Python 节点执行。前端还会校验卡片 ID 和标题；遇到损坏配置时保留原始值，并显示“重置为默认”入口。无效列数只影响布局，前端会恢复为 2 列。
+A non-empty configuration with invalid JSON, an invalid root, invalid `version`/`items`/`enabled`/`prompt` types, or an unsupported version prevents Python execution. The frontend additionally validates card IDs, titles, and colors. A corrupt value is preserved and the node displays **Reset to Default**. An invalid column count affects layout only and is restored to two columns.
 
-## 持久化与兼容范围
+## Persistence and compatibility
 
-- 网格状态随 Workflow 保存，支持普通画布中的保存重开和复制粘贴。
-- 桌面端解析器可以从图片中的 API Prompt 或仅有 UI Workflow 的元数据恢复实际启用的提示词。
-- 已经入库且曾解析为空的旧图片不会自动全量重扫；请在桌面端使用“重新解析此图片”。该操作会绕过旧元数据缓存。
-- v1 只承诺普通画布节点。Subgraph 参数提升、App Mode、存档文件夹/标签/搜索、云同步、自动定时保存、可配置分隔符、前后缀和卡片权重不在当前兼容范围内。
+- Grid state is saved with the workflow and supports reopening, copy, and paste on the normal canvas.
+- The desktop parser can recover the actual enabled prompts from either an API Prompt or UI-only Workflow embedded in image metadata.
+- Images already indexed with an empty parse result are not automatically rescanned. Use **Reparse this image** in the desktop application to bypass the old metadata cache.
+- Version 1 supports normal canvas nodes. Promoted subgraph parameters, App Mode, archive folders/tags/search, cloud sync, timed autosave, configurable separators, prefixes/suffixes, and card weights are outside the current compatibility contract.
 
-已验证基线：ComfyUI 0.31.1、frontend 1.48.7、Python 3.13.11。
+Validated baseline: ComfyUI 0.31.1, frontend 1.48.7, Python 3.13.11.
 
-## Workflow 打开桥接
+## Workflow-opening bridge
 
-已经打开的 ComfyUI 前端会通过心跳向插件注册。桌面端发送 `/prompt-weaver/open-workflow` 后，插件优先把 Workflow 投递给最近活跃的页面并调用 `app.loadGraphData()`；只有没有可用前端时才打开新的浏览器页面。
+An open ComfyUI frontend registers through a heartbeat. When the desktop application sends `/prompt-weaver/open-workflow`, the plugin delivers the workflow to the most recently active page and calls `app.loadGraphData()`. It opens a new browser page only when no active frontend is available.
 
-## 开发与测试
+## Development and testing
 
-插件运行时只依赖 ComfyUI 自带的 Python、aiohttp 和前端环境，不需要安装额外的 Python 或 JavaScript 包。仓库中的回归测试可独立运行：
+Runtime dependencies are limited to Python, aiohttp, and the frontend environment bundled with ComfyUI. The regression suite runs without installing additional Python or JavaScript packages:
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
 node --test tests/*.mjs
 ```
 
-测试覆盖节点配置解析、插件注册与路由、全局存档、网格排序、提示词编辑器以及 Prompt Assistant 标签补全。
+Tests cover node configuration parsing, registration and routes, archive storage and ordering, prompt-grid interaction, the prompt editor, Prompt Assistant autocomplete, language resources, locale switching, and legacy data compatibility.
 
-## 许可
+## License
 
-本项目采用 [MIT License](LICENSE) 开源。
+Released under the [MIT License](LICENSE).
