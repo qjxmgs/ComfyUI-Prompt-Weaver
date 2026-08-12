@@ -1,6 +1,6 @@
 # ComfyUI Prompt Weaver
 
-**English** | [简体中文](README.zh-CN.md)
+> 🌐 **Documentation / 文档:** **English** · [**简体中文 README →**](./README.zh-CN.md)
 
 ComfyUI Prompt Weaver provides two features:
 

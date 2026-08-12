@@ -49,8 +49,8 @@ class LocaleResourceTests(unittest.TestCase):
     def test_readmes_are_cross_linked_and_keep_the_same_test_commands(self):
         english = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
         chinese = (PLUGIN_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
-        self.assertIn("[简体中文](README.zh-CN.md)", english)
-        self.assertIn("[English](README.md)", chinese)
+        self.assertIn("](./README.zh-CN.md)", english)
+        self.assertIn("](./README.md)", chinese)
         for command in (
             'python -m unittest discover -s tests -p "test_*.py" -v',
             "node --test tests/*.mjs",

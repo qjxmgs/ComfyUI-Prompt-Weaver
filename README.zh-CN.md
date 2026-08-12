@@ -1,6 +1,6 @@
 # ComfyUI Prompt Weaver
 
-[English](README.md) | **简体中文**
+> 🌐 **文档 / Documentation：** [**← English README**](./README.md) · **简体中文**
 
 该插件包含两个能力：
 
