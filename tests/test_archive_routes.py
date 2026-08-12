@@ -46,9 +46,10 @@ class _UserManager:
 
 
 class _Request:
-    def __init__(self, payload=None, *, user="alice", match_info=None, raw=None):
+    def __init__(self, payload=None, *, user="alice", match_info=None, query=None, raw=None):
         self.user = user
         self.match_info = match_info or {}
+        self.query = query or {}
         self._raw = raw if raw is not None else json.dumps(payload).encode("utf-8")
         self.content_length = len(self._raw)
 
@@ -318,6 +319,46 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(renamed.payload["renamed"], 1)
         names = [item["name"] for item in renamed.payload["archives"]]
         self.assertCountEqual(names, ["默认存档", "通用画质 (2)", "通用画质"])
+
+    def test_tag_autocomplete_routes_are_user_isolated_and_report_missing_data(self):
+        alice_store = self.module._tag_autocomplete_store(_Request(user="alice"))
+        bob_store = self.module._tag_autocomplete_store(_Request(user="bob"))
+        self.assertIsNot(alice_store, bob_store)
+        self.assertIn("alice", str(alice_store.metadata_path))
+        self.assertIn("bob", str(bob_store.metadata_path))
+
+        status = self.run_async(self.module.get_tag_autocomplete_status(
+            _Request(user="alice", query={"locale": "zh-CN"})
+        ))
+        self.assertEqual(status.status, 200)
+        self.assertTrue(status.payload["needs_download"])
+        self.assertEqual(status.payload["locale"], "zh-CN")
+
+        missing = self.run_async(self.module.search_tag_autocomplete(
+            _Request(user="alice", query={"q": "bl", "locale": "en", "limit": "12"})
+        ))
+        self.assertEqual(missing.status, 409)
+
+    def test_tag_autocomplete_update_route_starts_one_background_job(self):
+        class _FakeStore:
+            def __init__(self):
+                self.calls = []
+
+            def start_update(self, locale, force=True):
+                self.calls.append((locale, force))
+                return asyncio.create_task(asyncio.sleep(0))
+
+            def status(self, locale):
+                return {"updating": True, "locale": locale}
+
+        store = _FakeStore()
+        with mock.patch.object(self.module, "_tag_autocomplete_store", return_value=store):
+            response = self.run_async(self.module.update_tag_autocomplete(
+                _Request({"locale": "zh-CN"})
+            ))
+        self.assertEqual(response.status, 202)
+        self.assertEqual(response.payload, {"updating": True, "locale": "zh-CN"})
+        self.assertEqual(store.calls, [("zh-CN", True)])
 
 
 if __name__ == "__main__":

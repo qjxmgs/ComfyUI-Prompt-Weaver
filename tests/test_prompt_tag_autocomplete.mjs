@@ -1,0 +1,206 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const i18nSource = await readFile(
+    new URL("../web/prompt_weaver_i18n.js", import.meta.url),
+    "utf8",
+);
+const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString("base64")}`;
+const assistantSource = (await readFile(
+    new URL("../web/prompt_assistant_tags.js", import.meta.url),
+    "utf8",
+)).replace("./prompt_weaver_i18n.js", i18nUrl);
+const assistantUrl = `data:text/javascript;base64,${Buffer.from(assistantSource).toString("base64")}`;
+const moduleSource = (await readFile(
+    new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
+    "utf8",
+))
+    .replace("./prompt_weaver_i18n.js", i18nUrl)
+    .replace("./prompt_assistant_tags.js", assistantUrl);
+const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
+const {
+    DanbooruTagProvider,
+    PromptTagAutocompleteProvider,
+    applyPromptCompletion,
+    autocompleteQueryIsEligible,
+    formatAutocompleteCount,
+    mergeAutocompleteResults,
+    normalizeAutocompleteInsertionKey,
+    promptPresenceKeys,
+    resolvePromptCompletionContext,
+} = await import(moduleUrl);
+
+function jsonResponse(payload, ok = true, status = 200) {
+    return {
+        ok,
+        status,
+        async json() {
+            return payload;
+        },
+    };
+}
+
+test("completion context preserves separators, wrappers, weights, and apostrophes", () => {
+    const plain = "masterpiece, blue ey, smile";
+    assert.deepEqual(resolvePromptCompletionContext(plain, 20), {
+        start: 13,
+        end: 20,
+        query: "blue ey",
+    });
+    assert.deepEqual(applyPromptCompletion(
+        plain,
+        resolvePromptCompletionContext(plain, 20),
+        "blue eyes",
+    ), {
+        value: "masterpiece, blue eyes, smile",
+        cursor: 22,
+    });
+
+    const weighted = "masterpiece, ((blue_ey:1.25)), smile";
+    const weightedContext = resolvePromptCompletionContext(weighted, weighted.indexOf(":1.25"));
+    assert.equal(weightedContext.query, "blue_ey");
+    assert.equal(
+        applyPromptCompletion(weighted, weightedContext, "blue eyes").value,
+        "masterpiece, ((blue eyes:1.25)), smile",
+    );
+
+    const quoted = 'portrait, "blue_ey", smile';
+    const quotedContext = resolvePromptCompletionContext(quoted, quoted.indexOf("blue_ey") + 7);
+    assert.equal(quotedContext.query, "blue_ey");
+    assert.equal(applyPromptCompletion(quoted, quotedContext, "blue eyes").value, 'portrait, "blue eyes", smile');
+
+    const apostrophe = "artist's_style, blue_ey";
+    assert.equal(resolvePromptCompletionContext(apostrophe, 6).query, "artist's_style");
+});
+
+test("presence keys normalize underscores and spaces without touching protected commas", () => {
+    const keys = promptPresenceKeys("blue_eyes, (red_hair:1.2), 'artist, name'");
+    assert.equal(keys.has("blue eyes"), true);
+    assert.equal(keys.has("red hair"), true);
+    assert.equal(keys.has("artist, name"), true);
+    assert.equal(normalizeAutocompleteInsertionKey(" BLUE__EYES "), "blue eyes");
+});
+
+test("Chinese queries start at one character and Latin queries at two", () => {
+    assert.equal(autocompleteQueryIsEligible("蓝"), true);
+    assert.equal(autocompleteQueryIsEligible("b"), false);
+    assert.equal(autocompleteQueryIsEligible("bl"), true);
+});
+
+test("dual-source merge ranks matches, prefers Prompt Assistant, and deduplicates insertions", () => {
+    const merged = mergeAutocompleteResults([
+        [
+            {
+                source: "danbooru",
+                tag: "blue_eyes",
+                insertText: "blue eyes",
+                matchRank: 1,
+                postCount: 1_400_000,
+            },
+            {
+                source: "danbooru",
+                tag: "blush",
+                insertText: "blush",
+                matchRank: 1,
+                postCount: 2_500_000,
+            },
+        ],
+        [
+            {
+                source: "prompt-assistant",
+                tag: "蓝眼睛",
+                insertText: "blue_eyes",
+                matchRank: 1,
+                postCount: 0,
+            },
+            {
+                source: "prompt-assistant",
+                tag: "杰作",
+                insertText: "masterpiece",
+                matchRank: 0,
+                postCount: 0,
+            },
+        ],
+    ]);
+    assert.deepEqual(merged.map((record) => record.tag), ["杰作", "蓝眼睛", "blush"]);
+});
+
+test("Danbooru provider keeps status local, maps rows, and starts updates", async () => {
+    const calls = [];
+    const api = {
+        async fetchApi(path, options = {}) {
+            calls.push([path, options]);
+            if (path.startsWith("/prompt-weaver/tag-autocomplete/status")) {
+                return jsonResponse({ available: true, updating: false, row_count: 32259 });
+            }
+            if (path.startsWith("/prompt-weaver/tag-autocomplete/search")) {
+                return jsonResponse({
+                    results: [{
+                        tag: "blue_eyes",
+                        insert_text: "blue eyes",
+                        translation: "蓝眼睛",
+                        category: 0,
+                        post_count: 1_409_152,
+                        match_rank: 1,
+                    }],
+                });
+            }
+            if (path === "/prompt-weaver/tag-autocomplete/update") {
+                return jsonResponse({ updating: true }, true, 202);
+            }
+            throw new Error(`unexpected path ${path}`);
+        },
+    };
+    const provider = new DanbooruTagProvider(api, { statusTtlMs: 60_000 });
+    const result = await provider.search("蓝", "zh", 12);
+    assert.equal(result.results[0].insertText, "blue eyes");
+    assert.equal(result.results[0].translation, "蓝眼睛");
+    assert.match(calls[1][0], /q=%E8%93%9D/);
+    assert.equal(formatAutocompleteCount(2_535_113, "en"), "2.5M");
+});
+
+test("provider toggles let either source work independently", async () => {
+    const provider = new PromptTagAutocompleteProvider(null, {
+        danbooruEnabled: () => true,
+        promptAssistantEnabled: () => false,
+    });
+    provider.danbooru = {
+        async search() {
+            return {
+                status: { available: true },
+                results: [{
+                    source: "danbooru",
+                    tag: "blush",
+                    insertText: "blush",
+                    matchRank: 1,
+                    postCount: 2_535_113,
+                }],
+            };
+        },
+    };
+    assert.deepEqual(
+        (await provider.search("bl", "en")).results.map((record) => record.tag),
+        ["blush"],
+    );
+});
+
+test("prompt grid source wires autocomplete into all three requested input surfaces", async () => {
+    const source = await readFile(new URL("../web/prompt_toggle_grid.js", import.meta.url), "utf8");
+    assert.match(source, /new PromptAutocompleteController\(\s*prompt,/);
+    assert.match(source, /new PromptAutocompleteController\(\s*addInput,/);
+    assert.match(source, /new PromptAutocompleteController\(\s*freeTextArea,/);
+    assert.match(source, /id:\s*DANBOORU_SETTING_ID/);
+    assert.match(source, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
+    assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
+});
+
+test("handled keys stay inside autocomplete and inserted text does not reopen results", async () => {
+    const source = await readFile(
+        new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
+        "utf8",
+    );
+    assert.match(source, /event\.stopImmediatePropagation\(\)/);
+    assert.match(source, /if \(!this\.applyingCompletion\) this\.schedule\(\)/);
+    assert.match(source, /this\.applyingCompletion = true;[\s\S]*dispatchEvent[\s\S]*finally/);
+});

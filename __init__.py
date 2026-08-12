@@ -1,6 +1,8 @@
+import asyncio
 import json
 import time
 import uuid
+from pathlib import Path
 
 from aiohttp import web
 from server import PromptServer
@@ -16,6 +18,13 @@ from .archive_store import (
     ArchiveValidationError,
 )
 from .nodes import PromptWeaverPromptToggleGrid
+from .tag_autocomplete import (
+    MAX_QUERY_LENGTH,
+    TagAutocompleteError,
+    TagAutocompleteStore,
+    TagAutocompleteUnavailableError,
+    TagAutocompleteValidationError,
+)
 
 
 WEB_DIRECTORY = "./web"
@@ -35,6 +44,8 @@ __all__ = [
 _pending_workflows = {}
 _frontend_heartbeats = {}
 _archive_stores = {}
+_tag_autocomplete_stores = {}
+_tag_source_manifest_path = Path(__file__).resolve().parent / "data" / "tag_sources.json"
 
 
 def _archive_store(request):
@@ -48,6 +59,22 @@ def _archive_store(request):
     if store is None:
         store = ArchiveStore(path)
         _archive_stores[path] = store
+    return store
+
+
+def _tag_autocomplete_store(request):
+    path = PromptServer.instance.user_manager.get_request_user_filepath(
+        request,
+        "ComfyUI-Prompt-Weaver/tag-autocomplete/metadata.json",
+    )
+    if not path:
+        raise TagAutocompleteValidationError(
+            "unable to resolve the ComfyUI user data directory"
+        )
+    store = _tag_autocomplete_stores.get(path)
+    if store is None:
+        store = TagAutocompleteStore(path, _tag_source_manifest_path)
+        _tag_autocomplete_stores[path] = store
     return store
 
 
@@ -83,6 +110,20 @@ def _archive_error_response(error):
     else:
         status = 400
     return web.json_response({"error": str(error)}, status=status)
+
+
+def _tag_autocomplete_error_response(error):
+    status = 409 if isinstance(error, TagAutocompleteUnavailableError) else 400
+    return web.json_response({"error": str(error)}, status=status)
+
+
+def _consume_background_task(task):
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except Exception:
+        pass
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/frontend-ready")
@@ -142,6 +183,58 @@ async def take_workflow(request):
     if data is None:
         return web.json_response({"error": "workflow expired"}, status=404)
     return web.json_response(data)
+
+
+@PromptServer.instance.routes.get("/prompt-weaver/tag-autocomplete/status")
+async def get_tag_autocomplete_status(request):
+    try:
+        locale = request.query.get("locale", "en")
+        return web.json_response(
+            _tag_autocomplete_store(request).maybe_start_weekly_check(locale)
+        )
+    except TagAutocompleteError as error:
+        return _tag_autocomplete_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/tag-autocomplete/update")
+async def update_tag_autocomplete(request):
+    try:
+        payload = await _request_json(request, 4096)
+        locale = payload.get("locale", "en")
+        task = _tag_autocomplete_store(request).start_update(locale, force=True)
+        task.add_done_callback(_consume_background_task)
+        return web.json_response(
+            _tag_autocomplete_store(request).status(locale),
+            status=202,
+        )
+    except (
+        ArchiveValidationError,
+        ArchiveCapacityError,
+        TagAutocompleteValidationError,
+        TagAutocompleteUnavailableError,
+    ) as error:
+        return _tag_autocomplete_error_response(error)
+
+
+@PromptServer.instance.routes.get("/prompt-weaver/tag-autocomplete/search")
+async def search_tag_autocomplete(request):
+    query = request.query.get("q", "")
+    locale = request.query.get("locale", "en")
+    limit = request.query.get("limit", "12")
+    if len(query) > MAX_QUERY_LENGTH:
+        return _tag_autocomplete_error_response(
+            TagAutocompleteValidationError("tag autocomplete query is too long")
+        )
+    try:
+        results = await asyncio.to_thread(
+            _tag_autocomplete_store(request).search,
+            query,
+            locale,
+            limit,
+        )
+        return web.json_response({"results": results})
+    except TagAutocompleteError as error:
+        return _tag_autocomplete_error_response(error)
 
 
 @PromptServer.instance.routes.get("/prompt-weaver/prompt-grid-archives")

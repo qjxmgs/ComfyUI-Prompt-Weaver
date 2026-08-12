@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "version": "2026-08-13.1",
+  "published_at": "2026-08-13T00:00:00Z",
+  "content_scope": "full",
+  "sources": {
+    "base": {
+      "filename": "danbooru.base.csv",
+      "format": "danbooru_tag_csv_v1",
+      "url": "https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv/resolve/fdf2772213f13d46bff60fc5ebd876e1a811a053/danbooru_tags.csv?download=true",
+      "sha256": "a48e1e63b81e8e4fc3091c660fd763e9d05e19beea3b98d1ee78d00ed10ac9d3",
+      "size_bytes": 1565830,
+      "min_rows": 32000,
+      "license": "MIT",
+      "attribution": "newtextdoc1111/danbooru-tag-csv",
+      "source_page": "https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv"
+    },
+    "zh-CN": {
+      "filename": "danbooru.zh-CN.csv",
+      "format": "tag_translation_csv_v1",
+      "url": "https://raw.githubusercontent.com/Aaalice233/ComfyUI-Danbooru-Gallery/663897c74d5aabf4437ae31381c16328472dc8f5/py/danbooru_gallery/zh_cn/danbooru.csv",
+      "sha256": "cbcf47b17843edc9b35281406c68b5392492d4a0dc534209026933342ed8b556",
+      "size_bytes": 299881,
+      "min_rows": 10000,
+      "license": "MIT",
+      "attribution": "Aaalice233/ComfyUI-Danbooru-Gallery",
+      "source_page": "https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery"
+    }
+  }
+}

@@ -5,7 +5,9 @@
 .cpw-archive-manager,
 .cpw-archive-manager *,
 .cpw-archive-confirm,
-.cpw-archive-confirm * {
+.cpw-archive-confirm *,
+.cpw-tag-autocomplete,
+.cpw-tag-autocomplete * {
     box-sizing: border-box;
 }
 
@@ -58,6 +60,148 @@
     gap: 6px;
     flex: 1 1 330px;
     flex-wrap: wrap;
+}
+
+.cpw-tag-autocomplete {
+    position: fixed;
+    z-index: 2147483500;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 5px;
+    border: 1px solid var(--border-color, #4b4d52);
+    border-radius: 8px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-menu-bg, #202124);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 34%);
+    font: 12px/1.35 Inter, system-ui, sans-serif;
+    user-select: none;
+}
+
+.cpw-tag-autocomplete[hidden] {
+    display: none;
+}
+
+.cpw-tag-autocomplete__option {
+    --cpw-tag-category: #7894b2;
+    width: 100%;
+    min-height: 38px;
+    display: grid;
+    grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto minmax(54px, auto);
+    align-items: center;
+    gap: 9px;
+    padding: 5px 8px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 6px;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cpw-tag-autocomplete__option--category-0 { --cpw-tag-category: #5b9cff; }
+.cpw-tag-autocomplete__option--category-1 { --cpw-tag-category: #ef6f70; }
+.cpw-tag-autocomplete__option--category-3 { --cpw-tag-category: #b784f7; }
+.cpw-tag-autocomplete__option--category-4 { --cpw-tag-category: #57ba7b; }
+.cpw-tag-autocomplete__option--category-5 { --cpw-tag-category: #e6a457; }
+.cpw-tag-autocomplete__option--category-custom { --cpw-tag-category: #65b7c8; }
+
+.cpw-tag-autocomplete__option:hover:not(:disabled),
+.cpw-tag-autocomplete__option--active:not(:disabled) {
+    color: var(--input-text, var(--fg-color, #fff));
+    background: color-mix(in srgb, var(--p-primary-color, #58a6ff) 22%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-tag-autocomplete__option--present,
+.cpw-tag-autocomplete__option:disabled {
+    opacity: 0.42;
+    cursor: default;
+}
+
+.cpw-tag-autocomplete__category {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    color: color-mix(in srgb, var(--cpw-tag-category) 76%, var(--input-text, #fff));
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cpw-tag-autocomplete__category::before {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-radius: 2px;
+    background: var(--cpw-tag-category);
+    content: "";
+}
+
+.cpw-tag-autocomplete__main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.cpw-tag-autocomplete__tag,
+.cpw-tag-autocomplete__translation {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cpw-tag-autocomplete__tag {
+    color: color-mix(in srgb, var(--cpw-tag-category) 76%, var(--input-text, #fff));
+    font-weight: 600;
+}
+
+.cpw-tag-autocomplete__translation {
+    color: var(--descrip-text, #aaa);
+    font-size: 11px;
+}
+
+.cpw-tag-autocomplete__source {
+    max-width: 106px;
+    overflow: hidden;
+    color: var(--descrip-text, #aaa);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cpw-tag-autocomplete__count {
+    color: color-mix(in srgb, var(--p-primary-color, #58a6ff) 80%, var(--input-text, #fff));
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.cpw-tag-autocomplete__download {
+    min-height: 34px;
+    padding: 6px 10px;
+    border: 1px dashed color-mix(in srgb, var(--p-primary-color, #58a6ff) 62%, var(--border-color, #4b4d52));
+    border-radius: 6px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: color-mix(in srgb, var(--p-primary-color, #58a6ff) 12%, transparent);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cpw-tag-autocomplete__download:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-primary-color, #58a6ff) 22%, transparent);
+}
+
+.cpw-tag-autocomplete__download:disabled {
+    cursor: wait;
+    opacity: 0.65;
 }
 
 .cpw-prompt-grid__archive-select {

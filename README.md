@@ -27,12 +27,12 @@ git pull --ff-only origin master
 
 The desktop application currently installs the plugin only when the target directory does not exist. It does not overwrite an older installation. Upgrade that installation manually and make sure the following files and directories are present if the node does not appear:
 
-- `nodes.py`, `archive_store.py`, and `__init__.py`
+- `nodes.py`, `archive_store.py`, `tag_autocomplete.py`, `data/tag_sources.json`, and `__init__.py`
 - `locales/en` and `locales/zh`
 - `web/prompt_toggle_grid.js` and `web/prompt_toggle_grid.css`
 - `web/prompt_weaver_i18n.js`
 - `web/prompt_grid_archives.js` and `web/prompt_grid_reorder.js`
-- `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, and `web/prompt_assistant_tags.js`
+- `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, `web/prompt_assistant_tags.js`, and `web/prompt_tag_autocomplete.js`
 
 ## Language support
 
@@ -58,7 +58,11 @@ The toolbar can add prompts, enable or disable every card, and select a fixed la
 
 The editor button next to a prompt splits its text at top-level English or Chinese commas and line breaks. Separators inside parentheses, square or curly brackets, quotes, and escaped content are preserved. The editor deduplicates tags case-insensitively while retaining the first spelling and original order. Its `+` composer accepts multiple prompts using the same splitting rules and commits on Enter, blur, or Confirm. Existing inactive duplicates are re-enabled instead of added again. Clicking or painting across tags toggles their selection. The close button, dialog-level `Esc`, or backdrop discards changes; `Esc` inside the composer cancels only that addition. Confirm writes only selected tags back with `, ` separators. Free Mode edits the complete raw prompt without making a persistent workflow setting.
 
-If [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant) is installed and enabled, the composer offers autocomplete from all of that extension's CSV tag files. Matching starts after one Chinese character or two English letters/digits and returns at most 12 results, ordered by exact, prefix, then substring matches. The detached suggestion panel opens above or below according to available space. Arrow keys move the active result; Enter selects it only when a result is highlighted and otherwise keeps the normal free-entry behavior. Composite results are split and deduplicated. The integration reads only Prompt Assistant's local API, does not copy or modify its code or data, and disappears cleanly when the extension or API is unavailable.
+The card prompt field, the `+` composer, and Free Mode share dual-source autocomplete. **Danbooru** suggestions come from a Prompt-Weaver-managed local CSV dictionary; **Prompt Assistant** suggestions come from every CSV exposed by an installed [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant). Both sources are enabled by default and can be toggled independently in ComfyUI settings. Exact, prefix, and substring matches are ranked in that order; Prompt Assistant wins equal-rank ties, while Danbooru ties use post count. Final insertion text is deduplicated across sources.
+
+Matching starts after one Chinese character or two Latin characters and returns at most 12 results. Danbooru rows show category, canonical tag, localized description, source, and compact post count. Selecting a Danbooru tag inserts its canonical English tag with underscores converted to spaces. The popup opens above or below according to available space; arrow keys move the highlight, Enter or Tab selects only a highlighted result, and `Esc` closes it. IME composition is not intercepted. In the card and Free Mode fields only the fragment surrounding the caret is replaced, preserving separators, wrappers, quotes, escapes, and weight suffixes.
+
+The Danbooru dictionary is not bundled. The first eligible query displays an explicit download action, and typing is never sent to Danbooru or another remote search API. Data is stored per ComfyUI user under `ComfyUI-Prompt-Weaver/tag-autocomplete/`. Existing data is checked at most once every seven days; **Prompt Weaver → Update Danbooru Dictionary** runs a manual check. Downloads are pinned by HTTPS URL and SHA-256, validated before atomic replacement, and a failed update keeps the last good files. Simplified Chinese uses a separate display/search translation overlay and always inserts the canonical English tag. The full dictionary can include adult tags; automatic safety filtering is not claimed. The base dataset is [newtextdoc1111/danbooru-tag-csv](https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv) (MIT), and the Simplified Chinese overlay is from [Aaalice233/ComfyUI-Danbooru-Gallery](https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery) (MIT).
 
 ## Global archives
 
@@ -150,7 +154,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 node --test tests/*.mjs
 ```
 
-Tests cover node configuration parsing, registration and routes, archive storage and ordering, prompt-grid interaction, the prompt editor, Prompt Assistant autocomplete, language resources, locale switching, and legacy data compatibility.
+Tests cover node configuration parsing, registration and routes, archive storage and ordering, prompt-grid interaction, the prompt editor, dual-source autocomplete, dictionary validation and fallback, language resources, locale switching, and legacy data compatibility.
 
 ## License
 

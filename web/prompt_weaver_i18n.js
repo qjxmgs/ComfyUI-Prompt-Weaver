@@ -193,7 +193,32 @@ const CHINESE_MESSAGES = Object.freeze({
     "Prompt Assistant tag file {file}": "Prompt Assistant 标签文件 {file}",
     "Prompt Assistant tag file {file} is invalid.": "Prompt Assistant 标签文件 {file} 格式无效。",
     "Could not load Prompt Assistant tag file: {file}": "无法加载 Prompt Assistant 标签文件：{file}",
-    "{value} ({name})": "{value}（{name}）"
+    "{value} ({name})": "{value}（{name}）",
+    "Prompt tag matches": "提示词标签匹配结果",
+    "Danbooru dictionary status": "Danbooru 词库状态",
+    "Danbooru tag search": "Danbooru 标签搜索",
+    "Danbooru dictionary update": "Danbooru 词库更新",
+    "Danbooru dictionary update timed out.": "Danbooru 词库更新超时。",
+    "General": "常规",
+    "Artist": "画师",
+    "Copyright": "作品",
+    "Character": "角色",
+    "Meta": "元数据",
+    "Custom": "自定义",
+    "Other": "其他",
+    "Download Danbooru dictionary": "下载 Danbooru 词库",
+    "Download Chinese Danbooru translations": "下载 Danbooru 中文释义",
+    "Updating Danbooru dictionary…": "正在更新 Danbooru 词库…",
+    "Update failed: {message}": "更新失败：{message}",
+    "Enable Danbooru tag autocomplete": "启用 Danbooru 标签联想",
+    "Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local.": "使用 Prompt-Weaver 本地 Danbooru CSV 词库，输入内容不会发送到网络。",
+    "Enable Prompt Assistant autocomplete": "启用 Prompt Assistant 联想",
+    "Uses tag CSV files exposed by an installed ComfyUI-Prompt-Assistant plugin.": "使用已安装 ComfyUI-Prompt-Assistant 插件提供的标签 CSV。",
+    "Update Danbooru Dictionary": "更新 Danbooru 词库",
+    "Danbooru Dictionary": "Danbooru 词库",
+    "Checking for Danbooru dictionary updates…": "正在检查 Danbooru 词库更新…",
+    "Danbooru dictionary is ready with {count} tags.": "Danbooru 词库已就绪，共 {count} 个标签。",
+    "Danbooru Dictionary Update Failed": "Danbooru 词库更新失败"
 });
 
 const ENGLISH_MESSAGES = Object.freeze(Object.fromEntries(

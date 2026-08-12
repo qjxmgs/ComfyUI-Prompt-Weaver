@@ -26,6 +26,7 @@ import {
     connectLocale,
     formatDateTime,
     formatList,
+    getLocale,
     subscribeLocale,
     syncLocale,
     t,
@@ -47,11 +48,12 @@ import {
     normalizePromptEditorSize,
 } from "./prompt_editor_window.js?v=20260812-font-size-slider-12-30";
 import {
-    PromptAssistantTagCatalog,
-    formatPromptAssistantTagOption,
-    movePromptAssistantSuggestionIndex,
-    searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260811-tag-autocomplete-v2";
+    AUTOCOMPLETE_SETTINGS_EVENT,
+    DANBOORU_SETTING_ID,
+    PROMPT_ASSISTANT_SETTING_ID,
+    PromptAutocompleteController,
+    PromptTagAutocompleteProvider,
+} from "./prompt_tag_autocomplete.js?v=20260813-dual-source-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -96,7 +98,17 @@ const PROMPT_EDITOR_MAX_FONT_SIZE = 30;
 const PROMPT_TOKEN_GESTURE_SAMPLE_STEP = 6;
 
 const archiveClient = new PromptGridArchiveClient(api);
-const promptAssistantTagCatalog = new PromptAssistantTagCatalog(api, {
+const readAutocompleteSetting = (settingId) => {
+    try {
+        const value = app?.extensionManager?.setting?.get?.(settingId);
+        return value === undefined || value === null ? true : Boolean(value);
+    } catch (_error) {
+        return true;
+    }
+};
+const promptTagAutocompleteProvider = new PromptTagAutocompleteProvider(api, {
+    danbooruEnabled: () => readAutocompleteSetting(DANBOORU_SETTING_ID),
+    promptAssistantEnabled: () => readAutocompleteSetting(PROMPT_ASSISTANT_SETTING_ID),
     onDiagnostic(message, error) {
         console.warn(`[Prompt Weaver] ${message}`, error || "");
     },
@@ -107,6 +119,46 @@ const promptGridLocaleControllers = new Set();
 const archiveChannel = typeof BroadcastChannel === "function"
     ? new BroadcastChannel(ARCHIVE_CHANNEL_NAME)
     : null;
+
+function dispatchAutocompleteSettingsChanged() {
+    globalThis.dispatchEvent(new CustomEvent(AUTOCOMPLETE_SETTINGS_EVENT));
+}
+
+function showAutocompleteToast(severity, summary, detail) {
+    const toast = app?.extensionManager?.toast;
+    if (typeof toast?.add === "function") {
+        toast.add({ severity, summary, detail, life: severity === "error" ? 8000 : 4000 });
+    } else if (severity === "error") {
+        console.error(`[Prompt Weaver] ${summary}: ${detail}`);
+    } else {
+        console.info(`[Prompt Weaver] ${summary}: ${detail}`);
+    }
+}
+
+async function updateDanbooruDictionary() {
+    showAutocompleteToast(
+        "info",
+        t("Danbooru Dictionary"),
+        t("Checking for Danbooru dictionary updates…"),
+    );
+    try {
+        const status = await promptTagAutocompleteProvider.updateDanbooru(getLocale());
+        showAutocompleteToast(
+            "success",
+            t("Danbooru Dictionary"),
+            t("Danbooru dictionary is ready with {count} tags.", {
+                count: status?.row_count || 0,
+            }),
+        );
+        dispatchAutocompleteSettingsChanged();
+    } catch (error) {
+        showAutocompleteToast(
+            "error",
+            t("Danbooru Dictionary Update Failed"),
+            error instanceof Error ? error.message : String(error),
+        );
+    }
+}
 
 function dispatchArchiveSync() {
     window.dispatchEvent(new CustomEvent(ARCHIVE_SYNC_EVENT));
@@ -657,6 +709,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let disposed = false;
     let widget;
     const cardElements = new Map();
+    const cardAutocompleteControllers = new Set();
     const reorderAnimations = new WeakMap();
     const archiveReorderAnimations = new WeakMap();
 
@@ -2906,10 +2959,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         let addButton = null;
         let addDraft = "";
         let addBlurTimer = 0;
-        let suggestionList = null;
-        let suggestionResults = [];
-        let activeSuggestionIndex = -1;
-        let tagCatalogRecords = [];
+        let editorAutocompleteController = null;
         let editorDragSession = null;
         let editorResizeSession = null;
         let tokenToggleGesture = null;
@@ -3007,13 +3057,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             persistPromptEditorFontSize(promptFontSize);
         });
 
-        promptAssistantTagCatalog.load().then((records) => {
-            tagCatalogRecords = records;
-            if (activePromptEditor?.overlay === overlay && adding && addInput) {
-                renderPromptAssistantSuggestions();
-            }
-        });
-
         const clearAddBlurTimer = () => {
             if (!addBlurTimer) return;
             clearTimeout(addBlurTimer);
@@ -3023,43 +3066,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             addStatus.textContent = message || "";
             addStatus.hidden = !message;
         };
-        const positionPromptAssistantSuggestions = () => {
-            if (!suggestionList || suggestionList.hidden || !addInput?.isConnected) return;
-
-            const inputRect = addInput.getBoundingClientRect();
-            const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-            const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-            const viewportMargin = 8;
-            const popupGap = 4;
-            const preferredHeight = Math.min(210, suggestionList.scrollHeight || 210);
-            const availableBelow = Math.max(
-                0,
-                viewportHeight - inputRect.bottom - viewportMargin - popupGap,
-            );
-            const availableAbove = Math.max(0, inputRect.top - viewportMargin - popupGap);
-            const openAbove = availableBelow < preferredHeight && availableAbove > availableBelow;
-            const availableHeight = openAbove ? availableAbove : availableBelow;
-            const popupWidth = Math.max(
-                0,
-                Math.min(inputRect.width, viewportWidth - viewportMargin * 2),
-            );
-            const popupLeft = Math.min(
-                Math.max(viewportMargin, inputRect.left),
-                Math.max(viewportMargin, viewportWidth - viewportMargin - popupWidth),
-            );
-
-            suggestionList.style.left = `${Math.round(popupLeft)}px`;
-            suggestionList.style.width = `${Math.round(popupWidth)}px`;
-            suggestionList.style.maxHeight = `${Math.max(48, Math.min(210, availableHeight))}px`;
-            if (openAbove) {
-                suggestionList.style.top = "auto";
-                suggestionList.style.bottom = `${Math.round(viewportHeight - inputRect.top + popupGap)}px`;
-            } else {
-                suggestionList.style.top = `${Math.round(inputRect.bottom + popupGap)}px`;
-                suggestionList.style.bottom = "auto";
-            }
-        };
-        const handleSuggestionAnchorChange = () => positionPromptAssistantSuggestions();
+        const handleSuggestionAnchorChange = () => editorAutocompleteController?.position();
         const applyPromptEditorSize = (size) => {
             dialog.style.width = `${size.width}px`;
             dialog.style.height = `${size.height}px`;
@@ -3185,72 +3192,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             persistPromptEditorSize(dialog.getBoundingClientRect());
             event.preventDefault();
         };
-        const syncActiveSuggestion = () => {
-            if (!suggestionList || !addInput) return;
-            const options = [...suggestionList.querySelectorAll("[role='option']")];
-            options.forEach((option, index) => {
-                const active = index === activeSuggestionIndex;
-                option.classList.toggle("cpw-prompt-editor__suggestion--active", active);
-                option.setAttribute("aria-selected", String(active));
-            });
-            const activeOption = options[activeSuggestionIndex];
-            if (activeOption) {
-                addInput.setAttribute("aria-activedescendant", activeOption.id);
-                activeOption.scrollIntoView({ block: "nearest" });
-            } else {
-                addInput.removeAttribute("aria-activedescendant");
-            }
-        };
-        function renderPromptAssistantSuggestions() {
-            if (!suggestionList || !addInput) return;
-            suggestionResults = searchPromptAssistantTags(tagCatalogRecords, addInput.value);
-            activeSuggestionIndex = -1;
-            suggestionList.replaceChildren();
-            suggestionList.hidden = !suggestionResults.length;
-            suggestionList.style.visibility = suggestionResults.length ? "hidden" : "";
-            addInput.setAttribute("aria-expanded", String(Boolean(suggestionResults.length)));
-            addInput.removeAttribute("aria-activedescendant");
-
-            suggestionResults.forEach((record, index) => {
-                const label = formatPromptAssistantTagOption(record);
-                const option = element("button", "cpw-prompt-editor__suggestion", label);
-                option.type = "button";
-                option.id = `${suggestionList.id}-option-${index}`;
-                option.tabIndex = -1;
-                option.title = label;
-                option.setAttribute("role", "option");
-                option.setAttribute("aria-selected", "false");
-                const keepInputFocused = (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                };
-                option.addEventListener("pointerdown", keepInputFocused);
-                option.addEventListener("mousedown", keepInputFocused);
-                option.addEventListener("click", (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    selectPromptAssistantSuggestion(index);
-                });
-                suggestionList.append(option);
-            });
-            if (suggestionResults.length) {
-                positionPromptAssistantSuggestions();
-                suggestionList.style.visibility = "";
-            }
-        }
-        function selectPromptAssistantSuggestion(index) {
-            const record = suggestionResults[index];
-            if (!record) return;
-            clearAddBlurTimer();
-            if (addInput) addInput.dataset.cpwSkipBlurCommit = "true";
-            const result = mergePromptTokenInput(tokens, selected, record.value);
-            tokens = result.tokens;
-            selected = result.selected;
-            adding = true;
-            addDraft = "";
-            renderTokens({ focusInput: true });
-            setAddStatus(formatAddStatus(result, true));
-        }
         const renderActivePromptCount = () => {
             const count = freeMode
                 ? promptSelectionFromFreeText(freePromptText).tokens.length
@@ -3369,14 +3310,12 @@ function createPromptGridWidget(node, inputName, inputData) {
             focusFreeText = false,
         } = {}) => {
             renderActivePromptCount();
-            suggestionList?.remove();
+            editorAutocompleteController?.destroy();
+            editorAutocompleteController = null;
             tokenList.replaceChildren();
             addInput = null;
             addButton = null;
             freeTextArea = null;
-            suggestionList = null;
-            suggestionResults = [];
-            activeSuggestionIndex = -1;
             enableAllButton.disabled = freeMode;
             disableAllButton.disabled = freeMode;
             tokenList.classList.toggle("cpw-prompt-editor__tokens--free", freeMode);
@@ -3396,6 +3335,14 @@ function createPromptGridWidget(node, inputName, inputData) {
                     renderActivePromptCount();
                 });
                 tokenList.append(freeTextArea);
+                editorAutocompleteController = new PromptAutocompleteController(
+                    freeTextArea,
+                    promptTagAutocompleteProvider,
+                    {
+                        getLocale,
+                        getExistingPrompt: () => freeTextArea?.value || "",
+                    },
+                );
                 if (focusFreeText) {
                     queueMicrotask(() => {
                         freeTextArea?.focus();
@@ -3445,42 +3392,36 @@ function createPromptGridWidget(node, inputName, inputData) {
                 addInput.value = addDraft;
                 addInput.placeholder = t("Enter a prompt; Chinese and English tag matching are supported");
                 addInput.setAttribute("aria-label", t("Add prompt"));
-                addInput.setAttribute("role", "combobox");
-                addInput.setAttribute("aria-autocomplete", "list");
-                addInput.setAttribute("aria-expanded", "false");
-                suggestionList = element("div", "cpw-prompt-editor__suggestions");
-                suggestionList.id = `cpw-prompt-editor-suggestions-${createId()}`;
-                suggestionList.setAttribute("role", "listbox");
-                suggestionList.setAttribute("aria-label", t("Prompt Assistant tag matches"));
-                suggestionList.hidden = true;
-                addInput.setAttribute("aria-controls", suggestionList.id);
                 addComposer.append(addInput);
                 tokenList.append(addComposer);
-                overlay.append(suggestionList);
                 addInput.addEventListener("input", (event) => {
                     addDraft = event.currentTarget.value;
-                    renderPromptAssistantSuggestions();
                 });
+                editorAutocompleteController = new PromptAutocompleteController(
+                    addInput,
+                    promptTagAutocompleteProvider,
+                    {
+                        getLocale,
+                        getExistingPrompt: () => tokens.join(", "),
+                        onSelect(record) {
+                            clearAddBlurTimer();
+                            if (addInput) addInput.dataset.cpwSkipBlurCommit = "true";
+                            const result = mergePromptTokenInput(tokens, selected, record.insertText);
+                            tokens = result.tokens;
+                            selected = result.selected;
+                            adding = true;
+                            addDraft = "";
+                            renderTokens({ focusInput: true });
+                            setAddStatus(formatAddStatus(result, true));
+                        },
+                    },
+                );
                 addInput.addEventListener("keydown", (event) => {
-                    if (event.isComposing) return;
-                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                        if (!suggestionResults.length) return;
+                    if (event.isComposing || event.defaultPrevented) return;
+                    if (event.key === "Enter") {
                         event.preventDefault();
                         event.stopPropagation();
-                        activeSuggestionIndex = movePromptAssistantSuggestionIndex(
-                            activeSuggestionIndex,
-                            suggestionResults.length,
-                            event.key === "ArrowDown" ? 1 : -1,
-                        );
-                        syncActiveSuggestion();
-                    } else if (event.key === "Enter") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (activeSuggestionIndex >= 0) {
-                            selectPromptAssistantSuggestion(activeSuggestionIndex);
-                        } else {
-                            commitAddInput({ focusAddButton: true });
-                        }
+                        commitAddInput({ focusAddButton: true });
                     } else if (event.key === "Escape") {
                         event.preventDefault();
                         event.stopPropagation();
@@ -3497,7 +3438,6 @@ function createPromptGridWidget(node, inputName, inputData) {
                         if (activePromptEditor?.overlay === overlay && !adding) renderTokens();
                     }, 0);
                 });
-                renderPromptAssistantSuggestions();
             } else {
                 addButton = element("button", "cpw-prompt-editor__add", "+");
                 addButton.type = "button";
@@ -3568,7 +3508,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             cleanupPromptTokenToggleGesture();
             clearTokenClickSuppressionTimer();
             suppressTokenClick = false;
-            suggestionList?.remove();
+            editorAutocompleteController?.destroy();
+            editorAutocompleteController = null;
             setAddStatus("");
 
             if (enabled) {
@@ -3608,9 +3549,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             clearTokenClickSuppressionTimer();
             suppressTokenClick = false;
             cleanupPromptTokenToggleGesture();
-            suggestionList?.remove();
+            editorAutocompleteController?.destroy();
+            editorAutocompleteController = null;
             window.removeEventListener("resize", handlePromptEditorViewportResize);
-            overlay.removeEventListener("scroll", handleSuggestionAnchorChange, true);
         };
         const refreshPromptEditorLocale = () => {
             title.childNodes[0].textContent = t("Edit Prompts (");
@@ -3644,6 +3585,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 addButton.title = t("Add prompt");
                 addButton.setAttribute("aria-label", t("Add prompt"));
             }
+            editorAutocompleteController?.refreshLocale();
         };
         activePromptEditor = {
             overlay,
@@ -3652,7 +3594,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             refreshLocale: refreshPromptEditorLocale,
         };
         window.addEventListener("resize", handlePromptEditorViewportResize);
-        overlay.addEventListener("scroll", handleSuggestionAnchorChange, true);
         header.addEventListener("pointerdown", beginPromptEditorDrag);
         header.addEventListener("pointermove", movePromptEditorDrag);
         header.addEventListener("pointerup", endPromptEditorDrag);
@@ -3796,6 +3737,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         prompt.addEventListener("input", () => updateItem(item.id, { prompt: prompt.value }, false));
         title.addEventListener("change", captureCanvasState);
         prompt.addEventListener("change", captureCanvasState);
+        cardAutocompleteControllers.add(new PromptAutocompleteController(
+            prompt,
+            promptTagAutocompleteProvider,
+            {
+                getLocale,
+                getExistingPrompt: () => prompt.value,
+            },
+        ));
         promptEditButton.addEventListener("click", () => openPromptEditor(prompt, item.id, promptEditButton));
         deleteButton.addEventListener("click", () => {
             if (prompt.value.trim() && !deleteArmed) {
@@ -3828,6 +3777,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         closeItemContextMenu();
         if (activePromptEditor) closePromptEditor(false);
         if (dragSession) endPointerDrag(true);
+        for (const controller of cardAutocompleteControllers) controller.destroy();
+        cardAutocompleteControllers.clear();
         const invalid = Boolean(parseError) || !state;
         toolbar.hidden = invalid;
         scroll.hidden = invalid;
@@ -3963,6 +3914,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
         if (sizeReconcileFrame) cancelAnimationFrame(sizeReconcileFrame);
         sizeObserver?.disconnect();
+        for (const controller of cardAutocompleteControllers) controller.destroy();
+        cardAutocompleteControllers.clear();
         if (node.onResize === promptGridOnResize) node.onResize = previousNodeOnResize;
         window.removeEventListener(ARCHIVE_SYNC_EVENT, onArchiveSync);
         columnSelect.customSelect.destroy();
@@ -3992,6 +3945,37 @@ function createPromptGridWidget(node, inputName, inputData) {
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.PromptToggleGrid",
+    settings: [
+        {
+            id: DANBOORU_SETTING_ID,
+            name: t("Enable Danbooru tag autocomplete"),
+            tooltip: t("Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local."),
+            type: "boolean",
+            defaultValue: true,
+            onChange: dispatchAutocompleteSettingsChanged,
+        },
+        {
+            id: PROMPT_ASSISTANT_SETTING_ID,
+            name: t("Enable Prompt Assistant autocomplete"),
+            tooltip: t("Uses tag CSV files exposed by an installed ComfyUI-Prompt-Assistant plugin."),
+            type: "boolean",
+            defaultValue: true,
+            onChange: dispatchAutocompleteSettingsChanged,
+        },
+    ],
+    commands: [
+        {
+            id: "PromptWeaver.Autocomplete.UpdateDictionary",
+            label: t("Update Danbooru Dictionary"),
+            function: updateDanbooruDictionary,
+        },
+    ],
+    menuCommands: [
+        {
+            path: ["Prompt Weaver"],
+            commands: ["PromptWeaver.Autocomplete.UpdateDictionary"],
+        },
+    ],
     loadedGraphNode(node) {
         if (node?.comfyClass === "PromptWeaverPromptToggleGrid"
             || node?.type === "PromptWeaverPromptToggleGrid") {
