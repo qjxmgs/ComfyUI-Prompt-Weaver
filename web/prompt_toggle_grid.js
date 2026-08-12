@@ -46,14 +46,15 @@ import {
     countActivePromptTokens,
     normalizePromptEditorFontSize,
     normalizePromptEditorSize,
-} from "./prompt_editor_window.js?v=20260812-font-size-slider-12-30";
+} from "./prompt_editor_window.js?v=20260814-min-width-600";
 import {
     AUTOCOMPLETE_SETTINGS_EVENT,
     DANBOORU_SETTING_ID,
     PROMPT_ASSISTANT_SETTING_ID,
     PromptAutocompleteController,
     PromptTagAutocompleteProvider,
-} from "./prompt_tag_autocomplete.js?v=20260813-unified-layout-v2";
+    textareaCaretClientRect,
+} from "./prompt_tag_autocomplete.js?v=20260814-caret-anchor-v3";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -90,7 +91,7 @@ const ARCHIVE_PROPERTY_KEY = "prompt_weaver_archive_id";
 const PROMPT_EDITOR_SIZE_STORAGE_KEY = "prompt-weaver-prompt-editor-size-v1";
 const PROMPT_EDITOR_FONT_SIZE_STORAGE_KEY = "prompt-weaver-prompt-editor-font-size-v1";
 const PROMPT_EDITOR_VIEWPORT_MARGIN = 16;
-const PROMPT_EDITOR_MIN_WIDTH = 360;
+const PROMPT_EDITOR_MIN_WIDTH = 600;
 const PROMPT_EDITOR_MIN_HEIGHT = 240;
 const PROMPT_EDITOR_DEFAULT_FONT_SIZE = 15;
 const PROMPT_EDITOR_MIN_FONT_SIZE = 12;
@@ -3340,6 +3341,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     promptTagAutocompleteProvider,
                     {
                         getLocale,
+                        getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                         getExistingPrompt: () => freeTextArea?.value || "",
                     },
                 );

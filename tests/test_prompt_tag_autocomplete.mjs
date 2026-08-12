@@ -31,6 +31,7 @@ const {
     mergeAutocompleteResults,
     normalizeAutocompleteInsertionKey,
     promptPresenceKeys,
+    resolveAutocompletePopupPosition,
     resolvePromptCompletionContext,
 } = await import(moduleUrl);
 
@@ -156,6 +157,20 @@ test("translation display uses an em dash when Chinese text is unavailable", () 
     assert.equal(autocompleteTranslationText({ tag: "blue eyes", translation: "blue eyes" }), "—");
 });
 
+test("free-mode popup placement uses the caret line instead of the textarea bottom", () => {
+    const position = resolveAutocompletePopupPosition({
+        inputRect: { left: 20, top: 60, right: 620, bottom: 500, width: 600, height: 440 },
+        anchorRect: { left: 300, top: 150, right: 300, bottom: 174, width: 0, height: 24 },
+        viewportWidth: 1280,
+        viewportHeight: 720,
+        popupScrollHeight: 240,
+    });
+    assert.equal(position.openAbove, false);
+    assert.equal(position.top, 178);
+    assert.equal(position.left, 20);
+    assert.equal(position.width, 600);
+});
+
 test("autocomplete defaults to twenty results", () => {
     const records = Array.from({ length: 25 }, (_value, index) => ({
         source: "danbooru",
@@ -235,7 +250,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /id:\s*DANBOORU_SETTING_ID/);
     assert.match(source, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
     assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260813-unified-layout-v2/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260814-caret-anchor-v3/);
 });
 
 test("result DOM and CSS use prompt, category, source, and count columns", async () => {

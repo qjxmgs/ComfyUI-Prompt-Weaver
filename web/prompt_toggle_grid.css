@@ -812,7 +812,7 @@
 
 .cpw-prompt-editor {
     position: relative;
-    width: min(560px, calc(100vw - 32px));
+    width: min(600px, calc(100vw - 32px));
     max-height: min(70vh, 560px);
     display: flex;
     flex-direction: column;
@@ -826,7 +826,7 @@
 
 .cpw-prompt-editor--positioned {
     position: fixed;
-    min-width: min(360px, calc(100vw - 32px));
+    min-width: min(600px, calc(100vw - 32px));
     min-height: min(240px, calc(100vh - 32px));
     max-width: calc(100vw - 32px);
     max-height: calc(100vh - 32px);

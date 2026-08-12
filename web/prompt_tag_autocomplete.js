@@ -490,10 +490,122 @@ export function autocompleteTranslationText(record) {
 }
 
 
+export function textareaCaretClientRect(textarea) {
+    if (!textarea?.isConnected || typeof document === "undefined") return null;
+    const inputRect = textarea.getBoundingClientRect();
+    const computed = globalThis.getComputedStyle?.(textarea);
+    if (!computed) return null;
+
+    const mirror = document.createElement("div");
+    const properties = [
+        "boxSizing",
+        "borderTopWidth",
+        "borderRightWidth",
+        "borderBottomWidth",
+        "borderLeftWidth",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "fontFamily",
+        "fontSize",
+        "fontStyle",
+        "fontVariant",
+        "fontWeight",
+        "fontStretch",
+        "lineHeight",
+        "letterSpacing",
+        "textAlign",
+        "textIndent",
+        "textTransform",
+        "tabSize",
+        "wordSpacing",
+    ];
+    for (const property of properties) mirror.style[property] = computed[property];
+    const borderWidth = (Number.parseFloat(computed.borderLeftWidth) || 0)
+        + (Number.parseFloat(computed.borderRightWidth) || 0);
+    mirror.style.position = "fixed";
+    mirror.style.left = `${inputRect.left}px`;
+    mirror.style.top = `${inputRect.top}px`;
+    mirror.style.width = `${textarea.clientWidth + borderWidth}px`;
+    mirror.style.height = "auto";
+    mirror.style.minHeight = "0";
+    mirror.style.overflow = "hidden";
+    mirror.style.visibility = "hidden";
+    mirror.style.pointerEvents = "none";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "break-word";
+    mirror.style.wordWrap = "break-word";
+
+    const caret = document.createElement("span");
+    const cursor = Math.max(0, Math.min(textarea.value.length, textarea.selectionStart ?? 0));
+    mirror.append(document.createTextNode(textarea.value.slice(0, cursor)), caret);
+    caret.textContent = textarea.value.slice(cursor, cursor + 1) || "\u200b";
+    document.body.append(mirror);
+    const caretRect = caret.getBoundingClientRect();
+    mirror.remove();
+
+    const lineHeight = Number.parseFloat(computed.lineHeight)
+        || (Number.parseFloat(computed.fontSize) || 16) * 1.2;
+    const horizontalInset = Number.parseFloat(computed.borderLeftWidth) || 0;
+    const verticalInset = Number.parseFloat(computed.borderTopWidth) || 0;
+    const left = Math.min(
+        Math.max(caretRect.left - textarea.scrollLeft, inputRect.left + horizontalInset),
+        inputRect.right - horizontalInset,
+    );
+    const top = Math.min(
+        Math.max(caretRect.top - textarea.scrollTop, inputRect.top + verticalInset),
+        inputRect.bottom - verticalInset - lineHeight,
+    );
+    return {
+        left,
+        right: left,
+        top,
+        bottom: top + lineHeight,
+        width: 0,
+        height: lineHeight,
+    };
+}
+
+
+export function resolveAutocompletePopupPosition({
+    inputRect,
+    anchorRect = inputRect,
+    viewportWidth,
+    viewportHeight,
+    popupScrollHeight = 240,
+    margin = 8,
+    gap = 4,
+}) {
+    const width = Math.max(
+        0,
+        Math.min(Math.max(inputRect.width, 420), viewportWidth - margin * 2),
+    );
+    const left = Math.min(
+        Math.max(margin, inputRect.left),
+        Math.max(margin, viewportWidth - margin - width),
+    );
+    const preferredHeight = Math.min(320, popupScrollHeight || 240);
+    const below = viewportHeight - anchorRect.bottom - margin - gap;
+    const above = anchorRect.top - margin - gap;
+    const openAbove = below < preferredHeight && above > below;
+    const available = Math.max(64, openAbove ? above : below);
+    return {
+        width: Math.round(width),
+        left: Math.round(left),
+        maxHeight: Math.round(Math.min(320, available)),
+        top: openAbove ? null : Math.round(anchorRect.bottom + gap),
+        bottom: openAbove ? Math.round(viewportHeight - anchorRect.top + gap) : null,
+        openAbove,
+    };
+}
+
+
 export class PromptAutocompleteController {
     constructor(input, provider, {
         getLocale: localeGetter = getLocale,
         getContext,
+        getAnchorRect,
         getExistingPrompt = () => input.value,
         onSelect,
         debounceMs = DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS,
@@ -508,6 +620,7 @@ export class PromptAutocompleteController {
             input.selectionStart,
             input.selectionEnd,
         ));
+        this.getAnchorRect = typeof getAnchorRect === "function" ? getAnchorRect : null;
         this.getExistingPrompt = getExistingPrompt;
         this.onSelect = typeof onSelect === "function" ? onSelect : null;
         this.debounceMs = debounceMs;
@@ -555,6 +668,7 @@ export class PromptAutocompleteController {
             this.blurTimer = setTimeout(() => this.close(), 100);
         };
         this.handleFocus = () => this.schedule();
+        this.handleCaretMove = () => this.position();
         this.handleViewport = () => this.position();
         this.handleSettings = () => this.schedule({ immediate: true });
         this.handlePopupWheel = (event) => event.stopPropagation();
@@ -575,6 +689,9 @@ export class PromptAutocompleteController {
         input.addEventListener("compositionend", this.handleCompositionEnd);
         input.addEventListener("blur", this.handleBlur);
         input.addEventListener("focus", this.handleFocus);
+        input.addEventListener("click", this.handleCaretMove);
+        input.addEventListener("select", this.handleCaretMove);
+        input.addEventListener("scroll", this.handleCaretMove, { passive: true });
         globalThis.addEventListener("keydown", this.handleGlobalKeyDown, true);
         globalThis.addEventListener("resize", this.handleViewport);
         document.addEventListener("scroll", this.handleViewport, true);
@@ -714,32 +831,25 @@ export class PromptAutocompleteController {
 
     position() {
         if (this.destroyed || this.popup.hidden || !this.input.isConnected) return;
-        const rect = this.input.getBoundingClientRect();
+        const inputRect = this.input.getBoundingClientRect();
+        const anchorRect = this.getAnchorRect?.() || inputRect;
         const viewportWidth = document.documentElement.clientWidth || globalThis.innerWidth;
         const viewportHeight = document.documentElement.clientHeight || globalThis.innerHeight;
-        const margin = 8;
-        const gap = 4;
-        const width = Math.max(
-            0,
-            Math.min(Math.max(rect.width, 420), viewportWidth - margin * 2),
-        );
-        const left = Math.min(
-            Math.max(margin, rect.left),
-            Math.max(margin, viewportWidth - margin - width),
-        );
-        const preferredHeight = Math.min(320, this.popup.scrollHeight || 240);
-        const below = viewportHeight - rect.bottom - margin - gap;
-        const above = rect.top - margin - gap;
-        const openAbove = below < preferredHeight && above > below;
-        const available = Math.max(64, openAbove ? above : below);
-        this.popup.style.width = `${Math.round(width)}px`;
-        this.popup.style.left = `${Math.round(left)}px`;
-        this.popup.style.maxHeight = `${Math.round(Math.min(320, available))}px`;
-        if (openAbove) {
+        const position = resolveAutocompletePopupPosition({
+            inputRect,
+            anchorRect,
+            viewportWidth,
+            viewportHeight,
+            popupScrollHeight: this.popup.scrollHeight,
+        });
+        this.popup.style.width = `${position.width}px`;
+        this.popup.style.left = `${position.left}px`;
+        this.popup.style.maxHeight = `${position.maxHeight}px`;
+        if (position.openAbove) {
             this.popup.style.top = "auto";
-            this.popup.style.bottom = `${Math.round(viewportHeight - rect.top + gap)}px`;
+            this.popup.style.bottom = `${position.bottom}px`;
         } else {
-            this.popup.style.top = `${Math.round(rect.bottom + gap)}px`;
+            this.popup.style.top = `${position.top}px`;
             this.popup.style.bottom = "auto";
         }
     }
@@ -843,6 +953,9 @@ export class PromptAutocompleteController {
         this.input.removeEventListener("compositionend", this.handleCompositionEnd);
         this.input.removeEventListener("blur", this.handleBlur);
         this.input.removeEventListener("focus", this.handleFocus);
+        this.input.removeEventListener("click", this.handleCaretMove);
+        this.input.removeEventListener("select", this.handleCaretMove);
+        this.input.removeEventListener("scroll", this.handleCaretMove);
         globalThis.removeEventListener("keydown", this.handleGlobalKeyDown, true);
         globalThis.removeEventListener("resize", this.handleViewport);
         document.removeEventListener("scroll", this.handleViewport, true);

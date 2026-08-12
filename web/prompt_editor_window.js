@@ -31,7 +31,7 @@ export function normalizePromptEditorSize(
         viewportWidth,
         viewportHeight,
         margin = 16,
-        minWidth = 360,
+        minWidth = 600,
         minHeight = 240,
     } = {},
 ) {

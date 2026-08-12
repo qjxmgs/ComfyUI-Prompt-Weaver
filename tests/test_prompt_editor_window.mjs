@@ -38,7 +38,7 @@ test("normalizes stored editor size to minimum and viewport bounds", () => {
         height: 481,
     });
     assert.deepEqual(normalizePromptEditorSize({ width: 10, height: 20 }, viewport), {
-        width: 360,
+        width: 600,
         height: 240,
     });
     assert.deepEqual(normalizePromptEditorSize({ width: 5000, height: 5000 }, viewport), {
@@ -88,4 +88,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(styleSource, /\.cpw-prompt-editor__resize-handle\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-control\s*\{/);
     assert.match(styleSource, /font-size: var\(--cpw-prompt-editor-font-size, 15px\)/);
+    assert.match(uiSource, /PROMPT_EDITOR_MIN_WIDTH = 600/);
+    assert.match(styleSource, /min-width: min\(600px, calc\(100vw - 32px\)\)/);
+    assert.match(uiSource, /getAnchorRect: \(\) => textareaCaretClientRect\(freeTextArea\)/);
 });
