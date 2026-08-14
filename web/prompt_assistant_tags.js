@@ -5,6 +5,7 @@ const DEFAULT_RESULT_LIMIT = 20;
 const EXTENSION_MODULE_PATTERN = /^\/extensions\/([^/]+)\/modules\/tag\.js$/i;
 const PROMPT_ASSISTANT_FOLDER_PATTERN = /prompt[-_]?assistant/i;
 const HAN_CHARACTER_PATTERN = /\p{Script=Han}/u;
+const FUZZY_SEPARATOR_PATTERN = /[\s_-]+/gu;
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -157,31 +158,110 @@ export function mergePromptAssistantTagRecords(records) {
     return merged;
 }
 
-function matchRank(field, query) {
-    if (field === query) return 0;
-    if (field.startsWith(query)) return 1;
-    if (field.includes(query)) return 2;
-    return Number.POSITIVE_INFINITY;
+function compactFuzzyText(value) {
+    return normalizePromptAssistantSearchText(value).replace(FUZZY_SEPARATOR_PATTERN, "");
+}
+
+function promptAssistantMatchContext(value) {
+    const query = normalizePromptAssistantSearchText(value);
+    const compact = compactFuzzyText(query);
+    const compactCharacters = [...compact];
+    const fuzzyEligible = Boolean(compact) && (
+        HAN_CHARACTER_PATTERN.test(compact)
+            ? compactCharacters.length >= 2
+            : compactCharacters.length >= 3
+    );
+    return { query, compactCharacters, fuzzyEligible };
+}
+
+export function fuzzyPromptAssistantQueryIsEligible(value) {
+    return promptAssistantMatchContext(value).fuzzyEligible;
+}
+
+function orderedSubsequenceScoreWithContext(fieldValue, context) {
+    if (!context.fuzzyEligible) return null;
+    const field = [...compactFuzzyText(fieldValue)];
+    const query = context.compactCharacters;
+    if (!field.length || query.length > field.length) return null;
+
+    let queryIndex = 0;
+    let first = -1;
+    let last = -1;
+    for (let index = 0; index < field.length && queryIndex < query.length; index += 1) {
+        if (field[index] !== query[queryIndex]) continue;
+        if (first < 0) first = index;
+        last = index;
+        queryIndex += 1;
+    }
+    if (queryIndex !== query.length) return null;
+    return {
+        start: first,
+        gaps: last - first + 1 - query.length,
+        length: field.length,
+    };
+}
+
+export function orderedSubsequenceMatchScore(fieldValue, queryValue) {
+    return orderedSubsequenceScoreWithContext(
+        fieldValue,
+        promptAssistantMatchContext(queryValue),
+    );
+}
+
+function compareMatchScore(left, right) {
+    return left.start - right.start || left.gaps - right.gaps || left.length - right.length;
+}
+
+function matchFieldsWithContext(fields, context) {
+    const { query } = context;
+    if (!query) return null;
+    let best = null;
+    for (const value of Array.isArray(fields) ? fields : []) {
+        const field = normalizePromptAssistantSearchText(value);
+        if (!field) continue;
+        let match = null;
+        if (field === query) match = { rank: 0, score: null };
+        else if (field.startsWith(query)) match = { rank: 1, score: null };
+        else if (field.includes(query)) match = { rank: 2, score: null };
+        else {
+            const score = orderedSubsequenceScoreWithContext(field, context);
+            if (score) match = { rank: 3, score };
+        }
+        if (!match) continue;
+        if (
+            !best
+            || match.rank < best.rank
+            || (match.rank === best.rank && match.rank === 3 && compareMatchScore(match.score, best.score) < 0)
+        ) {
+            best = match;
+        }
+    }
+    return best;
+}
+
+export function matchPromptAssistantFields(fields, queryValue) {
+    return matchFieldsWithContext(fields, promptAssistantMatchContext(queryValue));
 }
 
 export function searchPromptAssistantTags(records, queryValue, limit = DEFAULT_RESULT_LIMIT) {
-    const query = normalizePromptAssistantSearchText(queryValue);
-    if (!promptAssistantQueryIsEligible(query)) return [];
+    const context = promptAssistantMatchContext(queryValue);
+    if (!promptAssistantQueryIsEligible(context.query)) return [];
     const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_RESULT_LIMIT;
     const matches = [];
 
     for (let index = 0; index < (Array.isArray(records) ? records.length : 0); index += 1) {
         const record = records[index];
         if (!record || typeof record.value !== "string") continue;
-        const fields = [record.value, ...(Array.isArray(record.aliases) ? record.aliases : [record.name])]
-            .map(normalizePromptAssistantSearchText)
-            .filter(Boolean);
-        let rank = Number.POSITIVE_INFINITY;
-        for (const field of fields) rank = Math.min(rank, matchRank(field, query));
-        if (Number.isFinite(rank)) matches.push({ record, rank, index });
+        const fields = [record.value, ...(Array.isArray(record.aliases) ? record.aliases : [record.name])];
+        const match = matchFieldsWithContext(fields, context);
+        if (match) matches.push({ record, ...match, index });
     }
 
-    matches.sort((left, right) => left.rank - right.rank || left.index - right.index);
+    matches.sort((left, right) => (
+        left.rank - right.rank
+        || (left.rank === 3 ? compareMatchScore(left.score, right.score) : 0)
+        || left.index - right.index
+    ));
     return matches.slice(0, safeLimit).map(({ record }) => record);
 }
 

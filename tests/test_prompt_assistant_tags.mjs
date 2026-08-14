@@ -16,10 +16,13 @@ const {
     PromptAssistantTagCatalog,
     findPromptAssistantApiBases,
     flattenPromptAssistantTagData,
+    fuzzyPromptAssistantQueryIsEligible,
     formatPromptAssistantTagOption,
+    matchPromptAssistantFields,
     mergePromptAssistantTagRecords,
     movePromptAssistantSuggestionIndex,
     normalizePromptAssistantSearchText,
+    orderedSubsequenceMatchScore,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
     validatePromptAssistantTagFiles,
@@ -133,6 +136,36 @@ test("matches Chinese from one character and English from two characters", () =>
     assert.equal(searchPromptAssistantTags(records, "MAST")[0].name, "杰作");
     assert.deepEqual(searchPromptAssistantTags(records, "m"), []);
     assert.equal(normalizePromptAssistantSearchText(" ＭＡＳＴ "), "mast");
+});
+
+test("character-skip matching starts at three Latin or two Chinese characters", () => {
+    assert.equal(fuzzyPromptAssistantQueryIsEligible("bl"), false);
+    assert.equal(fuzzyPromptAssistantQueryIsEligible("ble"), true);
+    assert.equal(fuzzyPromptAssistantQueryIsEligible("蓝"), false);
+    assert.equal(fuzzyPromptAssistantQueryIsEligible("蓝睛"), true);
+    assert.deepEqual(orderedSubsequenceMatchScore("blue_eyes", "bleyes"), {
+        start: 0,
+        gaps: 2,
+        length: 8,
+    });
+    assert.deepEqual(matchPromptAssistantFields(["蓝眼睛"], "蓝睛"), {
+        rank: 3,
+        score: { start: 0, gaps: 1, length: 3 },
+    });
+});
+
+test("ranks exact, prefix, substring, then character-skip quality", () => {
+    const records = [
+        { name: "完整", value: "bleyes", aliases: ["完整"] },
+        { name: "开头", value: "bleyes style", aliases: ["开头"] },
+        { name: "包含", value: "super bleyes tag", aliases: ["包含"] },
+        { name: "蓝眼睛", value: "blue eyes", aliases: ["蓝眼睛"] },
+        { name: "黑眼睛", value: "black eyes", aliases: ["黑眼睛"] },
+    ];
+    assert.deepEqual(
+        searchPromptAssistantTags(records, "bleyes").map((record) => record.value),
+        ["bleyes", "bleyes style", "super bleyes tag", "blue eyes", "black eyes"],
+    );
 });
 
 test("ranks exact before prefix before substring and applies a stable result limit", () => {

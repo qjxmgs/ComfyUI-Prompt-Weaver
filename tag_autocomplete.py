@@ -64,6 +64,56 @@ def _canonical_search_text(value):
     return _normalize_search_text(value).replace(" ", "_")
 
 
+def _compact_fuzzy_text(value):
+    return "".join(
+        character
+        for character in _normalize_search_text(value)
+        if not character.isspace() and character not in "_-"
+    )
+
+
+def _contains_han(value):
+    return any(
+        "CJK UNIFIED IDEOGRAPH" in unicodedata.name(character, "")
+        or "CJK COMPATIBILITY IDEOGRAPH" in unicodedata.name(character, "")
+        for character in value
+    )
+
+
+def _fuzzy_query_is_eligible(value):
+    query = _compact_fuzzy_text(value)
+    if not query:
+        return False
+    return len(query) >= (2 if _contains_han(query) else 3)
+
+
+def _ordered_subsequence_score(field_value, query_value):
+    if not _fuzzy_query_is_eligible(query_value):
+        return None
+    field = _compact_fuzzy_text(field_value)
+    query = _compact_fuzzy_text(query_value)
+    return _ordered_subsequence_score_compact(field, query)
+
+
+def _ordered_subsequence_score_compact(field, query):
+    if not field or len(query) > len(field):
+        return None
+
+    query_index = 0
+    first = -1
+    last = -1
+    for index, character in enumerate(field):
+        if character != query[query_index]:
+            continue
+        if first < 0:
+            first = index
+        last = index
+        query_index += 1
+        if query_index == len(query):
+            return first, last - first + 1 - len(query), len(field)
+    return None
+
+
 def _iso_timestamp(now):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
 
@@ -595,6 +645,12 @@ class TagAutocompleteStore:
                         "_canonical": canonical,
                         "_aliases": tuple(dict.fromkeys(ascii_aliases)),
                         "_translation": _normalize_search_text(translation),
+                        "_fuzzy_canonical": _compact_fuzzy_text(canonical),
+                        "_fuzzy_aliases": tuple(
+                            _compact_fuzzy_text(alias)
+                            for alias in dict.fromkeys(ascii_aliases)
+                        ),
+                        "_fuzzy_translation": _compact_fuzzy_text(translation),
                         "_index": index,
                     })
         except (OSError, UnicodeError, csv.Error) as error:
@@ -665,24 +721,44 @@ class TagAutocompleteStore:
         return results
 
     @staticmethod
-    def _match_rank(record, query, canonical_query):
-        def rank_field(field, candidate_query):
+    def _match_record(record, query, canonical_query, fuzzy_query):
+        def rank_field(field, candidate_query, fuzzy_field):
             if field == candidate_query:
-                return 0
+                return 0, None
             if field.startswith(candidate_query):
-                return 1
+                return 1, None
             if candidate_query in field:
-                return 2
-            return 3
+                return 2, None
+            score = (
+                _ordered_subsequence_score_compact(fuzzy_field, fuzzy_query)
+                if fuzzy_query
+                else None
+            )
+            return (3, score) if score is not None else (4, None)
 
-        best = rank_field(record["_canonical"], canonical_query)
+        best = rank_field(
+            record["_canonical"],
+            canonical_query,
+            record["_fuzzy_canonical"],
+        )
         if record["_translation"]:
-            best = min(best, rank_field(record["_translation"], query))
-        for alias in record["_aliases"]:
-            if canonical_query in alias:
-                # Alias hits remain searchable but do not outrank canonical
-                # prefixes such as blush/blue_* for the query "bl".
-                best = min(best, 2)
+            candidate = rank_field(
+                record["_translation"],
+                query,
+                record["_fuzzy_translation"],
+            )
+            if candidate[0] < best[0] or (
+                candidate[0] == best[0] == 3 and candidate[1] < best[1]
+            ):
+                best = candidate
+        for alias, fuzzy_alias in zip(record["_aliases"], record["_fuzzy_aliases"]):
+            candidate = rank_field(alias, canonical_query, fuzzy_alias)
+            if candidate[0] < 2:
+                candidate = 2, None
+            if candidate[0] < best[0] or (
+                candidate[0] == best[0] == 3 and candidate[1] < best[1]
+            ):
+                best = candidate
         return best
 
     def search(self, query, locale="en", limit=DEFAULT_RESULT_LIMIT):
@@ -699,15 +775,26 @@ class TagAutocompleteStore:
             raise TagAutocompleteValidationError("tag autocomplete limit is out of range")
         normalized_locale = normalize_locale(locale)
         canonical_query = normalized_query.replace(" ", "_")
+        fuzzy_query = (
+            _compact_fuzzy_text(normalized_query)
+            if _fuzzy_query_is_eligible(normalized_query)
+            else ""
+        )
         matches = []
         for record in self._records_for_locale(normalized_locale):
-            rank = self._match_rank(record, normalized_query, canonical_query)
-            if rank < 3:
-                matches.append((rank, -record["post_count"], record["_index"], record))
-        matches.sort(key=lambda item: item[:3])
+            rank, score = self._match_record(
+                record,
+                normalized_query,
+                canonical_query,
+                fuzzy_query,
+            )
+            if rank < 4:
+                score_key = score if score is not None else (0, 0, 0)
+                matches.append((rank, score_key, -record["post_count"], record["_index"], record))
+        matches.sort(key=lambda item: item[:4])
         result = []
-        for rank, _negative_count, _index, record in matches[:safe_limit]:
-            result.append({
+        for rank, score, _negative_count, _index, record in matches[:safe_limit]:
+            item = {
                 "tag": record["tag"],
                 "insert_text": record["insert_text"],
                 "translation": record["translation"],
@@ -715,5 +802,12 @@ class TagAutocompleteStore:
                 "post_count": record["post_count"],
                 "source": "danbooru",
                 "match_rank": rank,
-            })
+            }
+            if rank == 3:
+                item["match_score"] = {
+                    "start": score[0],
+                    "gaps": score[1],
+                    "length": score[2],
+                }
+            result.append(item)
         return result

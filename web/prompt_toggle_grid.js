@@ -57,7 +57,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260814-bilingual-tokens-v2";
+} from "./prompt_tag_autocomplete.js?v=20260814-fuzzy-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,

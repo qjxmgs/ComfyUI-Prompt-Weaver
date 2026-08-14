@@ -1,10 +1,11 @@
 import { getLocale, t } from "./prompt_weaver_i18n.js";
 import {
     PromptAssistantTagCatalog,
+    matchPromptAssistantFields,
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js";
+} from "./prompt_assistant_tags.js?v=20260814-fuzzy-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
@@ -89,17 +90,22 @@ export function autocompleteQueryIsEligible(value) {
 }
 
 
-function matchingRank(fields, queryValue) {
-    const query = normalizeAutocompleteText(queryValue);
-    let rank = Number.POSITIVE_INFINITY;
-    for (const value of fields) {
-        const field = normalizeAutocompleteText(value);
-        if (!field) continue;
-        if (field === query) rank = Math.min(rank, 0);
-        else if (field.startsWith(query)) rank = Math.min(rank, 1);
-        else if (field.includes(query)) rank = Math.min(rank, 2);
-    }
-    return rank;
+function autocompleteMatchScore(value) {
+    if (!value || typeof value !== "object") return null;
+    const start = Number(value.start);
+    const gaps = Number(value.gaps);
+    const length = Number(value.length);
+    if (![start, gaps, length].every(Number.isInteger) || start < 0 || gaps < 0 || length < 0) return null;
+    return { start, gaps, length };
+}
+
+function compareAutocompleteMatchScore(left, right) {
+    const fallback = { start: Number.MAX_SAFE_INTEGER, gaps: Number.MAX_SAFE_INTEGER, length: Number.MAX_SAFE_INTEGER };
+    const leftScore = left || fallback;
+    const rightScore = right || fallback;
+    return leftScore.start - rightScore.start
+        || leftScore.gaps - rightScore.gaps
+        || leftScore.length - rightScore.length;
 }
 
 
@@ -295,10 +301,12 @@ export class DanbooruTagProvider {
     }
 
     async search(query, locale = getLocale(), limit = DEFAULT_AUTOCOMPLETE_LIMIT, { signal } = {}) {
-        const status = await this.status(locale, { signal });
+        const normalizedLocale = promptTokenHasHanText(query)
+            ? "zh-CN"
+            : (locale === "zh" ? "zh-CN" : locale);
+        const status = await this.status(normalizedLocale, { signal });
         if (!status?.available) return { results: [], status };
         ensureNotAborted(signal);
-        const normalizedLocale = locale === "zh" ? "zh-CN" : locale;
         const payload = await this.fetchJson(
             "/prompt-weaver/tag-autocomplete/search"
                 + `?q=${encodeURIComponent(query)}`
@@ -320,6 +328,7 @@ export class DanbooruTagProvider {
                 categoryPath: [],
                 postCount: Number(record?.post_count) || 0,
                 matchRank: Number.isInteger(record?.match_rank) ? record.match_rank : 2,
+                matchScore: autocompleteMatchScore(record?.match_score),
             })).filter((record) => record.tag && record.insertText),
         };
     }
@@ -394,16 +403,23 @@ export class PromptAssistantTagProvider {
         ensureNotAborted(signal);
         const records = await this.catalog.load();
         ensureNotAborted(signal);
-        return searchPromptAssistantTags(records, query, limit).map((record) => ({
-            source: "prompt-assistant",
-            tag: String(record.value || ""),
-            insertText: String(record.value || ""),
-            translation: String(record.name || ""),
-            category: null,
-            categoryPath: Array.isArray(record.categoryPath) ? record.categoryPath : [],
-            postCount: 0,
-            matchRank: matchingRank([record.value, ...(record.aliases || [])], query),
-        })).filter((record) => record.tag && record.insertText);
+        return searchPromptAssistantTags(records, query, limit).map((record) => {
+            const match = matchPromptAssistantFields(
+                [record.value, ...(record.aliases || [])],
+                query,
+            );
+            return {
+                source: "prompt-assistant",
+                tag: String(record.value || ""),
+                insertText: String(record.value || ""),
+                translation: String(record.name || ""),
+                category: null,
+                categoryPath: Array.isArray(record.categoryPath) ? record.categoryPath : [],
+                postCount: 0,
+                matchRank: match?.rank ?? 2,
+                matchScore: match?.score || null,
+            };
+        }).filter((record) => record.tag && record.insertText);
     }
 
     async resolve(tags, { signal } = {}) {
@@ -441,6 +457,7 @@ export function mergeAutocompleteResults(resultGroups, limit = DEFAULT_AUTOCOMPL
             candidates.push({
                 record,
                 rank: Number.isFinite(record?.matchRank) ? record.matchRank : 2,
+                matchScore: autocompleteMatchScore(record?.matchScore),
                 sourcePriority,
                 postCount: Number(record?.postCount) || 0,
                 sequence: sequence++,
@@ -449,6 +466,7 @@ export function mergeAutocompleteResults(resultGroups, limit = DEFAULT_AUTOCOMPL
     }
     candidates.sort((left, right) => (
         left.rank - right.rank
+        || (left.rank === 3 ? compareAutocompleteMatchScore(left.matchScore, right.matchScore) : 0)
         || left.sourcePriority - right.sourcePriority
         || right.postCount - left.postCount
         || left.sequence - right.sequence

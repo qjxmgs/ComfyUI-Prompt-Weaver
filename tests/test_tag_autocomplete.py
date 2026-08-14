@@ -117,6 +117,7 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             ["blush", "blue_eyes", "blue_hair", "blue_archive"],
         )
         self.assertEqual(english[1]["insert_text"], "blue eyes")
+        self.assertNotEqual(english[0]["tag"], "blue_archive")
         chinese = self.store.search("蓝", "zh-CN", 12)
         self.assertEqual([record["tag"] for record in chinese], ["blue_eyes", "blue_hair"])
         self.assertEqual(chinese[0]["translation"], "蓝眼睛")
@@ -153,6 +154,48 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 20)
         self.assertEqual(results[0]["tag"], "test_tag_00")
         self.assertEqual(results[-1]["tag"], "test_tag_19")
+
+    async def test_character_skip_fuzzy_matching_ranks_after_contiguous_matches(self):
+        self.base_payload = base_csv([
+            ("bleyes", 0, 1, ""),
+            ("bleyes_style", 0, 2, ""),
+            ("super_bleyes_tag", 0, 3, ""),
+            ("blue_eyes", 0, 9_000_000, ""),
+            ("black_eyes", 0, 8_000_000, ""),
+            ("black_pantyhose", 0, 7_000_000, ""),
+            ("yaoi", 0, 99_000_000, "bl"),
+        ])
+        self.zh_payload = translation_csv([
+            ("blue_eyes", "蓝眼睛"),
+            ("black_eyes", "黑眼睛"),
+            ("black_pantyhose", "黑色连裤袜"),
+        ])
+        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-fuzzy")
+        await self.store.update("zh-CN")
+
+        english = self.store.search("bleyes", "zh-CN", 20)
+        self.assertEqual(
+            [record["tag"] for record in english[:5]],
+            ["bleyes", "bleyes_style", "super_bleyes_tag", "blue_eyes", "black_eyes"],
+        )
+        self.assertNotIn("match_score", english[0])
+        self.assertEqual(english[3]["match_rank"], 3)
+        self.assertEqual(
+            english[3]["match_score"],
+            {"start": 0, "gaps": 2, "length": 8},
+        )
+        self.assertEqual(self.store.search("blkpnths", "zh-CN", 20)[0]["tag"], "black_pantyhose")
+        self.assertEqual(self.store.search("蓝睛", "zh-CN", 20)[0]["tag"], "blue_eyes")
+        self.assertEqual(self.store.search("be", "zh-CN", 20), [])
+        prefix_results = self.store.search("bl", "zh-CN", 20)
+        self.assertNotEqual(prefix_results[0]["tag"], "yaoi")
+        yaoi_index = next(
+            index for index, record in enumerate(prefix_results) if record["tag"] == "yaoi"
+        )
+        self.assertTrue(all(
+            record["match_rank"] == 1
+            for record in prefix_results[:yaoi_index]
+        ))
 
     async def test_failed_refresh_keeps_last_good_files_and_reports_error(self):
         await self.store.update("zh-CN")

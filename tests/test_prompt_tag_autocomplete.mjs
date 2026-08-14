@@ -17,7 +17,7 @@ const moduleSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_weaver_i18n.js", i18nUrl)
-    .replace("./prompt_assistant_tags.js", assistantUrl);
+    .replace("./prompt_assistant_tags.js?v=20260814-fuzzy-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_AUTOCOMPLETE_LIMIT,
@@ -224,6 +224,7 @@ test("Danbooru provider keeps status local, maps rows, and starts updates", asyn
                         category: 0,
                         post_count: 1_409_152,
                         match_rank: 1,
+                        match_score: null,
                     }],
                 });
             }
@@ -245,14 +246,49 @@ test("Danbooru provider keeps status local, maps rows, and starts updates", asyn
         },
     };
     const provider = new DanbooruTagProvider(api, { statusTtlMs: 60_000 });
-    const result = await provider.search("蓝", "zh", 12);
+    const result = await provider.search("蓝", "en", 12);
     assert.equal(result.results[0].insertText, "blue eyes");
     assert.equal(result.results[0].translation, "蓝眼睛");
+    assert.equal(result.results[0].matchScore, null);
     assert.match(calls[1][0], /q=%E8%93%9D/);
+    assert.match(calls[0][0], /locale=zh-CN/);
+    assert.match(calls[1][0], /locale=zh-CN/);
     const resolved = await provider.resolve(["blue eyes"], "zh-CN");
     assert.equal(resolved.results[0].translation, "蓝眼睛");
     assert.equal(JSON.parse(calls.at(-1)[1].body).locale, "zh-CN");
     assert.equal(formatAutocompleteCount(2_535_113, "en"), "2.5M");
+});
+
+test("dual-source merge compares fuzzy quality before source and count ties", () => {
+    const merged = mergeAutocompleteResults([
+        [{
+            source: "danbooru",
+            tag: "blue_eyes",
+            insertText: "blue eyes",
+            matchRank: 3,
+            matchScore: { start: 0, gaps: 2, length: 8 },
+            postCount: 1_400_000,
+        }, {
+            source: "danbooru",
+            tag: "black_eyes",
+            insertText: "black eyes",
+            matchRank: 3,
+            matchScore: { start: 0, gaps: 3, length: 9 },
+            postCount: 2_000_000,
+        }],
+        [{
+            source: "prompt-assistant",
+            tag: "custom blue eyes",
+            insertText: "custom blue eyes",
+            matchRank: 3,
+            matchScore: { start: 0, gaps: 2, length: 8 },
+            postCount: 0,
+        }],
+    ]);
+    assert.deepEqual(
+        merged.map((record) => record.insertText),
+        ["custom blue eyes", "blue eyes", "black eyes"],
+    );
 });
 
 test("translation resolution prefers Prompt Assistant, follows source toggles, and caches", async () => {
@@ -341,7 +377,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /id:\s*DANBOORU_SETTING_ID/);
     assert.match(source, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
     assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260814-bilingual-tokens-v2/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260814-fuzzy-v1/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {
