@@ -62,7 +62,9 @@ git pull --ff-only origin master
 
 输入中文 1 个字或拉丁字符 2 个后开始普通匹配，字符跳跃匹配分别从中文 2 个字或拉丁字符 3 个开始，最多显示 20 项。两个来源统一显示英文提示词及下方中文释义、分类、来源和使用量；无中文释义时显示 `—`，Prompt Assistant 没有可靠使用量时保留空白。选中 Danbooru 候选后固定写入规范英文 tag，并把下划线转换为空格。浮层会根据空间向上或向下展开；上下方向键移动高亮，只有存在高亮项时 Enter/Tab 才会选中，`Esc` 关闭。中文 IME 组合期间不会查询或抢占按键。卡片与自由模式只替换光标所在片段，保留分隔符、括号、引号、转义及权重后缀。
 
-Danbooru 词库不随插件打包。首次输入达到联想条件时，浮层提供明确的下载按钮；平时输入内容不会发送给 Danbooru 或其他远程搜索 API。数据按 ComfyUI 用户保存在 `ComfyUI-Prompt-Weaver/tag-autocomplete/`。已有词库最多每七天后台检查一次；菜单中的“Prompt Weaver → 更新 Danbooru 词库”可手动检查。下载使用固定 HTTPS 地址与 SHA-256，完整验证后才原子替换，失败继续使用上一个可用版本。简体中文释义是独立的检索/展示覆盖层，写入始终使用规范英文 tag。完整词库可能包含成人向标签，插件不声称能自动准确过滤。基础词库来自 MIT 授权的 [newtextdoc1111/danbooru-tag-csv](https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv)，简体中文覆盖层来自 MIT 授权的 [Aaalice233/ComfyUI-Danbooru-Gallery](https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery)。
+Danbooru 词库不随插件打包。首次输入达到联想条件时，浮层提供明确的下载按钮；平时输入内容不会发送给 Danbooru 或其他远程搜索 API。数据按 ComfyUI 用户保存在 `ComfyUI-Prompt-Weaver/tag-autocomplete/`。插件不会自动联网检查更新；可在“设置 → Prompt Weaver → 提示词翻译”点击“管理提示词翻译…”，或使用菜单“Prompt Weaver → 管理提示词翻译…”，查看本地标签数、中文覆盖率、三层数据源状态及更新时间。打开面板和查看状态只读取本地文件，只有点击“检查并更新”才访问远程数据源。下载使用固定 HTTPS 地址与 SHA-256，完整验证后才原子替换，失败继续使用上一个可用版本。简体中文释义是独立的检索/展示覆盖层，写入始终使用规范英文 tag。完整词库可能包含成人向标签，插件不声称能自动准确过滤。基础词库来自 MIT 授权的 [newtextdoc1111/danbooru-tag-csv](https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv)，简体中文主覆盖层来自 MIT 授权的 [Aaalice233/ComfyUI-Danbooru-Gallery](https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery)。
+
+后端还支持第三层 SQLite 缺失翻译补充源：它通过 GitHub Contents API 跟踪固定的 [`qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table`](https://github.com/qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table) 镜像，仅在用户手动更新且 blob 变化时流式下载 `tag.sqlite`。数据库需通过大小、SQLite 完整性、schema、行数和字段约束校验才会原子安装；加载时只按主键查询基础词库中仍未翻译的标签，绝不覆盖主覆盖层，也不引入库外标签、分类或热度。该仓库目前未声明数据许可证，因此补充源在 `data/tag_sources.json` 中保持 `license_status: pending` 和禁用状态；管理面板只展示“等待授权”和来源说明，不提供绕过开关。有权方明确授权后，远程清单才能将其切换为 `cleared` 并启用。`/prompt-weaver/tag-autocomplete/status` 是纯本地只读接口，并报告实际基础词库交集的主翻译数、合并翻译数、覆盖率，以及补充层的许可、可用状态、补齐数量、blob SHA、更新时间和独立错误信息。
 
 ## 全局存档
 

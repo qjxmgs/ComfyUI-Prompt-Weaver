@@ -1,0 +1,103 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+import {
+    TRANSLATION_STATUS_POLL_MS,
+    TRANSLATION_UPDATE_TIMEOUT_MS,
+    shortBlobSha,
+    translationManagerState,
+} from "../web/prompt_translation_manager.js";
+
+test("translation manager reports ready coverage and enabled supplement details", () => {
+    const state = translationManagerState({
+        available: true,
+        ready: true,
+        row_count: 32_259,
+        primary_translation_available: true,
+        primary_translation_count: 7_831,
+        translated_tag_count: 31_657,
+        translation_coverage_percent: 98.13,
+        supplement_enabled: true,
+        supplement_available: true,
+        supplement_translation_count: 23_826,
+        supplement_license_status: "cleared",
+        supplement_blob_sha: "1234567890abcdef",
+    });
+
+    assert.equal(state.summary, "ready");
+    assert.equal(state.tone, "success");
+    assert.equal(state.action, "update");
+    assert.equal(state.translatedTagCount, 31_657);
+    assert.equal(state.coveragePercent, 98.13);
+    assert.equal(state.supplementState, "available");
+    assert.equal(shortBlobSha(state.supplementBlobSha), "1234567890ab");
+});
+
+test("license-pending supplement stays disabled without turning the main dictionary into an error", () => {
+    const state = translationManagerState({
+        available: true,
+        ready: true,
+        primary_translation_available: true,
+        supplement_enabled: false,
+        supplement_available: false,
+        supplement_license_status: "pending",
+    });
+
+    assert.equal(state.summary, "ready");
+    assert.equal(state.tone, "success");
+    assert.equal(state.supplementState, "license-pending");
+    assert.equal(state.supplementTone, "warning");
+});
+
+test("missing, partial failure, fatal failure, and updating states select the right actions", () => {
+    assert.deepEqual(
+        translationManagerState({}).summary,
+        "not-installed",
+    );
+    assert.equal(translationManagerState({}).action, "download");
+
+    const warning = translationManagerState({ available: true, error: "network failed" });
+    assert.equal(warning.summary, "warning");
+    assert.equal(warning.tone, "warning");
+    assert.equal(warning.action, "update");
+
+    const failed = translationManagerState({ error: "network failed" });
+    assert.equal(failed.summary, "failed");
+    assert.equal(failed.tone, "error");
+
+    const updating = translationManagerState({ available: true, updating: true });
+    assert.equal(updating.summary, "updating");
+    assert.equal(updating.tone, "info");
+});
+
+test("manager polling is bounded at five minutes", () => {
+    assert.equal(TRANSLATION_STATUS_POLL_MS, 500);
+    assert.equal(TRANSLATION_UPDATE_TIMEOUT_MS, 300_000);
+});
+
+test("settings button and legacy command open the same singleton manager", async () => {
+    const source = await readFile(
+        new URL("../web/prompt_translation_settings.js", import.meta.url),
+        "utf8",
+    );
+    const css = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+
+    assert.match(source, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
+    assert.match(source, /type:\s*createTranslationManagerSettingButton/);
+    assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
+    assert.match(source, /function:\s*\(\)\s*=>\s*openPromptTranslationManager/);
+    assert.match(source, /if \(activeTranslationManager\)/);
+    assert.match(source, /translationProvider\.status\("zh-CN"/);
+    assert.match(source, /translationProvider\.update\("zh-CN"\)/);
+    assert.match(source, /name:\s*"ComfyUIPromptWeaver\.TranslationSettings"/);
+    assert.match(source, /manager\.controller\.abort\(\)/);
+    assert.doesNotMatch(source, /translationProvider\.update\("zh-CN",\s*\{\s*signal/);
+    assert.match(source, /activeUpdateOperation/);
+    assert.match(css, /\.cpw-translation-manager__overlay/);
+    assert.match(css, /\.cpw-translation-manager__summary--warning/);
+    assert.match(css, /@media \(max-width: 680px\)/);
+});

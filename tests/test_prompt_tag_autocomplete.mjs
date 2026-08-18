@@ -17,9 +17,11 @@ const moduleSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_weaver_i18n.js", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260814-fuzzy-v1", assistantUrl);
+    .replace("./prompt_assistant_tags.js?v=20260817-translation-manager-v2", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
+    DANBOORU_UPDATE_POLL_MS,
+    DANBOORU_UPDATE_TIMEOUT_MS,
     DEFAULT_AUTOCOMPLETE_LIMIT,
     DanbooruTagProvider,
     PromptAssistantTagProvider,
@@ -36,6 +38,11 @@ const {
     resolveAutocompletePopupPosition,
     resolvePromptCompletionContext,
 } = await import(moduleUrl);
+
+test("manual Danbooru updates poll for up to five minutes", () => {
+    assert.equal(DANBOORU_UPDATE_POLL_MS, 500);
+    assert.equal(DANBOORU_UPDATE_TIMEOUT_MS, 300_000);
+});
 
 function jsonResponse(payload, ok = true, status = 200) {
     return {
@@ -371,13 +378,20 @@ test("provider toggles let either source work independently", async () => {
 
 test("prompt grid source wires autocomplete into all three requested input surfaces", async () => {
     const source = await readFile(new URL("../web/prompt_toggle_grid.js", import.meta.url), "utf8");
+    const settingsSource = await readFile(
+        new URL("../web/prompt_translation_settings.js", import.meta.url),
+        "utf8",
+    );
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,/);
     assert.match(source, /new PromptAutocompleteController\(\s*addInput,/);
     assert.match(source, /new PromptAutocompleteController\(\s*freeTextArea,/);
-    assert.match(source, /id:\s*DANBOORU_SETTING_ID/);
-    assert.match(source, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
-    assert.match(source, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260814-fuzzy-v1/);
+    assert.match(settingsSource, /id:\s*DANBOORU_SETTING_ID/);
+    assert.match(settingsSource, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
+    assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
+    assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
+    assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260817-translation-manager-v2/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260817-translation-manager-v2/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {

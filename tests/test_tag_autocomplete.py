@@ -3,13 +3,17 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
 from tag_autocomplete import (
-    CHECK_INTERVAL_SECONDS,
+    SUPPLEMENT_REPOSITORY,
+    SUPPLEMENT_REF,
+    SUPPLEMENT_REMOTE_PATH,
     TagAutocompleteStore,
     TagAutocompleteValidationError,
+    _validate_sqlite_dataset,
     normalize_locale,
     validate_manifest,
 )
@@ -32,6 +36,38 @@ def translation_csv(rows):
     return buffer.getvalue().encode("utf-8")
 
 
+def supplement_sqlite(rows, *, invalid_schema=False):
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "tag.sqlite"
+        connection = sqlite3.connect(path)
+        try:
+            if invalid_schema:
+                connection.execute("CREATE TABLE tags (name TEXT PRIMARY KEY, cn_name TEXT)")
+                connection.executemany(
+                    "INSERT INTO tags (name, cn_name) VALUES (?, ?)",
+                    [(name, translation) for name, _category, translation, _count in rows],
+                )
+            else:
+                connection.execute(
+                    """
+                    CREATE TABLE tags (
+                        name TEXT PRIMARY KEY,
+                        category INTEGER,
+                        cn_name TEXT,
+                        post_count INTEGER
+                    )
+                    """
+                )
+                connection.executemany(
+                    "INSERT INTO tags (name, category, cn_name, post_count) VALUES (?, ?, ?, ?)",
+                    rows,
+                )
+            connection.commit()
+        finally:
+            connection.close()
+        return path.read_bytes()
+
+
 def source(filename, source_format, payload, minimum_rows=1):
     return {
         "filename": filename,
@@ -46,8 +82,29 @@ def source(filename, source_format, payload, minimum_rows=1):
     }
 
 
-def manifest(base_payload, zh_payload, version="test-1"):
+def supplement_source(payload, *, enabled=True, license_status="cleared", minimum_rows=1):
     return {
+        "filename": "danbooru.zh-CN.supplement.sqlite",
+        "format": "tag_translation_sqlite_v1",
+        "enabled": enabled,
+        "license_status": license_status,
+        "repository": SUPPLEMENT_REPOSITORY,
+        "ref": SUPPLEMENT_REF,
+        "path": SUPPLEMENT_REMOTE_PATH,
+        "api_url": (
+            "https://api.github.com/repos/"
+            f"{SUPPLEMENT_REPOSITORY}/contents/{SUPPLEMENT_REMOTE_PATH}?ref={SUPPLEMENT_REF}"
+        ),
+        "max_size_bytes": max(len(payload) + 1, 1024),
+        "min_rows": minimum_rows,
+        "license": "Test license",
+        "attribution": "test supplement",
+        "source_page": f"https://github.com/{SUPPLEMENT_REPOSITORY}",
+    }
+
+
+def manifest(base_payload, zh_payload, version="test-1", supplement_payload=None):
+    payload = {
         "schema_version": 1,
         "version": version,
         "published_at": "2026-08-13T00:00:00Z",
@@ -57,6 +114,9 @@ def manifest(base_payload, zh_payload, version="test-1"):
             "zh-CN": source("danbooru.zh-CN.csv", "tag_translation_csv_v1", zh_payload),
         },
     }
+    if supplement_payload is not None:
+        payload["sources"]["zh-CN-supplement"] = supplement_source(supplement_payload)
+    return payload
 
 
 class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +141,10 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
         self.calls = []
+        self.file_calls = []
+        self.supplement_payload = None
+        self.supplement_blob_sha = "a" * 40
+        self.supplement_api_not_modified = False
 
         async def fetcher(url, *, headers=None, maximum_bytes=None):
             self.calls.append((url, dict(headers or {}), maximum_bytes))
@@ -89,14 +153,42 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             for source_id, payload in (("base", self.base_payload), ("zh-CN", self.zh_payload)):
                 if url == self.manifest["sources"][source_id]["url"]:
                     return 200, payload, {"ETag": f'"{source_id}"'}
+            supplement = self.manifest["sources"].get("zh-CN-supplement")
+            if supplement and url == supplement["api_url"]:
+                if self.supplement_api_not_modified and headers and headers.get("If-None-Match"):
+                    return 304, b"", {"ETag": '"supplement"'}
+                metadata = {
+                    "type": "file",
+                    "name": SUPPLEMENT_REMOTE_PATH,
+                    "path": SUPPLEMENT_REMOTE_PATH,
+                    "sha": self.supplement_blob_sha,
+                    "size": len(self.supplement_payload),
+                    "download_url": (
+                        "https://raw.githubusercontent.com/"
+                        f"{SUPPLEMENT_REPOSITORY}/{SUPPLEMENT_REF}/{SUPPLEMENT_REMOTE_PATH}"
+                    ),
+                }
+                return 200, json.dumps(metadata).encode("utf-8"), {"ETag": '"supplement"'}
             raise AssertionError(f"unexpected URL {url}")
 
+        async def file_fetcher(url, destination, *, headers=None, maximum_bytes=None):
+            self.file_calls.append((url, dict(headers or {}), maximum_bytes))
+            if len(self.supplement_payload) > maximum_bytes:
+                raise TagAutocompleteValidationError("download is too large")
+            Path(destination).write_bytes(self.supplement_payload)
+            return 200, {
+                "size_bytes": len(self.supplement_payload),
+                "sha256": hashlib.sha256(self.supplement_payload).hexdigest(),
+            }, {"ETag": '"sqlite"'}
+
         self.fetcher = fetcher
+        self.file_fetcher = file_fetcher
         self.store = TagAutocompleteStore(
             self.root / "user" / "metadata.json",
             self.manifest_path,
             remote_manifest_url="https://manifest.example/tag_sources.json",
             fetcher=fetcher,
+            file_fetcher=file_fetcher,
             now=lambda: 1_700_000_000,
         )
 
@@ -107,7 +199,11 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.store.status("zh-CN")["needs_download"])
         status = await self.store.update("zh-CN")
         self.assertTrue(status["ready"])
+        self.assertTrue(status["primary_translation_available"])
         self.assertEqual(status["row_count"], 4)
+        self.assertEqual(status["primary_translation_count"], 3)
+        self.assertEqual(status["translated_tag_count"], 3)
+        self.assertEqual(status["translation_coverage_percent"], 75.0)
         self.assertTrue((self.root / "user" / "danbooru.base.csv").is_file())
         self.assertTrue((self.root / "user" / "danbooru.zh-CN.csv").is_file())
 
@@ -215,17 +311,167 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         await first
         self.assertEqual(sum(url.endswith("tag_sources.json") for url, _headers, _limit in self.calls), 1)
 
-    async def test_weekly_check_starts_only_when_ready_and_due(self):
+    async def test_status_is_local_and_never_starts_an_update(self):
         await self.store.update("en")
-        self.store.now = lambda: 1_700_000_000 + CHECK_INTERVAL_SECONDS - 1
+        self.calls.clear()
+        self.file_calls.clear()
         self.assertIsNone(self.store._update_task)
-        self.store.maybe_start_weekly_check("en")
+        status = self.store.status("zh-CN")
         self.assertIsNone(self.store._update_task)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.file_calls, [])
+        self.assertTrue(status["available"])
 
-        self.store.now = lambda: 1_700_000_000 + CHECK_INTERVAL_SECONDS + 1
-        state = self.store.maybe_start_weekly_check("en")
-        self.assertTrue(state["updating"])
-        await self.store._update_task
+    async def test_supplement_only_fills_missing_primary_translations(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_eyes", 0, "碧蓝眼眸", 1_500_000),
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+            ("outside_dictionary", 0, "库外标签", 100),
+        ])
+        self.manifest = manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-supplement-1",
+            supplement_payload=self.supplement_payload,
+        )
+
+        status = await self.store.update("zh-CN")
+
+        self.assertTrue(status["ready"])
+        self.assertTrue(status["supplement_enabled"])
+        self.assertTrue(status["supplement_available"])
+        self.assertEqual(status["supplement_translation_count"], 1)
+        self.assertEqual(status["primary_translation_count"], 3)
+        self.assertEqual(status["translated_tag_count"], 4)
+        self.assertEqual(status["translation_coverage_percent"], 100.0)
+        self.assertEqual(status["supplement_blob_sha"], "a" * 40)
+        self.assertEqual(status["supplement_license_status"], "cleared")
+        self.assertEqual(
+            status["supplement_source_page"],
+            f"https://github.com/{SUPPLEMENT_REPOSITORY}",
+        )
+        self.assertTrue(
+            (self.root / "user" / "danbooru.zh-CN.supplement.sqlite").is_file()
+        )
+        self.assertEqual(
+            self.store.resolve(["blue eyes"], "zh-CN")[0]["translation"],
+            "蓝眼睛",
+        )
+        self.assertEqual(
+            self.store.search("蔚蓝", "zh-CN", 20)[0]["tag"],
+            "blue_archive",
+        )
+        self.assertEqual(self.store.search("库外", "zh-CN", 20), [])
+        self.assertEqual(len(self.file_calls), 1)
+
+        self.supplement_api_not_modified = True
+        unchanged = await self.store.update("zh-CN")
+        self.assertEqual(len(self.file_calls), 1)
+        self.assertEqual(unchanged["supplement_translation_count"], 1)
+
+    async def test_failed_supplement_refresh_keeps_primary_and_last_good_database(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+        ])
+        self.manifest = manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-supplement-good",
+            supplement_payload=self.supplement_payload,
+        )
+        await self.store.update("zh-CN")
+        supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
+        original = supplement_path.read_bytes()
+
+        self.supplement_payload = b"not a sqlite database"
+        self.supplement_blob_sha = "b" * 40
+        self.manifest = manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-supplement-broken",
+            supplement_payload=self.supplement_payload,
+        )
+        status = await self.store.update("zh-CN")
+
+        self.assertTrue(status["ready"])
+        self.assertTrue(status["supplement_available"])
+        self.assertTrue(status["supplement_error"])
+        self.assertEqual(supplement_path.read_bytes(), original)
+        self.assertEqual(
+            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
+            "蔚蓝档案",
+        )
+        self.assertEqual(
+            self.store.resolve(["blue eyes"], "zh-CN")[0]["translation"],
+            "蓝眼睛",
+        )
+
+    async def test_broken_installed_supplement_reports_local_warning_and_keeps_primary_coverage(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+        ])
+        self.manifest = manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-supplement-broken-local",
+            supplement_payload=self.supplement_payload,
+        )
+        await self.store.update("zh-CN")
+        supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
+        supplement_path.write_bytes(b"not sqlite")
+        self.store._coverage_cache_key = None
+
+        status = self.store.status("zh-CN")
+
+        self.assertTrue(status["available"])
+        self.assertEqual(status["primary_translation_count"], 3)
+        self.assertEqual(status["translated_tag_count"], 3)
+        self.assertEqual(status["translation_coverage_percent"], 75.0)
+        self.assertIn("could not read Chinese translation supplement", status["supplement_error"])
+
+    async def test_not_modified_metadata_redownloads_a_missing_local_database(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+        ])
+        self.manifest = manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-supplement-redownload",
+            supplement_payload=self.supplement_payload,
+        )
+        await self.store.update("zh-CN")
+        supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
+        supplement_path.unlink()
+        self.supplement_api_not_modified = True
+
+        status = await self.store.update("zh-CN")
+
+        self.assertTrue(status["supplement_available"])
+        self.assertTrue(supplement_path.is_file())
+        self.assertEqual(len(self.file_calls), 2)
+
+    async def test_disabled_pending_supplement_is_not_downloaded(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+        ])
+        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-disabled")
+        source_payload = supplement_source(
+            self.supplement_payload,
+            enabled=False,
+            license_status="pending",
+        )
+        self.manifest["sources"]["zh-CN-supplement"] = source_payload
+
+        status = await self.store.update("zh-CN")
+
+        self.assertFalse(status["supplement_enabled"])
+        self.assertFalse(status["supplement_available"])
+        self.assertEqual(status["supplement_license_status"], "pending")
+        self.assertEqual(status["translated_tag_count"], 3)
+        self.assertEqual(status["translation_coverage_percent"], 75.0)
+        self.assertEqual(self.file_calls, [])
+        self.assertFalse(any(url == source_payload["api_url"] for url, _headers, _limit in self.calls))
+        self.assertEqual(self.store.resolve(["blue archive"], "zh-CN")[0]["translation"], "")
 
 
 class TagAutocompleteValidationTests(unittest.TestCase):
@@ -245,6 +491,41 @@ class TagAutocompleteValidationTests(unittest.TestCase):
         payload["sources"]["base"]["sha256"] = "bad"
         with self.assertRaisesRegex(TagAutocompleteValidationError, "SHA-256"):
             validate_manifest(payload)
+
+    def test_manifest_refuses_to_enable_supplement_without_cleared_license(self):
+        base = base_csv([("test", 0, 1, "")])
+        zh = translation_csv([("test", "测试")])
+        sqlite_payload = supplement_sqlite([("test", 0, "测试", 10)])
+        payload = manifest(base, zh)
+        payload["sources"]["zh-CN-supplement"] = supplement_source(
+            sqlite_payload,
+            enabled=True,
+            license_status="pending",
+        )
+        with self.assertRaisesRegex(TagAutocompleteValidationError, "license is cleared"):
+            validate_manifest(payload)
+
+    def test_sqlite_validation_rejects_corruption_schema_and_invalid_rows(self):
+        cases = {
+            "not a SQLite": b"broken",
+            "column is invalid": supplement_sqlite(
+                [("test", 0, "测试", 10)],
+                invalid_schema=True,
+            ),
+            "only 1 rows": supplement_sqlite([("test", 0, "测试", 10)]),
+            "invalid tag rows": supplement_sqlite([("test", 2, "", 9)]),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tag.sqlite"
+            for expected, sqlite_payload in cases.items():
+                with self.subTest(expected=expected):
+                    path.write_bytes(sqlite_payload)
+                    source_payload = supplement_source(
+                        sqlite_payload,
+                        minimum_rows=2 if expected == "only 1 rows" else 1,
+                    )
+                    with self.assertRaisesRegex(TagAutocompleteValidationError, expected):
+                        _validate_sqlite_dataset(path, source_payload)
 
 
 if __name__ == "__main__":

@@ -190,9 +190,7 @@ async def take_workflow(request):
 async def get_tag_autocomplete_status(request):
     try:
         locale = request.query.get("locale", "en")
-        return web.json_response(
-            _tag_autocomplete_store(request).maybe_start_weekly_check(locale)
-        )
+        return web.json_response(_tag_autocomplete_store(request).status(locale))
     except TagAutocompleteError as error:
         return _tag_autocomplete_error_response(error)
 

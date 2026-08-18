@@ -57,7 +57,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260814-fuzzy-v1";
+} from "./prompt_tag_autocomplete.js?v=20260817-translation-manager-v2";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -128,41 +128,10 @@ function dispatchAutocompleteSettingsChanged() {
     globalThis.dispatchEvent(new CustomEvent(AUTOCOMPLETE_SETTINGS_EVENT));
 }
 
-function showAutocompleteToast(severity, summary, detail) {
-    const toast = app?.extensionManager?.toast;
-    if (typeof toast?.add === "function") {
-        toast.add({ severity, summary, detail, life: severity === "error" ? 8000 : 4000 });
-    } else if (severity === "error") {
-        console.error(`[Prompt Weaver] ${summary}: ${detail}`);
-    } else {
-        console.info(`[Prompt Weaver] ${summary}: ${detail}`);
-    }
-}
-
-async function updateDanbooruDictionary() {
-    showAutocompleteToast(
-        "info",
-        t("Danbooru Dictionary"),
-        t("Checking for Danbooru dictionary updates…"),
-    );
-    try {
-        const status = await promptTagAutocompleteProvider.updateDanbooru(getLocale());
-        showAutocompleteToast(
-            "success",
-            t("Danbooru Dictionary"),
-            t("Danbooru dictionary is ready with {count} tags.", {
-                count: status?.row_count || 0,
-            }),
-        );
-        dispatchAutocompleteSettingsChanged();
-    } catch (error) {
-        showAutocompleteToast(
-            "error",
-            t("Danbooru Dictionary Update Failed"),
-            error instanceof Error ? error.message : String(error),
-        );
-    }
-}
+globalThis.addEventListener(AUTOCOMPLETE_SETTINGS_EVENT, () => {
+    promptTagAutocompleteProvider.danbooru.invalidateStatus();
+    promptTagAutocompleteProvider.translationCache.clear();
+});
 
 function dispatchArchiveSync() {
     window.dispatchEvent(new CustomEvent(ARCHIVE_SYNC_EVENT));
@@ -580,7 +549,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260814-bilingual-tokens-v2", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260817-translation-manager-v2", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -4037,37 +4006,6 @@ function createPromptGridWidget(node, inputName, inputData) {
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.PromptToggleGrid",
-    settings: [
-        {
-            id: DANBOORU_SETTING_ID,
-            name: t("Enable Danbooru tag autocomplete"),
-            tooltip: t("Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local."),
-            type: "boolean",
-            defaultValue: true,
-            onChange: dispatchAutocompleteSettingsChanged,
-        },
-        {
-            id: PROMPT_ASSISTANT_SETTING_ID,
-            name: t("Enable Prompt Assistant autocomplete"),
-            tooltip: t("Uses tag CSV files exposed by an installed ComfyUI-Prompt-Assistant plugin."),
-            type: "boolean",
-            defaultValue: true,
-            onChange: dispatchAutocompleteSettingsChanged,
-        },
-    ],
-    commands: [
-        {
-            id: "PromptWeaver.Autocomplete.UpdateDictionary",
-            label: t("Update Danbooru Dictionary"),
-            function: updateDanbooruDictionary,
-        },
-    ],
-    menuCommands: [
-        {
-            path: ["Prompt Weaver"],
-            commands: ["PromptWeaver.Autocomplete.UpdateDictionary"],
-        },
-    ],
     loadedGraphNode(node) {
         if (node?.comfyClass === "PromptWeaverPromptToggleGrid"
             || node?.type === "PromptWeaverPromptToggleGrid") {

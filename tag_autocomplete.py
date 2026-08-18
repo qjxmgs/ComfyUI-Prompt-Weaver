@@ -1,9 +1,9 @@
 import asyncio
-import calendar
 import csv
 import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -12,9 +12,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-CHECK_INTERVAL_SECONDS = 7 * 24 * 60 * 60
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_DATASET_BYTES = 8 * 1024 * 1024
+MAX_SQLITE_DATASET_BYTES = 64 * 1024 * 1024
 MAX_QUERY_LENGTH = 128
 MAX_RESOLVE_TAGS = 256
 DEFAULT_RESULT_LIMIT = 20
@@ -25,16 +25,33 @@ REMOTE_MANIFEST_URL = (
     "https://raw.githubusercontent.com/qjxmgs/ComfyUI-Prompt-Weaver/"
     "master/data/tag_sources.json"
 )
-ALLOWED_DOWNLOAD_HOSTS = frozenset({"huggingface.co", "raw.githubusercontent.com"})
+ALLOWED_DOWNLOAD_HOSTS = frozenset({
+    "api.github.com",
+    "huggingface.co",
+    "raw.githubusercontent.com",
+})
 EXPECTED_SOURCE_FILES = {
     "base": "danbooru.base.csv",
     "zh-CN": "danbooru.zh-CN.csv",
+    "zh-CN-supplement": "danbooru.zh-CN.supplement.sqlite",
 }
 EXPECTED_SOURCE_FORMATS = {
     "base": "danbooru_tag_csv_v1",
     "zh-CN": "tag_translation_csv_v1",
+    "zh-CN-supplement": "tag_translation_sqlite_v1",
 }
 BASE_HEADER = ["tag", "category", "count", "alias"]
+SUPPLEMENT_SOURCE_ID = "zh-CN-supplement"
+SUPPLEMENT_REQUIRED_COLUMNS = {
+    "name": "TEXT",
+    "category": "INTEGER",
+    "cn_name": "TEXT",
+    "post_count": "INTEGER",
+}
+SUPPLEMENT_QUERY_BATCH_SIZE = 500
+SUPPLEMENT_REPOSITORY = "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
+SUPPLEMENT_REF = "main"
+SUPPLEMENT_REMOTE_PATH = "tag.sqlite"
 
 
 class TagAutocompleteError(Exception):
@@ -118,15 +135,6 @@ def _iso_timestamp(now):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
 
 
-def _parse_timestamp(value):
-    if not isinstance(value, str) or not value:
-        return 0.0
-    try:
-        return float(calendar.timegm(time.strptime(value, "%Y-%m-%dT%H:%M:%SZ")))
-    except (OverflowError, ValueError):
-        return 0.0
-
-
 def _atomic_write_json(path, payload):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,6 +190,60 @@ def _header_value(headers, name):
     return ""
 
 
+def _validate_source_attribution(source_id, source):
+    for field in ("license", "attribution", "source_page"):
+        if not isinstance(source.get(field), str) or not source[field].strip():
+            raise TagAutocompleteValidationError(f"tag source {source_id} {field} is invalid")
+
+
+def _validate_static_source(source_id, source):
+    _validate_https_url(source.get("url"), f"tag source {source_id}")
+    digest = source.get("sha256")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in digest)
+    ):
+        raise TagAutocompleteValidationError(f"tag source {source_id} SHA-256 is invalid")
+    size_bytes = source.get("size_bytes")
+    if not isinstance(size_bytes, int) or size_bytes <= 0 or size_bytes > MAX_DATASET_BYTES:
+        raise TagAutocompleteValidationError(f"tag source {source_id} size is invalid")
+    return {
+        **source,
+        "sha256": digest.lower(),
+    }
+
+
+def _validate_supplement_source(source_id, source):
+    enabled = source.get("enabled")
+    if not isinstance(enabled, bool):
+        raise TagAutocompleteValidationError(f"tag source {source_id} enabled state is invalid")
+    license_status = source.get("license_status")
+    if license_status not in {"pending", "cleared"}:
+        raise TagAutocompleteValidationError(f"tag source {source_id} license status is invalid")
+    if enabled and license_status != "cleared":
+        raise TagAutocompleteValidationError(
+            f"tag source {source_id} cannot be enabled before its license is cleared"
+        )
+    if source.get("repository") != SUPPLEMENT_REPOSITORY:
+        raise TagAutocompleteValidationError(f"tag source {source_id} repository is invalid")
+    if source.get("ref") != SUPPLEMENT_REF or source.get("path") != SUPPLEMENT_REMOTE_PATH:
+        raise TagAutocompleteValidationError(f"tag source {source_id} Git reference is invalid")
+    _validate_https_url(source.get("api_url"), f"tag source {source_id}")
+    api_url = urlparse(source["api_url"])
+    expected_api_path = f"/repos/{SUPPLEMENT_REPOSITORY}/contents/{SUPPLEMENT_REMOTE_PATH}"
+    if api_url.hostname != "api.github.com" or api_url.path != expected_api_path:
+        raise TagAutocompleteValidationError(f"tag source {source_id} API URL is invalid")
+    max_size_bytes = source.get("max_size_bytes")
+    if (
+        not isinstance(max_size_bytes, int)
+        or max_size_bytes <= 0
+        or max_size_bytes > MAX_SQLITE_DATASET_BYTES
+    ):
+        raise TagAutocompleteValidationError(f"tag source {source_id} size limit is invalid")
+    return dict(source)
+
+
 def validate_manifest(payload):
     if not isinstance(payload, dict) or payload.get("schema_version") != MANIFEST_SCHEMA_VERSION:
         raise TagAutocompleteValidationError("unsupported tag source manifest schema")
@@ -205,27 +267,15 @@ def validate_manifest(payload):
             raise TagAutocompleteValidationError(f"tag source {source_id} filename is invalid")
         if source.get("format") != EXPECTED_SOURCE_FORMATS[source_id]:
             raise TagAutocompleteValidationError(f"tag source {source_id} format is invalid")
-        _validate_https_url(source.get("url"), f"tag source {source_id}")
-        digest = source.get("sha256")
-        if (
-            not isinstance(digest, str)
-            or len(digest) != 64
-            or any(character not in "0123456789abcdefABCDEF" for character in digest)
-        ):
-            raise TagAutocompleteValidationError(f"tag source {source_id} SHA-256 is invalid")
-        size_bytes = source.get("size_bytes")
         min_rows = source.get("min_rows")
-        if not isinstance(size_bytes, int) or size_bytes <= 0 or size_bytes > MAX_DATASET_BYTES:
-            raise TagAutocompleteValidationError(f"tag source {source_id} size is invalid")
         if not isinstance(min_rows, int) or min_rows <= 0:
             raise TagAutocompleteValidationError(f"tag source {source_id} row limit is invalid")
-        for field in ("license", "attribution", "source_page"):
-            if not isinstance(source.get(field), str) or not source[field].strip():
-                raise TagAutocompleteValidationError(f"tag source {source_id} {field} is invalid")
-        normalized_sources[source_id] = {
-            **source,
-            "sha256": digest.lower(),
-        }
+        _validate_source_attribution(source_id, source)
+        normalized_sources[source_id] = (
+            _validate_supplement_source(source_id, source)
+            if source_id == SUPPLEMENT_SOURCE_ID
+            else _validate_static_source(source_id, source)
+        )
 
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -287,6 +337,103 @@ def _validate_dataset_bytes(source_id, source, payload):
     return row_count
 
 
+def _validate_github_file_metadata(payload, source):
+    if not isinstance(payload, dict):
+        raise TagAutocompleteValidationError("supplement source metadata must be an object")
+    if payload.get("type") != "file" or payload.get("path") != SUPPLEMENT_REMOTE_PATH:
+        raise TagAutocompleteValidationError("supplement source metadata does not describe tag.sqlite")
+    blob_sha = payload.get("sha")
+    if (
+        not isinstance(blob_sha, str)
+        or len(blob_sha) not in {40, 64}
+        or any(character not in "0123456789abcdefABCDEF" for character in blob_sha)
+    ):
+        raise TagAutocompleteValidationError("supplement source blob SHA is invalid")
+    size_bytes = payload.get("size")
+    if (
+        not isinstance(size_bytes, int)
+        or size_bytes <= 0
+        or size_bytes > source["max_size_bytes"]
+    ):
+        raise TagAutocompleteValidationError("supplement source size is invalid")
+    download_url = payload.get("download_url")
+    _validate_https_url(download_url, "supplement source download")
+    parsed = urlparse(download_url)
+    expected_path = f"/{SUPPLEMENT_REPOSITORY}/{SUPPLEMENT_REF}/{SUPPLEMENT_REMOTE_PATH}"
+    if parsed.hostname != "raw.githubusercontent.com" or parsed.path != expected_path:
+        raise TagAutocompleteValidationError("supplement source download URL is invalid")
+    return {
+        "blob_sha": blob_sha.lower(),
+        "size_bytes": size_bytes,
+        "download_url": download_url,
+    }
+
+
+def _validate_sqlite_dataset(path, source):
+    path = Path(path)
+    try:
+        with path.open("rb") as handle:
+            if handle.read(16) != b"SQLite format 3\x00":
+                raise TagAutocompleteValidationError("supplement source is not a SQLite database")
+        connection = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro&immutable=1",
+            uri=True,
+            timeout=5,
+        )
+        try:
+            connection.execute("PRAGMA query_only = ON")
+            check = connection.execute("PRAGMA quick_check").fetchone()
+            if not check or check[0] != "ok":
+                raise TagAutocompleteValidationError("supplement source failed SQLite quick_check")
+            columns = {
+                row[1]: {
+                    "type": str(row[2] or "").upper(),
+                    "primary_key": bool(row[5]),
+                }
+                for row in connection.execute("PRAGMA table_info(tags)")
+            }
+            for name, expected_type in SUPPLEMENT_REQUIRED_COLUMNS.items():
+                if name not in columns or columns[name]["type"] != expected_type:
+                    raise TagAutocompleteValidationError(
+                        f"supplement source tags.{name} column is invalid"
+                    )
+            if not columns["name"]["primary_key"]:
+                raise TagAutocompleteValidationError(
+                    "supplement source tags.name must be the primary key"
+                )
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN name IS NULL OR trim(name) = '' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN cn_name IS NULL OR trim(cn_name) = '' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN category IS NULL OR category NOT IN (0, 1, 3, 4, 5) THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN post_count IS NULL OR post_count < 10 THEN 1 ELSE 0 END),
+                    MAX(length(name)),
+                    MAX(length(cn_name))
+                FROM tags
+                """
+            ).fetchone()
+            if not row or row[0] < source["min_rows"]:
+                count = row[0] if row else 0
+                raise TagAutocompleteValidationError(
+                    f"supplement source contains only {count} rows"
+                )
+            if any(row[index] for index in range(1, 5)):
+                raise TagAutocompleteValidationError("supplement source contains invalid tag rows")
+            if row[5] > 256 or row[6] > 512:
+                raise TagAutocompleteValidationError("supplement source contains oversized tag text")
+            return row[0]
+        finally:
+            connection.close()
+    except TagAutocompleteError:
+        raise
+    except (OSError, sqlite3.Error) as error:
+        raise TagAutocompleteValidationError(
+            f"could not validate supplement source: {error}"
+        ) from error
+
+
 async def _default_fetch(url, *, headers=None, maximum_bytes=MAX_DATASET_BYTES):
     import aiohttp
 
@@ -316,6 +463,46 @@ async def _default_fetch(url, *, headers=None, maximum_bytes=MAX_DATASET_BYTES):
             return response.status, b"".join(chunks), dict(response.headers)
 
 
+async def _default_fetch_to_file(
+    url,
+    destination,
+    *,
+    headers=None,
+    maximum_bytes=MAX_SQLITE_DATASET_BYTES,
+):
+    import aiohttp
+
+    timeout = aiohttp.ClientTimeout(total=180, connect=15, sock_read=60)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url, headers=headers or {}, allow_redirects=True) as response:
+            if response.status != 200:
+                raise TagAutocompleteUnavailableError(
+                    f"download failed with HTTP {response.status}"
+                )
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > maximum_bytes:
+                        raise TagAutocompleteValidationError("download is too large")
+                except ValueError:
+                    pass
+            digest = hashlib.sha256()
+            total = 0
+            with Path(destination).open("wb") as handle:
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    total += len(chunk)
+                    if total > maximum_bytes:
+                        raise TagAutocompleteValidationError("download is too large")
+                    digest.update(chunk)
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+            return response.status, {
+                "size_bytes": total,
+                "sha256": digest.hexdigest(),
+            }, dict(response.headers)
+
+
 class TagAutocompleteStore:
     def __init__(
         self,
@@ -324,6 +511,7 @@ class TagAutocompleteStore:
         *,
         remote_manifest_url=REMOTE_MANIFEST_URL,
         fetcher=None,
+        file_fetcher=None,
         now=None,
     ):
         self.metadata_path = Path(metadata_path)
@@ -331,6 +519,7 @@ class TagAutocompleteStore:
         self.manifest_path = Path(manifest_path)
         self.remote_manifest_url = remote_manifest_url
         self.fetcher = fetcher or _default_fetch
+        self.file_fetcher = file_fetcher or _default_fetch_to_file
         self.now = now or time.time
         self._update_task = None
         self._update_lock = asyncio.Lock()
@@ -339,7 +528,14 @@ class TagAutocompleteStore:
         self._search_records = []
         self._resolve_cache_key = None
         self._resolve_index = {}
+        self._coverage_cache_key = None
+        self._coverage_metrics = {
+            "primary_translation_count": 0,
+            "translated_tag_count": 0,
+            "translation_coverage_percent": 0.0,
+        }
         self._last_error = ""
+        self._last_supplement_error = ""
 
     def bundled_manifest(self):
         return validate_manifest(_read_json_file(self.manifest_path, "bundled tag source manifest"))
@@ -378,6 +574,21 @@ class TagAutocompleteStore:
             and path.stat().st_size > 0
         )
 
+    def _supplement_config(self, metadata):
+        installed_manifest = metadata.get("manifest")
+        if isinstance(installed_manifest, dict):
+            try:
+                manifest = validate_manifest(installed_manifest)
+                source = manifest["sources"].get(SUPPLEMENT_SOURCE_ID)
+                if source is not None:
+                    return source
+            except TagAutocompleteError:
+                pass
+        try:
+            return self.bundled_manifest()["sources"].get(SUPPLEMENT_SOURCE_ID)
+        except TagAutocompleteError:
+            return None
+
     def status(self, locale="en"):
         normalized_locale = normalize_locale(locale)
         try:
@@ -387,7 +598,26 @@ class TagAutocompleteStore:
             self._last_error = str(error)
         base_available = self._source_is_available(metadata, "base")
         translation_required = normalized_locale == "zh-CN"
-        translation_available = self._source_is_available(metadata, "zh-CN")
+        primary_translation_available = self._source_is_available(metadata, "zh-CN")
+        supplement_config = self._supplement_config(metadata)
+        supplement_enabled = bool(supplement_config and supplement_config.get("enabled"))
+        supplement_available = self._source_is_available(metadata, SUPPLEMENT_SOURCE_ID)
+        translation_available = primary_translation_available or (
+            supplement_enabled and supplement_available
+        )
+        supplement_metadata = metadata.get("sources", {}).get(SUPPLEMENT_SOURCE_ID)
+        if not isinstance(supplement_metadata, dict):
+            supplement_metadata = {}
+        coverage = {
+            "primary_translation_count": 0,
+            "translated_tag_count": 0,
+            "translation_coverage_percent": 0.0,
+        }
+        if base_available:
+            try:
+                coverage = self._translation_coverage_metrics()
+            except TagAutocompleteError as error:
+                self._last_error = str(error)
         row_count = 0
         source_metadata = metadata.get("sources", {}).get("base")
         if isinstance(source_metadata, dict) and isinstance(source_metadata.get("rows"), int):
@@ -397,29 +627,31 @@ class TagAutocompleteStore:
             "ready": base_available and (not translation_required or translation_available),
             "needs_download": not base_available or (translation_required and not translation_available),
             "translation_available": translation_available,
+            "primary_translation_available": primary_translation_available,
             "locale": normalized_locale,
             "version": metadata.get("manifest_version") or "",
             "row_count": row_count,
             "last_checked_at": metadata.get("last_checked_at") or "",
             "last_updated_at": metadata.get("last_updated_at") or "",
             "updating": bool(self._update_task and not self._update_task.done()),
-            "error": self._last_error,
+            "error": self._last_error or self._last_supplement_error,
             "content_scope": "full",
+            "supplement_enabled": supplement_enabled,
+            "supplement_available": supplement_available,
+            "supplement_translation_count": supplement_metadata.get("translations", 0),
+            "supplement_blob_sha": supplement_metadata.get("blob_sha") or "",
+            "supplement_last_updated_at": supplement_metadata.get("downloaded_at") or "",
+            "supplement_error": self._last_supplement_error,
+            "supplement_license_status": (
+                str(supplement_config.get("license_status") or "")
+                if supplement_config else ""
+            ),
+            "supplement_source_page": (
+                str(supplement_config.get("source_page") or "")
+                if supplement_config else ""
+            ),
+            **coverage,
         }
-
-    def _weekly_check_due(self):
-        try:
-            metadata = self._read_metadata()
-        except TagAutocompleteError:
-            return False
-        last_checked = _parse_timestamp(metadata.get("last_checked_at"))
-        return self.now() - last_checked >= CHECK_INTERVAL_SECONDS
-
-    def maybe_start_weekly_check(self, locale="en"):
-        state = self.status(locale)
-        if state["ready"] and self._weekly_check_due():
-            self.start_update(locale, force=False)
-        return self.status(locale)
 
     def start_update(self, locale="en", *, force=True):
         if self._update_task and not self._update_task.done():
@@ -476,11 +708,125 @@ class TagAutocompleteStore:
                 return bundled, metadata.get("manifest_etag") or ""
             raise
 
+    async def _update_supplement_source(self, source, installed, now):
+        target_path = self._source_path(SUPPLEMENT_SOURCE_ID)
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if isinstance(installed, dict) and installed.get("etag"):
+            headers["If-None-Match"] = installed["etag"]
+        status, payload, response_headers = await self.fetcher(
+            source["api_url"],
+            headers=headers,
+            maximum_bytes=MAX_MANIFEST_BYTES,
+        )
+        if status == 304:
+            if (
+                target_path.is_file()
+                and isinstance(installed, dict)
+                and isinstance(installed.get("size_bytes"), int)
+                and target_path.stat().st_size == installed["size_bytes"]
+            ):
+                return False, {
+                    **installed,
+                    "checked_at": _iso_timestamp(now),
+                }
+            status, payload, response_headers = await self.fetcher(
+                source["api_url"],
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                maximum_bytes=MAX_MANIFEST_BYTES,
+            )
+        if status != 200:
+            raise TagAutocompleteUnavailableError(
+                f"supplement metadata download failed with HTTP {status}"
+            )
+        try:
+            remote_payload = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise TagAutocompleteValidationError(
+                f"supplement source metadata is invalid JSON: {error}"
+            ) from error
+        remote = _validate_github_file_metadata(remote_payload, source)
+        if (
+            isinstance(installed, dict)
+            and installed.get("blob_sha") == remote["blob_sha"]
+            and target_path.is_file()
+            and target_path.stat().st_size == remote["size_bytes"]
+        ):
+            return False, {
+                **installed,
+                "etag": _header_value(response_headers, "etag"),
+                "checked_at": _iso_timestamp(now),
+            }
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        file_descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{target_path.name}.",
+            suffix=".tmp",
+            dir=str(self.root),
+        )
+        os.close(file_descriptor)
+        temporary_path = Path(temporary_path)
+        try:
+            download_status, download, download_headers = await self.file_fetcher(
+                remote["download_url"],
+                temporary_path,
+                headers={},
+                maximum_bytes=min(source["max_size_bytes"], remote["size_bytes"] + 1),
+            )
+            if download_status != 200:
+                raise TagAutocompleteUnavailableError(
+                    f"supplement source download failed with HTTP {download_status}"
+                )
+            if download.get("size_bytes") != remote["size_bytes"]:
+                raise TagAutocompleteValidationError(
+                    "supplement source download size does not match GitHub metadata"
+                )
+            digest = download.get("sha256")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdefABCDEF" for character in digest)
+            ):
+                raise TagAutocompleteValidationError(
+                    "supplement source download SHA-256 is invalid"
+                )
+            row_count = _validate_sqlite_dataset(temporary_path, source)
+            os.replace(temporary_path, target_path)
+            return True, {
+                "sha256": digest.lower(),
+                "blob_sha": remote["blob_sha"],
+                "size_bytes": remote["size_bytes"],
+                "rows": row_count,
+                "translations": 0,
+                "etag": _header_value(response_headers, "etag"),
+                "download_etag": _header_value(download_headers, "etag"),
+                "checked_at": _iso_timestamp(now),
+                "downloaded_at": _iso_timestamp(now),
+                "license": source["license"],
+                "license_status": source["license_status"],
+                "attribution": source["attribution"],
+                "source_page": source["source_page"],
+                "repository": source["repository"],
+                "ref": source["ref"],
+                "path": source["path"],
+            }
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
     async def update(self, locale="en", *, force=True):
-        del force  # Calling update already bypasses the seven-day scheduling gate.
+        del force  # Every update is an explicit user-requested remote check.
         normalized_locale = normalize_locale(locale)
         async with self._update_lock:
             self._last_error = ""
+            self._last_supplement_error = ""
             now = self.now()
             try:
                 metadata = self._read_metadata()
@@ -552,6 +898,28 @@ class TagAutocompleteStore:
                             pass
 
                 changed = bool(staged)
+                supplement_source = manifest["sources"].get(SUPPLEMENT_SOURCE_ID)
+                if (
+                    normalized_locale == "zh-CN"
+                    and supplement_source
+                    and supplement_source.get("enabled")
+                ):
+                    try:
+                        supplement_changed, supplement_metadata = (
+                            await self._update_supplement_source(
+                                supplement_source,
+                                next_sources.get(SUPPLEMENT_SOURCE_ID),
+                                now,
+                            )
+                        )
+                        next_sources[SUPPLEMENT_SOURCE_ID] = supplement_metadata
+                        changed = changed or supplement_changed
+                        supplement_metadata["translations"] = (
+                            self._count_supplement_translations()
+                        )
+                    except Exception as error:
+                        self._last_supplement_error = str(error)
+
                 metadata = {
                     **metadata,
                     "schema_version": METADATA_SCHEMA_VERSION,
@@ -571,6 +939,7 @@ class TagAutocompleteStore:
                         self._search_records = []
                         self._resolve_cache_key = None
                         self._resolve_index = {}
+                        self._coverage_cache_key = None
                 return self.status(normalized_locale)
             except Exception as error:
                 self._last_error = str(error)
@@ -582,11 +951,22 @@ class TagAutocompleteStore:
                     pass
                 raise
 
+    def _supplement_enabled(self):
+        try:
+            metadata = self._read_metadata()
+        except TagAutocompleteError:
+            metadata = {}
+        source = self._supplement_config(metadata)
+        return bool(source and source.get("enabled"))
+
     def _cache_key(self, locale):
+        supplement_enabled = locale == "zh-CN" and self._supplement_enabled()
         paths = [self._source_path("base")]
         if locale == "zh-CN":
             paths.append(self._source_path("zh-CN"))
-        result = [locale]
+        if supplement_enabled:
+            paths.append(self._source_path(SUPPLEMENT_SOURCE_ID))
+        result = [locale, supplement_enabled]
         for path in paths:
             if path.is_file():
                 stat = path.stat()
@@ -595,25 +975,27 @@ class TagAutocompleteStore:
                 result.extend((str(path), 0, 0))
         return tuple(result)
 
-    def _load_records(self, locale):
+    def _read_primary_translations(self):
+        translations = {}
+        translation_path = self._source_path("zh-CN")
+        if not translation_path.is_file():
+            return translations
+        try:
+            with translation_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                for row in csv.reader(handle):
+                    if len(row) == 2 and row[0].strip() and row[1].strip():
+                        translations[_canonical_search_text(row[0])] = row[1].strip()
+        except (OSError, UnicodeError, csv.Error) as error:
+            raise TagAutocompleteValidationError(
+                f"could not read Chinese tag translations: {error}"
+            ) from error
+        return translations
+
+    def _read_base_entries(self):
         base_path = self._source_path("base")
         if not base_path.is_file():
             raise TagAutocompleteUnavailableError("Danbooru tag dictionary has not been downloaded")
-
-        translations = {}
-        translation_path = self._source_path("zh-CN")
-        if locale == "zh-CN" and translation_path.is_file():
-            try:
-                with translation_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    for row in csv.reader(handle):
-                        if len(row) == 2 and row[0].strip() and row[1].strip():
-                            translations[_canonical_search_text(row[0])] = row[1].strip()
-            except (OSError, UnicodeError, csv.Error) as error:
-                raise TagAutocompleteValidationError(
-                    f"could not read Chinese tag translations: {error}"
-                ) from error
-
-        records = []
+        entries = []
         try:
             with base_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 reader = csv.DictReader(handle)
@@ -634,27 +1016,132 @@ class TagAutocompleteStore:
                         normalized_alias = _normalize_search_text(alias)
                         if normalized_alias and normalized_alias.isascii():
                             ascii_aliases.append(normalized_alias.replace(" ", "_"))
-                    translation = translations.get(canonical, "")
-                    records.append({
+                    entries.append({
                         "tag": tag,
-                        "insert_text": tag.replace("_", " "),
-                        "translation": translation,
                         "category": category,
                         "post_count": post_count,
-                        "source": "danbooru",
                         "_canonical": canonical,
                         "_aliases": tuple(dict.fromkeys(ascii_aliases)),
-                        "_translation": _normalize_search_text(translation),
                         "_fuzzy_canonical": _compact_fuzzy_text(canonical),
                         "_fuzzy_aliases": tuple(
                             _compact_fuzzy_text(alias)
                             for alias in dict.fromkeys(ascii_aliases)
                         ),
-                        "_fuzzy_translation": _compact_fuzzy_text(translation),
                         "_index": index,
                     })
         except (OSError, UnicodeError, csv.Error) as error:
             raise TagAutocompleteValidationError(f"could not read base tag dictionary: {error}") from error
+        return entries
+
+    def _query_supplement_translations(self, tags):
+        if not tags:
+            return {}
+        path = self._source_path(SUPPLEMENT_SOURCE_ID)
+        if not path.is_file():
+            return {}
+        try:
+            connection = sqlite3.connect(
+                f"{path.resolve().as_uri()}?mode=ro&immutable=1",
+                uri=True,
+                timeout=5,
+            )
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                translations = {}
+                for offset in range(0, len(tags), SUPPLEMENT_QUERY_BATCH_SIZE):
+                    batch = tags[offset:offset + SUPPLEMENT_QUERY_BATCH_SIZE]
+                    placeholders = ",".join("?" for _value in batch)
+                    rows = connection.execute(
+                        f"SELECT name, cn_name FROM tags WHERE name IN ({placeholders})",
+                        batch,
+                    )
+                    for name, translation in rows:
+                        if name and translation and str(translation).strip():
+                            translations[_canonical_search_text(name)] = str(translation).strip()
+                return translations
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error) as error:
+            raise TagAutocompleteValidationError(
+                f"could not read Chinese translation supplement: {error}"
+            ) from error
+
+    def _count_supplement_translations(self):
+        primary = self._read_primary_translations()
+        entries = self._read_base_entries()
+        missing_tags = [
+            entry["tag"]
+            for entry in entries
+            if entry["_canonical"] not in primary
+        ]
+        supplemental = self._query_supplement_translations(missing_tags)
+        return sum(
+            _canonical_search_text(tag) in supplemental
+            for tag in missing_tags
+        )
+
+    def _translation_coverage_metrics(self):
+        cache_key = self._cache_key("zh-CN")
+        with self._cache_lock:
+            if cache_key == self._coverage_cache_key:
+                return dict(self._coverage_metrics)
+
+            entries = self._read_base_entries()
+            primary = self._read_primary_translations()
+            base_keys = {entry["_canonical"] for entry in entries}
+            primary_keys = base_keys.intersection(primary)
+            translated_keys = set(primary_keys)
+
+            if self._supplement_enabled():
+                missing_tags = [
+                    entry["tag"]
+                    for entry in entries
+                    if entry["_canonical"] not in primary_keys
+                ]
+                try:
+                    supplemental = self._query_supplement_translations(missing_tags)
+                    translated_keys.update(base_keys.intersection(supplemental))
+                except TagAutocompleteError as error:
+                    self._last_supplement_error = str(error)
+
+            row_count = len(entries)
+            metrics = {
+                "primary_translation_count": len(primary_keys),
+                "translated_tag_count": len(translated_keys),
+                "translation_coverage_percent": round(
+                    len(translated_keys) * 100 / row_count,
+                    2,
+                ) if row_count else 0.0,
+            }
+            self._coverage_cache_key = cache_key
+            self._coverage_metrics = metrics
+            return dict(metrics)
+
+    def _load_records(self, locale):
+        entries = self._read_base_entries()
+        translations = self._read_primary_translations() if locale == "zh-CN" else {}
+        if locale == "zh-CN" and self._supplement_enabled():
+            missing = [
+                entry["tag"]
+                for entry in entries
+                if entry["_canonical"] not in translations
+            ]
+            try:
+                translations.update(self._query_supplement_translations(missing))
+            except TagAutocompleteError as error:
+                self._last_supplement_error = str(error)
+
+        records = []
+        for entry in entries:
+            translation = translations.get(entry["_canonical"], "")
+            records.append({
+                **entry,
+                "insert_text": entry["tag"].replace("_", " "),
+                "translation": translation,
+                "source": "danbooru",
+                "_translation": _normalize_search_text(translation),
+                "_fuzzy_translation": _compact_fuzzy_text(translation),
+            })
         return records
 
     def _records_for_locale(self, locale):

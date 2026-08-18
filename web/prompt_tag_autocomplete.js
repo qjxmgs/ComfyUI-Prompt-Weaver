@@ -5,7 +5,7 @@ import {
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260814-fuzzy-v1";
+} from "./prompt_assistant_tags.js?v=20260817-translation-manager-v2";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
@@ -13,6 +13,8 @@ export const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssi
 export const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
 export const DEFAULT_AUTOCOMPLETE_LIMIT = 20;
 export const DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS = 120;
+export const DANBOORU_UPDATE_POLL_MS = 500;
+export const DANBOORU_UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 const RESOLVE_BATCH_SIZE = 256;
 
 const TOP_LEVEL_SEPARATORS = new Set([",", "，", "\n", "\r"]);
@@ -381,8 +383,9 @@ export class DanbooruTagProvider {
             t("Danbooru dictionary update"),
         );
         this.invalidateStatus(normalizedLocale);
-        for (let attempt = 0; attempt < 240; attempt += 1) {
-            await delay(250, signal);
+        const attempts = Math.ceil(DANBOORU_UPDATE_TIMEOUT_MS / DANBOORU_UPDATE_POLL_MS);
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+            await delay(DANBOORU_UPDATE_POLL_MS, signal);
             const status = await this.status(normalizedLocale, { signal, force: true });
             if (!status.updating) {
                 if (status.error && !status.available) throw new Error(status.error);

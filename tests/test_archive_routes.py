@@ -360,6 +360,27 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.payload, {"updating": True, "locale": "zh-CN"})
         self.assertEqual(store.calls, [("zh-CN", True)])
 
+    def test_tag_autocomplete_status_route_is_read_only(self):
+        class _FakeStore:
+            def __init__(self):
+                self.calls = []
+
+            def status(self, locale):
+                self.calls.append(locale)
+                return {"available": True, "locale": locale, "updating": False}
+
+            def maybe_start_weekly_check(self, _locale):
+                raise AssertionError("status must not schedule a remote update")
+
+        store = _FakeStore()
+        with mock.patch.object(self.module, "_tag_autocomplete_store", return_value=store):
+            response = self.run_async(self.module.get_tag_autocomplete_status(
+                _Request(query={"locale": "zh-CN"})
+            ))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["locale"], "zh-CN")
+        self.assertEqual(store.calls, ["zh-CN"])
+
     def test_tag_autocomplete_search_route_defaults_to_twenty_results(self):
         class _FakeStore:
             def __init__(self):
