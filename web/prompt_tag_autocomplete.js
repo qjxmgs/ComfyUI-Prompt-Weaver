@@ -91,6 +91,13 @@ export function autocompleteQueryIsEligible(value) {
     return promptAssistantQueryIsEligible(value);
 }
 
+export function autocompleteInputOwnsFocus(
+    input,
+    activeElement = globalThis.document?.activeElement,
+) {
+    return Boolean(input && activeElement === input);
+}
+
 
 function autocompleteMatchScore(value) {
     if (!value || typeof value !== "object") return null;
@@ -812,13 +819,14 @@ export class PromptAutocompleteController {
             this.schedule();
         };
         this.handleBlur = () => {
+            this.cancelPending();
             clearTimeout(this.blurTimer);
             this.blurTimer = setTimeout(() => this.close(), 100);
         };
         this.handleFocus = () => this.schedule();
         this.handleCaretMove = () => this.position();
         this.handleViewport = () => this.position();
-        this.handleSettings = () => this.schedule({ immediate: true });
+        this.handleSettings = () => this.refreshForExternalChange();
         this.handlePopupWheel = (event) => event.stopPropagation();
         this.handleGlobalKeyDown = (event) => {
             if (
@@ -857,20 +865,42 @@ export class PromptAutocompleteController {
     schedule({ immediate = false } = {}) {
         if (this.destroyed || this.composing || !this.input.isConnected) return;
         this.cancelPending();
+        if (!autocompleteInputOwnsFocus(this.input)) {
+            this.close();
+            return;
+        }
         this.timer = setTimeout(() => {
             this.timer = 0;
             void this.search();
         }, immediate ? 0 : this.debounceMs);
     }
 
+    refreshForExternalChange() {
+        if (this.destroyed) return false;
+        this.cancelPending();
+        if (!autocompleteInputOwnsFocus(this.input)) {
+            this.close();
+            return false;
+        }
+        this.schedule({ immediate: true });
+        return true;
+    }
+
     refreshLocale() {
         if (this.destroyed) return;
         this.popup.setAttribute("aria-label", t("Prompt tag matches"));
-        this.schedule({ immediate: true });
+        this.refreshForExternalChange();
     }
 
     async search() {
-        if (this.destroyed || this.composing) return;
+        if (
+            this.destroyed
+            || this.composing
+            || !autocompleteInputOwnsFocus(this.input)
+        ) {
+            this.close();
+            return;
+        }
         this.context = this.getContext();
         const query = this.context?.query || "";
         if (!autocompleteQueryIsEligible(query)) {
@@ -887,7 +917,15 @@ export class PromptAutocompleteController {
                 this.limit,
                 { signal: abortController.signal },
             );
-            if (this.destroyed || sequence !== this.sequence || abortController.signal.aborted) return;
+            if (
+                this.destroyed
+                || sequence !== this.sequence
+                || abortController.signal.aborted
+                || !autocompleteInputOwnsFocus(this.input)
+            ) {
+                this.close();
+                return;
+            }
             this.results = response.results || [];
             this.status = response;
             this.activeIndex = -1;

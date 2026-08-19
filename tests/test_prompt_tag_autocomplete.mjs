@@ -27,6 +27,7 @@ const {
     PromptAssistantTagProvider,
     PromptTagAutocompleteProvider,
     applyPromptCompletion,
+    autocompleteInputOwnsFocus,
     autocompleteQueryIsEligible,
     autocompleteTranslationText,
     formatAutocompleteCount,
@@ -42,6 +43,24 @@ const {
 test("manual Danbooru updates poll for up to five minutes", () => {
     assert.equal(DANBOORU_UPDATE_POLL_MS, 500);
     assert.equal(DANBOORU_UPDATE_TIMEOUT_MS, 300_000);
+});
+
+test("external autocomplete refresh only targets the focused input", async () => {
+    const input = {};
+    assert.equal(autocompleteInputOwnsFocus(input, input), true);
+    assert.equal(autocompleteInputOwnsFocus(input, {}), false);
+    assert.equal(autocompleteInputOwnsFocus(null, input), false);
+
+    const source = await readFile(
+        new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
+        "utf8",
+    );
+    assert.match(source, /this\.handleSettings = \(\) => this\.refreshForExternalChange\(\)/);
+    assert.match(source, /if \(!autocompleteInputOwnsFocus\(this\.input\)\) \{[\s\S]*this\.close\(\)/);
+    assert.match(source, /refreshLocale\(\) \{[\s\S]*this\.refreshForExternalChange\(\)/);
+    assert.match(source, /this\.handleBlur = \(\) => \{\s*this\.cancelPending\(\)/);
+    assert.match(source, /schedule\(\{ immediate = false \} = \{\}\) \{[\s\S]*autocompleteInputOwnsFocus\(this\.input\)/);
+    assert.match(source, /abortController\.signal\.aborted[\s\S]*!autocompleteInputOwnsFocus\(this\.input\)/);
 });
 
 function jsonResponse(payload, ok = true, status = 200) {
@@ -390,7 +409,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260817-translation-manager-v2/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260819-focused-refresh-v1/);
     assert.match(source, /prompt_toggle_grid\.css\?v=20260817-translation-manager-v2/);
 });
 
