@@ -5,7 +5,7 @@ import {
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260817-translation-manager-v2";
+} from "./prompt_assistant_tags.js?v=20260819-escaped-grouping-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";

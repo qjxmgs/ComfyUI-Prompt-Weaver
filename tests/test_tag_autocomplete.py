@@ -248,6 +248,32 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TagAutocompleteValidationError, "must be strings"):
             self.store.resolve([123], "zh-CN")
 
+    async def test_escaped_parentheses_match_danbooru_character_tags(self):
+        self.base_payload = base_csv([
+            ("karin_(blue_archive)", 4, 159, ""),
+            ("karin_(bunny)_(blue_archive)", 4, 115, ""),
+        ])
+        self.zh_payload = translation_csv([
+            ("karin_(blue_archive)", "卡琳（蔚蓝档案）"),
+            ("karin_(bunny)_(blue_archive)", "卡琳（兔女郎）（蔚蓝档案）"),
+        ])
+        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-escaped-parentheses")
+        await self.store.update("zh-CN")
+
+        escaped_query = r"karin \(blue archive\)"
+        results = self.store.search(escaped_query, "zh-CN", 20)
+        self.assertEqual(results[0]["tag"], "karin_(blue_archive)")
+        self.assertEqual(results[0]["match_rank"], 0)
+
+        resolved = self.store.resolve([
+            r"karin \(blue archive\)",
+            r"karin \(bunny\) \(blue archive\)",
+        ], "zh-CN")
+        self.assertEqual(
+            [record["translation"] for record in resolved],
+            ["卡琳（蔚蓝档案）", "卡琳（兔女郎）（蔚蓝档案）"],
+        )
+
     async def test_search_defaults_to_twenty_results(self):
         self.base_payload = base_csv([
             (f"test_tag_{index:02d}", 0, 10_000 - index, "")

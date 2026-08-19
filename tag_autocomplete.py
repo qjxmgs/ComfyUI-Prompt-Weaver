@@ -3,6 +3,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -74,7 +75,12 @@ def normalize_locale(value):
 
 
 def _normalize_search_text(value):
-    return unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+    text = unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+    # ComfyUI escapes literal grouping characters in prompts (for example
+    # ``karin \\(blue archive\\)``), while Danbooru stores the tag without
+    # those prompt-syntax escapes. Treat the escaped and unescaped forms as
+    # the same lookup key without changing the original text used for insert.
+    return re.sub(r"\\([()\[\]{}])", r"\1", text)
 
 
 def _canonical_search_text(value):

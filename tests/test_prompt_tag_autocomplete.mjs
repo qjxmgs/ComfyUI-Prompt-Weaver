@@ -17,7 +17,7 @@ const moduleSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_weaver_i18n.js", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260817-translation-manager-v2", assistantUrl);
+    .replace("./prompt_assistant_tags.js?v=20260819-escaped-grouping-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DANBOORU_UPDATE_POLL_MS,
@@ -120,6 +120,16 @@ test("presence keys normalize underscores and spaces without touching protected 
     assert.equal(keys.has("red hair"), true);
     assert.equal(keys.has("artist, name"), true);
     assert.equal(normalizeAutocompleteInsertionKey(" BLUE__EYES "), "blue eyes");
+});
+
+test("escaped literal parentheses use the same lookup key as Danbooru tags", () => {
+    const escaped = String.raw`karin \(blue archive\)`;
+    assert.equal(normalizeAutocompleteInsertionKey(escaped), "karin (blue archive)");
+    assert.equal(promptPresenceKeys(escaped).has("karin (blue archive)"), true);
+    assert.equal(
+        promptTokenLookupText(escaped),
+        escaped,
+    );
 });
 
 test("Chinese queries start at one character and Latin queries at two", () => {
@@ -409,7 +419,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260819-focused-refresh-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260819-escaped-grouping-v1/);
     assert.match(source, /prompt_toggle_grid\.css\?v=20260817-translation-manager-v2/);
 });
 

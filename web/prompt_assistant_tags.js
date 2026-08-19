@@ -27,9 +27,9 @@ async function readJsonResponse(response, label) {
 export function normalizePromptAssistantSearchText(value) {
     const text = typeof value === "string" ? value : "";
     try {
-        return text.normalize("NFKC").trim().toLowerCase();
+        return text.normalize("NFKC").trim().toLowerCase().replace(/\\([()\[\]{}])/gu, "$1");
     } catch (_error) {
-        return text.trim().toLowerCase();
+        return text.trim().toLowerCase().replace(/\\([()\[\]{}])/gu, "$1");
     }
 }
 

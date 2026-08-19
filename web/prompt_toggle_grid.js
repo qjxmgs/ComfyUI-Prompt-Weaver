@@ -57,7 +57,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260819-focused-refresh-v1";
+} from "./prompt_tag_autocomplete.js?v=20260819-escaped-grouping-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
