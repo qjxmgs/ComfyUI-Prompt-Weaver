@@ -153,8 +153,11 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             for source_id, payload in (("base", self.base_payload), ("zh-CN", self.zh_payload)):
                 if url == self.manifest["sources"][source_id]["url"]:
                     return 200, payload, {"ETag": f'"{source_id}"'}
-            supplement = self.manifest["sources"].get("zh-CN-supplement")
-            if supplement and url == supplement["api_url"]:
+            supplement_api_url = (
+                "https://api.github.com/repos/"
+                f"{SUPPLEMENT_REPOSITORY}/contents/{SUPPLEMENT_REMOTE_PATH}?ref={SUPPLEMENT_REF}"
+            )
+            if self.supplement_payload is not None and url == supplement_api_url:
                 if self.supplement_api_not_modified and headers and headers.get("If-None-Match"):
                     return 304, b"", {"ETag": '"supplement"'}
                 metadata = {
@@ -190,6 +193,13 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             fetcher=fetcher,
             file_fetcher=file_fetcher,
             now=lambda: 1_700_000_000,
+        )
+
+    def set_supplement_manifest(self, payload):
+        self.manifest = payload
+        self.manifest_path.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
         )
 
     def tearDown(self):
@@ -328,12 +338,12 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             ("blue_archive", 3, "蔚蓝档案", 300_000),
             ("outside_dictionary", 0, "库外标签", 100),
         ])
-        self.manifest = manifest(
+        self.set_supplement_manifest(manifest(
             self.base_payload,
             self.zh_payload,
             version="test-supplement-1",
             supplement_payload=self.supplement_payload,
-        )
+        ))
 
         status = await self.store.update("zh-CN")
 
@@ -373,24 +383,24 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.supplement_payload = supplement_sqlite([
             ("blue_archive", 3, "蔚蓝档案", 300_000),
         ])
-        self.manifest = manifest(
+        self.set_supplement_manifest(manifest(
             self.base_payload,
             self.zh_payload,
             version="test-supplement-good",
             supplement_payload=self.supplement_payload,
-        )
+        ))
         await self.store.update("zh-CN")
         supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
         original = supplement_path.read_bytes()
 
         self.supplement_payload = b"not a sqlite database"
         self.supplement_blob_sha = "b" * 40
-        self.manifest = manifest(
+        self.set_supplement_manifest(manifest(
             self.base_payload,
             self.zh_payload,
             version="test-supplement-broken",
             supplement_payload=self.supplement_payload,
-        )
+        ))
         status = await self.store.update("zh-CN")
 
         self.assertTrue(status["ready"])
@@ -410,12 +420,12 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.supplement_payload = supplement_sqlite([
             ("blue_archive", 3, "蔚蓝档案", 300_000),
         ])
-        self.manifest = manifest(
+        self.set_supplement_manifest(manifest(
             self.base_payload,
             self.zh_payload,
             version="test-supplement-broken-local",
             supplement_payload=self.supplement_payload,
-        )
+        ))
         await self.store.update("zh-CN")
         supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
         supplement_path.write_bytes(b"not sqlite")
@@ -433,12 +443,12 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.supplement_payload = supplement_sqlite([
             ("blue_archive", 3, "蔚蓝档案", 300_000),
         ])
-        self.manifest = manifest(
+        self.set_supplement_manifest(manifest(
             self.base_payload,
             self.zh_payload,
             version="test-supplement-redownload",
             supplement_payload=self.supplement_payload,
-        )
+        ))
         await self.store.update("zh-CN")
         supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
         supplement_path.unlink()
@@ -449,6 +459,64 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["supplement_available"])
         self.assertTrue(supplement_path.is_file())
         self.assertEqual(len(self.file_calls), 2)
+
+    async def test_repository_change_forces_local_sqlite_replacement(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+        ])
+        self.set_supplement_manifest(manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-source-migration",
+            supplement_payload=self.supplement_payload,
+        ))
+        await self.store.update("zh-CN")
+
+        metadata = json.loads(self.store.metadata_path.read_text(encoding="utf-8"))
+        installed = metadata["sources"]["zh-CN-supplement"]
+        installed["repository"] = "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
+        installed["source_page"] = f"https://github.com/{installed['repository']}"
+        self.store.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        self.file_calls.clear()
+
+        status = await self.store.update("zh-CN")
+
+        self.assertEqual(len(self.file_calls), 1)
+        self.assertEqual(status["supplement_license_status"], "cleared")
+        refreshed = json.loads(self.store.metadata_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            refreshed["sources"]["zh-CN-supplement"]["repository"],
+            SUPPLEMENT_REPOSITORY,
+        )
+
+    async def test_bundled_supplement_policy_overrides_remote_manifest(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+        ])
+        bundled = manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-bundled-policy",
+            supplement_payload=self.supplement_payload,
+        )
+        bundled["sources"]["zh-CN-supplement"]["license_status"] = "user-directed"
+        self.manifest_path.write_text(json.dumps(bundled), encoding="utf-8")
+        stale_remote_source = supplement_source(self.supplement_payload)
+        stale_remote_source["repository"] = (
+            "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
+        )
+        stale_remote_source["api_url"] = (
+            "https://api.github.com/repos/"
+            f"{stale_remote_source['repository']}/contents/{SUPPLEMENT_REMOTE_PATH}?ref=main"
+        )
+        self.manifest["sources"]["zh-CN-supplement"] = stale_remote_source
+
+        status = await self.store.update("zh-CN")
+
+        self.assertTrue(status["supplement_enabled"])
+        self.assertTrue(status["supplement_available"])
+        self.assertEqual(status["supplement_license_status"], "user-directed")
+        self.assertEqual(len(self.file_calls), 1)
 
     async def test_disabled_pending_supplement_is_not_downloaded(self):
         self.supplement_payload = supplement_sqlite([
@@ -461,6 +529,10 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             license_status="pending",
         )
         self.manifest["sources"]["zh-CN-supplement"] = source_payload
+        self.manifest_path.write_text(
+            json.dumps(self.manifest, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
         status = await self.store.update("zh-CN")
 
@@ -492,7 +564,7 @@ class TagAutocompleteValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(TagAutocompleteValidationError, "SHA-256"):
             validate_manifest(payload)
 
-    def test_manifest_refuses_to_enable_supplement_without_cleared_license(self):
+    def test_manifest_accepts_user_directed_local_use_but_rejects_pending_enablement(self):
         base = base_csv([("test", 0, 1, "")])
         zh = translation_csv([("test", "测试")])
         sqlite_payload = supplement_sqlite([("test", 0, "测试", 10)])
@@ -500,9 +572,20 @@ class TagAutocompleteValidationTests(unittest.TestCase):
         payload["sources"]["zh-CN-supplement"] = supplement_source(
             sqlite_payload,
             enabled=True,
+            license_status="user-directed",
+        )
+        validated = validate_manifest(payload)
+        self.assertEqual(
+            validated["sources"]["zh-CN-supplement"]["license_status"],
+            "user-directed",
+        )
+
+        payload["sources"]["zh-CN-supplement"] = supplement_source(
+            sqlite_payload,
+            enabled=True,
             license_status="pending",
         )
-        with self.assertRaisesRegex(TagAutocompleteValidationError, "license is cleared"):
+        with self.assertRaisesRegex(TagAutocompleteValidationError, "user-directed use"):
             validate_manifest(payload)
 
     def test_sqlite_validation_rejects_corruption_schema_and_invalid_rows(self):

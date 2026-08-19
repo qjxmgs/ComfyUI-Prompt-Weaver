@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "version": "2026-08-17.1",
-  "published_at": "2026-08-17T00:00:00Z",
+  "version": "2026-08-19.1",
+  "published_at": "2026-08-19T00:00:00Z",
   "content_scope": "full",
   "sources": {
     "base": {
@@ -29,17 +29,17 @@
     "zh-CN-supplement": {
       "filename": "danbooru.zh-CN.supplement.sqlite",
       "format": "tag_translation_sqlite_v1",
-      "enabled": false,
-      "license_status": "pending",
-      "repository": "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table",
+      "enabled": true,
+      "license_status": "user-directed",
+      "repository": "ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table",
       "ref": "main",
       "path": "tag.sqlite",
-      "api_url": "https://api.github.com/repos/qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table/contents/tag.sqlite?ref=main",
+      "api_url": "https://api.github.com/repos/ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table/contents/tag.sqlite?ref=main",
       "max_size_bytes": 67108864,
       "min_rows": 300000,
-      "license": "No license declared",
-      "attribution": "ffdkj-Danbooru_Tag-Chinese-English-Translation-Table via qjxmgs mirror",
-      "source_page": "https://github.com/qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
+      "license": "No license declared; user-directed local download",
+      "attribution": "ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table",
+      "source_page": "https://github.com/ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
     }
   }
 }

@@ -49,7 +49,7 @@ SUPPLEMENT_REQUIRED_COLUMNS = {
     "post_count": "INTEGER",
 }
 SUPPLEMENT_QUERY_BATCH_SIZE = 500
-SUPPLEMENT_REPOSITORY = "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
+SUPPLEMENT_REPOSITORY = "ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
 SUPPLEMENT_REF = "main"
 SUPPLEMENT_REMOTE_PATH = "tag.sqlite"
 
@@ -219,11 +219,11 @@ def _validate_supplement_source(source_id, source):
     if not isinstance(enabled, bool):
         raise TagAutocompleteValidationError(f"tag source {source_id} enabled state is invalid")
     license_status = source.get("license_status")
-    if license_status not in {"pending", "cleared"}:
+    if license_status not in {"pending", "cleared", "user-directed"}:
         raise TagAutocompleteValidationError(f"tag source {source_id} license status is invalid")
-    if enabled and license_status != "cleared":
+    if enabled and license_status not in {"cleared", "user-directed"}:
         raise TagAutocompleteValidationError(
-            f"tag source {source_id} cannot be enabled before its license is cleared"
+            f"tag source {source_id} cannot be enabled without cleared or user-directed use"
         )
     if source.get("repository") != SUPPLEMENT_REPOSITORY:
         raise TagAutocompleteValidationError(f"tag source {source_id} repository is invalid")
@@ -575,19 +575,28 @@ class TagAutocompleteStore:
         )
 
     def _supplement_config(self, metadata):
-        installed_manifest = metadata.get("manifest")
-        if isinstance(installed_manifest, dict):
-            try:
-                manifest = validate_manifest(installed_manifest)
-                source = manifest["sources"].get(SUPPLEMENT_SOURCE_ID)
-                if source is not None:
-                    return source
-            except TagAutocompleteError:
-                pass
+        del metadata
         try:
             return self.bundled_manifest()["sources"].get(SUPPLEMENT_SOURCE_ID)
         except TagAutocompleteError:
             return None
+
+    def _validate_with_bundled_supplement(self, payload, bundled):
+        if not isinstance(payload, dict):
+            return validate_manifest(payload)
+        sources = payload.get("sources")
+        if not isinstance(sources, dict):
+            return validate_manifest(payload)
+        pinned_payload = {
+            **payload,
+            "sources": dict(sources),
+        }
+        bundled_source = bundled["sources"].get(SUPPLEMENT_SOURCE_ID)
+        if bundled_source is None:
+            pinned_payload["sources"].pop(SUPPLEMENT_SOURCE_ID, None)
+        else:
+            pinned_payload["sources"][SUPPLEMENT_SOURCE_ID] = bundled_source
+        return validate_manifest(pinned_payload)
 
     def status(self, locale="en"):
         normalized_locale = normalize_locale(locale)
@@ -676,7 +685,10 @@ class TagAutocompleteStore:
                 installed_manifest = metadata.get("manifest")
                 if installed_manifest:
                     return (
-                        validate_manifest(installed_manifest),
+                        self._validate_with_bundled_supplement(
+                            installed_manifest,
+                            bundled,
+                        ),
                         metadata.get("manifest_etag") or "",
                     )
                 return bundled, metadata.get("manifest_etag") or ""
@@ -690,13 +702,19 @@ class TagAutocompleteStore:
                 raise TagAutocompleteValidationError(
                     f"remote tag source manifest is invalid JSON: {error}"
                 ) from error
-            manifest = validate_manifest(remote_payload)
+            manifest = self._validate_with_bundled_supplement(
+                remote_payload,
+                bundled,
+            )
             installed_version = str(metadata.get("manifest_version") or "")
             if installed_version and manifest["version"] < installed_version:
                 installed_manifest = metadata.get("manifest")
                 if installed_manifest:
                     return (
-                        validate_manifest(installed_manifest),
+                        self._validate_with_bundled_supplement(
+                            installed_manifest,
+                            bundled,
+                        ),
                         metadata.get("manifest_etag") or "",
                     )
                 raise TagAutocompleteValidationError(
@@ -710,11 +728,17 @@ class TagAutocompleteStore:
 
     async def _update_supplement_source(self, source, installed, now):
         target_path = self._source_path(SUPPLEMENT_SOURCE_ID)
+        same_source = (
+            isinstance(installed, dict)
+            and installed.get("repository") == source["repository"]
+            and installed.get("ref") == source["ref"]
+            and installed.get("path") == source["path"]
+        )
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        if isinstance(installed, dict) and installed.get("etag"):
+        if same_source and installed.get("etag"):
             headers["If-None-Match"] = installed["etag"]
         status, payload, response_headers = await self.fetcher(
             source["api_url"],
@@ -752,7 +776,7 @@ class TagAutocompleteStore:
             ) from error
         remote = _validate_github_file_metadata(remote_payload, source)
         if (
-            isinstance(installed, dict)
+            same_source
             and installed.get("blob_sha") == remote["blob_sha"]
             and target_path.is_file()
             and target_path.stat().st_size == remote["size_bytes"]

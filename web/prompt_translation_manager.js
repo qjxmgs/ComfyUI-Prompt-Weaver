@@ -47,11 +47,15 @@ export function translationManagerState(status = {}) {
         supplementTone = "warning";
         supplementState = "failed";
     } else if (status?.supplement_available) {
-        supplementTone = "success";
-        supplementState = "available";
+        supplementTone = supplementLicenseStatus === "user-directed" ? "warning" : "success";
+        supplementState = supplementLicenseStatus === "user-directed"
+            ? "available-local-use"
+            : "available";
     } else if (status?.supplement_enabled) {
         supplementTone = "neutral";
-        supplementState = "not-installed";
+        supplementState = supplementLicenseStatus === "user-directed"
+            ? "not-installed-local-use"
+            : "not-installed";
     }
 
     return {

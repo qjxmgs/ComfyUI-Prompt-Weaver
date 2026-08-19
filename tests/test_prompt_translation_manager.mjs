@@ -50,6 +50,29 @@ test("license-pending supplement stays disabled without turning the main diction
     assert.equal(state.supplementTone, "warning");
 });
 
+test("user-directed supplement is enabled for local download without claiming a license", () => {
+    const pending = translationManagerState({
+        available: true,
+        ready: true,
+        primary_translation_available: true,
+        supplement_enabled: true,
+        supplement_available: false,
+        supplement_license_status: "user-directed",
+    });
+    assert.equal(pending.supplementState, "not-installed-local-use");
+
+    const installed = translationManagerState({
+        available: true,
+        ready: true,
+        primary_translation_available: true,
+        supplement_enabled: true,
+        supplement_available: true,
+        supplement_license_status: "user-directed",
+    });
+    assert.equal(installed.supplementState, "available-local-use");
+    assert.equal(installed.supplementTone, "warning");
+});
+
 test("missing, partial failure, fatal failure, and updating states select the right actions", () => {
     assert.deepEqual(
         translationManagerState({}).summary,

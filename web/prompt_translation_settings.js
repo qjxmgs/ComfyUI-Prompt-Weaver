@@ -280,14 +280,18 @@ function renderPromptTranslationManager(manager) {
         "license-pending": t("Awaiting license"),
         failed: t("Update failed"),
         available: t("Installed"),
+        "available-local-use": t("Installed for local use"),
         "not-installed": t("Not installed"),
+        "not-installed-local-use": t("Ready for local download"),
         disabled: t("Disabled"),
     };
     const supplementDescriptions = {
         "license-pending": t("This source has not declared a data license, so it is shown for transparency but cannot be enabled or downloaded."),
         failed: state.supplementError,
         available: t("Only fills base-dictionary tags still missing from the primary translation layer."),
+        "available-local-use": t("Downloaded from the user-selected source for local missing-translation completion; the source has not declared a data license."),
         "not-installed": t("This approved supplement will be downloaded during the next manual update."),
+        "not-installed-local-use": t("The next manual update downloads tag.sqlite from the user-selected source and applies it only to missing local translations."),
         disabled: t("The optional missing-translation supplement is disabled by the source manifest."),
     };
     sources.append(translationManagerSourceCard({
