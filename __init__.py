@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -21,6 +23,8 @@ from .nodes import PromptWeaverPromptToggleGrid
 from .tag_autocomplete import (
     MAX_QUERY_LENGTH,
     MAX_RESOLVE_TAGS,
+    MAX_SQLITE_DATASET_BYTES,
+    TagAutocompleteCapacityError,
     TagAutocompleteError,
     TagAutocompleteStore,
     TagAutocompleteUnavailableError,
@@ -114,8 +118,50 @@ def _archive_error_response(error):
 
 
 def _tag_autocomplete_error_response(error):
-    status = 409 if isinstance(error, TagAutocompleteUnavailableError) else 400
+    if isinstance(error, TagAutocompleteCapacityError):
+        status = 413
+    elif isinstance(error, TagAutocompleteUnavailableError):
+        status = 409
+    else:
+        status = 400
     return web.json_response({"error": str(error)}, status=status)
+
+
+async def _stream_request_to_temporary_file(request, directory, maximum_bytes):
+    if request.content_length is not None and request.content_length > maximum_bytes:
+        raise TagAutocompleteCapacityError(
+            "local supplement upload exceeds the size limit"
+        )
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        prefix=".tag.sqlite.upload.",
+        suffix=".tmp",
+        dir=str(directory),
+    )
+    total = 0
+    try:
+        with os.fdopen(file_descriptor, "wb") as handle:
+            async for chunk in request.content.iter_chunked(64 * 1024):
+                total += len(chunk)
+                if total > maximum_bytes:
+                    raise TagAutocompleteCapacityError(
+                        "local supplement upload exceeds the size limit"
+                    )
+                handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if total <= 0:
+            raise TagAutocompleteValidationError(
+                "local supplement upload is empty"
+            )
+        return Path(temporary_path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _consume_background_task(task):
@@ -190,7 +236,11 @@ async def take_workflow(request):
 async def get_tag_autocomplete_status(request):
     try:
         locale = request.query.get("locale", "en")
-        return web.json_response(_tag_autocomplete_store(request).status(locale))
+        status = await asyncio.to_thread(
+            _tag_autocomplete_store(request).status,
+            locale,
+        )
+        return web.json_response(status)
     except TagAutocompleteError as error:
         return _tag_autocomplete_error_response(error)
 
@@ -213,6 +263,63 @@ async def update_tag_autocomplete(request):
         TagAutocompleteUnavailableError,
     ) as error:
         return _tag_autocomplete_error_response(error)
+
+
+@PromptServer.instance.routes.post(
+    "/prompt-weaver/tag-autocomplete/supplement/import"
+)
+async def import_tag_autocomplete_supplement(request):
+    store = _tag_autocomplete_store(request)
+    temporary_path = None
+    import_started = False
+    try:
+        store.begin_local_import()
+        import_started = True
+        temporary_path = await _stream_request_to_temporary_file(
+            request,
+            store.root,
+            MAX_SQLITE_DATASET_BYTES,
+        )
+        await asyncio.to_thread(
+            store.install_local_supplement,
+            temporary_path,
+        )
+        temporary_path = None
+        store.finish_local_import()
+        import_started = False
+        status = await asyncio.to_thread(store.status, "zh-CN")
+        return web.json_response(status)
+    except TagAutocompleteError as error:
+        return _tag_autocomplete_error_response(error)
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+        if import_started:
+            store.finish_local_import()
+
+
+@PromptServer.instance.routes.post(
+    "/prompt-weaver/tag-autocomplete/supplement/rescan"
+)
+async def rescan_tag_autocomplete_supplement(request):
+    try:
+        payload = await _request_json(request, 4096)
+        locale = payload.get("locale", "zh-CN")
+        store = _tag_autocomplete_store(request)
+        await asyncio.to_thread(store.rescan_local_supplement)
+        status = await asyncio.to_thread(store.status, locale)
+        return web.json_response(status)
+    except (
+        ArchiveValidationError,
+        ArchiveCapacityError,
+        TagAutocompleteError,
+    ) as error:
+        if isinstance(error, TagAutocompleteError):
+            return _tag_autocomplete_error_response(error)
+        return _archive_error_response(error)
 
 
 @PromptServer.instance.routes.get("/prompt-weaver/tag-autocomplete/search")

@@ -1939,6 +1939,13 @@
     text-decoration: underline;
 }
 
+.cpw-translation-manager__source-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 10px;
+}
+
 .cpw-translation-manager__notice {
     padding: 9px 11px;
 }
@@ -1974,6 +1981,12 @@
     border-color: var(--p-primary-color, #7c6df2);
     color: #fff;
     background: var(--p-primary-color, #6757d9);
+}
+
+.cpw-translation-manager__button--compact {
+    min-height: 28px;
+    padding: 4px 9px;
+    font-size: 11px;
 }
 
 .cpw-translation-manager__button:disabled {

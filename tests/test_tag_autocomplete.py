@@ -8,10 +8,13 @@ import tempfile
 import unittest
 
 from tag_autocomplete import (
+    LOCAL_SUPPLEMENT_DROP_IN_PATH,
     SUPPLEMENT_REPOSITORY,
     SUPPLEMENT_REF,
     SUPPLEMENT_REMOTE_PATH,
     TagAutocompleteStore,
+    TagAutocompleteCapacityError,
+    TagAutocompleteUnavailableError,
     TagAutocompleteValidationError,
     _validate_sqlite_dataset,
     normalize_locale,
@@ -404,6 +407,176 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
         unchanged = await self.store.update("zh-CN")
         self.assertEqual(len(self.file_calls), 1)
         self.assertEqual(unchanged["supplement_translation_count"], 1)
+
+    async def test_drop_in_sqlite_is_auto_detected_preferred_and_skips_remote_download(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_eyes", 0, "不应覆盖主翻译", 1_500_000),
+            ("blue_archive", 3, "蔚蓝档案", 300_000),
+            ("outside_dictionary", 0, "库外标签", 100),
+        ])
+        self.set_supplement_manifest(manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-local-drop-in",
+            supplement_payload=self.supplement_payload,
+        ))
+        local_path = self.root / "user" / "tag.sqlite"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(self.supplement_payload)
+
+        status = await self.store.update("zh-CN")
+
+        self.assertEqual(status["supplement_origin"], "local")
+        self.assertEqual(
+            status["supplement_drop_in_path"],
+            LOCAL_SUPPLEMENT_DROP_IN_PATH,
+        )
+        self.assertEqual(status["supplement_row_count"], 3)
+        self.assertEqual(len(status["supplement_file_sha256"]), 64)
+        self.assertTrue(status["supplement_file_modified_at"])
+        self.assertEqual(status["supplement_translation_count"], 1)
+        self.assertEqual(status["primary_translation_count"], 3)
+        self.assertEqual(status["translated_tag_count"], 4)
+        self.assertEqual(self.file_calls, [])
+        self.assertFalse(any(
+            url == self.manifest["sources"]["zh-CN-supplement"]["api_url"]
+            for url, _headers, _limit in self.calls
+        ))
+        self.assertEqual(
+            self.store.resolve(["blue eyes"], "zh-CN")[0]["translation"],
+            "蓝眼睛",
+        )
+        self.assertEqual(
+            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
+            "蔚蓝档案",
+        )
+        self.assertEqual(self.store.search("库外", "zh-CN", 20), [])
+
+    async def test_invalid_drop_in_file_warns_and_falls_back_to_downloaded_supplement(self):
+        self.supplement_payload = supplement_sqlite([
+            ("blue_archive", 3, "远程补充翻译", 300_000),
+        ])
+        self.set_supplement_manifest(manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-local-fallback",
+            supplement_payload=self.supplement_payload,
+        ))
+        await self.store.update("zh-CN")
+        (self.root / "user" / "tag.sqlite").write_bytes(b"broken")
+
+        status = self.store.status("zh-CN")
+
+        self.assertEqual(status["supplement_origin"], "downloaded")
+        self.assertTrue(status["supplement_available"])
+        self.assertIn("not a SQLite", status["supplement_local_error"])
+        self.assertEqual(
+            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
+            "远程补充翻译",
+        )
+
+    async def test_replacing_or_removing_drop_in_file_refreshes_active_cache(self):
+        first_payload = supplement_sqlite([
+            ("blue_archive", 3, "本地翻译一", 300_000),
+        ])
+        second_payload = supplement_sqlite([
+            ("blue_archive", 3, "本地翻译二（更新）", 300_000),
+        ])
+        self.supplement_payload = first_payload
+        self.set_supplement_manifest(manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-local-refresh",
+            supplement_payload=first_payload,
+        ))
+        local_path = self.root / "user" / "tag.sqlite"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(first_payload)
+        await self.store.update("zh-CN")
+        self.assertEqual(
+            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
+            "本地翻译一",
+        )
+
+        local_path.write_bytes(second_payload)
+        self.assertEqual(
+            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
+            "本地翻译二（更新）",
+        )
+        local_path.unlink()
+        status = self.store.status("zh-CN")
+        self.assertEqual(status["supplement_origin"], "")
+        self.assertEqual(
+            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
+            "",
+        )
+
+    async def test_local_import_is_atomic_validated_and_blocks_remote_update(self):
+        local_path = self.root / "user" / "tag.sqlite"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        original = supplement_sqlite([
+            ("blue_archive", 3, "原本地翻译", 300_000),
+        ])
+        self.set_supplement_manifest(manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-local-import",
+            supplement_payload=original,
+        ))
+        local_path.write_bytes(original)
+        valid_upload = self.root / "user" / ".valid-upload.tmp"
+        valid_upload.write_bytes(supplement_sqlite([
+            ("blue_archive", 3, "新本地翻译", 300_000),
+        ]))
+        self.store.begin_local_import()
+        try:
+            self.store.install_local_supplement(valid_upload)
+        finally:
+            self.store.finish_local_import()
+        self.assertFalse(valid_upload.exists())
+        self.assertEqual(self.store.status("zh-CN")["supplement_origin"], "local")
+
+        invalid_upload = self.root / "user" / ".invalid-upload.tmp"
+        invalid_upload.write_bytes(b"broken")
+        self.store.begin_local_import()
+        try:
+            with self.assertRaisesRegex(TagAutocompleteValidationError, "not a SQLite"):
+                self.store.install_local_supplement(invalid_upload)
+        finally:
+            self.store.finish_local_import()
+        self.assertNotEqual(local_path.read_bytes(), b"broken")
+        invalid_upload.unlink()
+
+        self.store.begin_local_import()
+        try:
+            with self.assertRaisesRegex(
+                TagAutocompleteUnavailableError,
+                "import is already running",
+            ):
+                self.store.start_update("zh-CN")
+        finally:
+            self.store.finish_local_import()
+
+    async def test_local_import_rejects_oversized_file_before_replacement(self):
+        local_path = self.root / "user" / "tag.sqlite"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        original = supplement_sqlite([
+            ("blue_archive", 3, "原本地翻译", 300_000),
+        ])
+        self.set_supplement_manifest(manifest(
+            self.base_payload,
+            self.zh_payload,
+            version="test-local-import-size",
+            supplement_payload=original,
+        ))
+        local_path.write_bytes(original)
+        oversized = self.root / "user" / ".oversized-upload.tmp"
+        with oversized.open("wb") as handle:
+            handle.truncate(64 * 1024 * 1024 + 1)
+        with self.assertRaises(TagAutocompleteCapacityError):
+            self.store.install_local_supplement(oversized)
+        self.assertEqual(local_path.read_bytes(), original)
+        oversized.unlink()
 
     async def test_failed_supplement_refresh_keeps_primary_and_last_good_database(self):
         self.supplement_payload = supplement_sqlite([

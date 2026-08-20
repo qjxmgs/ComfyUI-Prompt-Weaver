@@ -73,6 +73,41 @@ test("user-directed supplement is enabled for local download without claiming a 
     assert.equal(installed.supplementTone, "warning");
 });
 
+test("local supplement state exposes origin, validation details, and fallback warnings", () => {
+    const local = translationManagerState({
+        available: true,
+        ready: true,
+        primary_translation_available: true,
+        supplement_enabled: true,
+        supplement_available: true,
+        supplement_license_status: "user-directed",
+        supplement_origin: "local",
+        supplement_drop_in_path: "ComfyUI-Prompt-Weaver/tag-autocomplete/tag.sqlite",
+        supplement_file_sha256: "a".repeat(64),
+        supplement_row_count: 323_130,
+        supplement_file_modified_at: "2026-08-19T12:00:00Z",
+    });
+    assert.equal(local.supplementState, "available-local-file");
+    assert.equal(local.supplementOrigin, "local");
+    assert.equal(local.supplementRowCount, 323_130);
+    assert.equal(local.supplementFileSha256, "a".repeat(64));
+    assert.match(local.supplementDropInPath, /tag\.sqlite$/);
+
+    const fallback = translationManagerState({
+        available: true,
+        ready: true,
+        primary_translation_available: true,
+        supplement_enabled: true,
+        supplement_available: true,
+        supplement_origin: "downloaded",
+        supplement_local_error: "invalid SQLite",
+    });
+    assert.equal(fallback.summary, "warning");
+    assert.equal(fallback.supplementState, "available");
+    assert.equal(fallback.supplementTone, "warning");
+    assert.equal(fallback.supplementLocalError, "invalid SQLite");
+});
+
 test("missing, partial failure, fatal failure, and updating states select the right actions", () => {
     assert.deepEqual(
         translationManagerState({}).summary,
@@ -116,11 +151,23 @@ test("settings button and legacy command open the same singleton manager", async
     assert.match(source, /if \(activeTranslationManager\)/);
     assert.match(source, /translationProvider\.status\("zh-CN"/);
     assert.match(source, /translationProvider\.update\("zh-CN"\)/);
+    assert.match(source, /\/prompt-weaver\/tag-autocomplete\/supplement\/import/);
+    assert.match(source, /\/prompt-weaver\/tag-autocomplete\/supplement\/rescan/);
+    assert.match(source, /fileInput\.accept = "\.sqlite,application\/vnd\.sqlite3,application\/octet-stream"/);
+    assert.match(source, /Choose local tag\.sqlite…/);
+    assert.match(source, /Rescan local file/);
+    assert.match(source, /Copy path/);
+    assert.match(source, /activeSupplementOperation/);
+    assert.match(source, /translationProvider\.importSupplement\(file\)/);
+    assert.match(source, /translationProvider\.rescanSupplement\("zh-CN"\)/);
+    assert.match(source, /prompt_translation_manager\.js\?v=20260819-local-sqlite-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260819-local-sqlite-v1/);
     assert.match(source, /name:\s*"ComfyUIPromptWeaver\.TranslationSettings"/);
     assert.match(source, /manager\.controller\.abort\(\)/);
     assert.doesNotMatch(source, /translationProvider\.update\("zh-CN",\s*\{\s*signal/);
     assert.match(source, /activeUpdateOperation/);
     assert.match(css, /\.cpw-translation-manager__overlay/);
     assert.match(css, /\.cpw-translation-manager__summary--warning/);
+    assert.match(css, /\.cpw-translation-manager__source-actions/);
     assert.match(css, /@media \(max-width: 680px\)/);
 });

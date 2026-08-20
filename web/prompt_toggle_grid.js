@@ -549,7 +549,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260817-translation-manager-v2", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260819-local-sqlite-v1", import.meta.url).href;
     document.head.append(link);
 }
 

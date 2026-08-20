@@ -420,7 +420,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
     assert.match(source, /prompt_tag_autocomplete\.js\?v=20260819-escaped-grouping-v1/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260817-translation-manager-v2/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260819-local-sqlite-v1/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {

@@ -78,6 +78,8 @@ class PluginRegistrationTests(unittest.TestCase):
                 ("GET", "/prompt-weaver/workflow/{token}", "take_workflow"),
                 ("GET", "/prompt-weaver/tag-autocomplete/status", "get_tag_autocomplete_status"),
                 ("POST", "/prompt-weaver/tag-autocomplete/update", "update_tag_autocomplete"),
+                ("POST", "/prompt-weaver/tag-autocomplete/supplement/import", "import_tag_autocomplete_supplement"),
+                ("POST", "/prompt-weaver/tag-autocomplete/supplement/rescan", "rescan_tag_autocomplete_supplement"),
                 ("GET", "/prompt-weaver/tag-autocomplete/search", "search_tag_autocomplete"),
                 ("POST", "/prompt-weaver/tag-autocomplete/resolve", "resolve_tag_autocomplete"),
                 ("GET", "/prompt-weaver/prompt-grid-archives", "list_prompt_grid_archives"),

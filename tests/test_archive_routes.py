@@ -45,6 +45,15 @@ class _UserManager:
         return str(self.root / request.user / relative_path)
 
 
+class _Content:
+    def __init__(self, raw):
+        self.raw = raw
+
+    async def iter_chunked(self, size):
+        for offset in range(0, len(self.raw), size):
+            yield self.raw[offset:offset + size]
+
+
 class _Request:
     def __init__(self, payload=None, *, user="alice", match_info=None, query=None, raw=None):
         self.user = user
@@ -52,6 +61,7 @@ class _Request:
         self.query = query or {}
         self._raw = raw if raw is not None else json.dumps(payload).encode("utf-8")
         self.content_length = len(self._raw)
+        self.content = _Content(self._raw)
 
     async def read(self):
         return self._raw
@@ -417,6 +427,118 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.payload["results"][0]["tag"], "blue_eyes")
         self.assertIsNone(response.payload["results"][1])
         self.assertEqual(store.calls, [(["blue eyes", "blue"], "zh-CN")])
+
+    def test_local_supplement_import_streams_to_the_current_user_store(self):
+        class _FakeStore:
+            def __init__(self, root):
+                self.root = Path(root)
+                self.calls = []
+                self.importing = False
+
+            def begin_local_import(self):
+                self.importing = True
+                self.calls.append("begin")
+
+            def install_local_supplement(self, path):
+                self.calls.append(("install", Path(path).read_bytes()))
+                Path(path).unlink()
+
+            def finish_local_import(self):
+                self.importing = False
+                self.calls.append("finish")
+
+            def status(self, locale):
+                return {
+                    "locale": locale,
+                    "supplement_origin": "local",
+                    "supplement_importing": self.importing,
+                }
+
+        store = _FakeStore(Path(self.temporary.name) / "alice" / "tag-autocomplete")
+        with mock.patch.object(self.module, "_tag_autocomplete_store", return_value=store):
+            response = self.run_async(
+                self.module.import_tag_autocomplete_supplement(
+                    _Request(raw=b"SQLite test payload", user="alice")
+                )
+            )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["supplement_origin"], "local")
+        self.assertFalse(response.payload["supplement_importing"])
+        self.assertEqual(store.calls[0], "begin")
+        self.assertEqual(store.calls[1], ("install", b"SQLite test payload"))
+        self.assertEqual(store.calls[2], "finish")
+        self.assertEqual(list(store.root.glob("*.tmp")), [])
+
+    def test_local_supplement_import_reports_capacity_and_busy_conflicts(self):
+        class _CapacityStore:
+            def __init__(self, root):
+                self.root = Path(root)
+                self.finished = False
+
+            def begin_local_import(self):
+                pass
+
+            def finish_local_import(self):
+                self.finished = True
+
+        capacity_store = _CapacityStore(Path(self.temporary.name) / "capacity")
+        request = _Request(raw=b"x")
+        request.content_length = self.module.MAX_SQLITE_DATASET_BYTES + 1
+        with mock.patch.object(
+            self.module,
+            "_tag_autocomplete_store",
+            return_value=capacity_store,
+        ):
+            response = self.run_async(
+                self.module.import_tag_autocomplete_supplement(request)
+            )
+        self.assertEqual(response.status, 413)
+        self.assertTrue(capacity_store.finished)
+
+        unavailable_error = self.module.TagAutocompleteUnavailableError
+        busy_root = Path(self.temporary.name) / "busy"
+
+        class _BusyStore:
+            root = busy_root
+
+            def begin_local_import(self):
+                raise unavailable_error("busy")
+
+            def finish_local_import(self):
+                raise AssertionError("an import that did not start must not be finished")
+
+        with mock.patch.object(
+            self.module,
+            "_tag_autocomplete_store",
+            return_value=_BusyStore(),
+        ):
+            response = self.run_async(
+                self.module.import_tag_autocomplete_supplement(_Request(raw=b"x"))
+            )
+        self.assertEqual(response.status, 409)
+
+    def test_local_supplement_rescan_is_local_and_returns_status(self):
+        class _FakeStore:
+            def __init__(self):
+                self.calls = []
+
+            def rescan_local_supplement(self):
+                self.calls.append("rescan")
+
+            def status(self, locale):
+                self.calls.append(("status", locale))
+                return {"locale": locale, "supplement_origin": "local"}
+
+        store = _FakeStore()
+        with mock.patch.object(self.module, "_tag_autocomplete_store", return_value=store):
+            response = self.run_async(
+                self.module.rescan_tag_autocomplete_supplement(
+                    _Request({"locale": "zh-CN"})
+                )
+            )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["supplement_origin"], "local")
+        self.assertEqual(store.calls, ["rescan", ("status", "zh-CN")])
 
 
 if __name__ == "__main__":

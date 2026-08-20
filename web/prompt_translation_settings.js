@@ -12,7 +12,7 @@ import {
     TRANSLATION_UPDATE_TIMEOUT_MS,
     shortBlobSha,
     translationManagerState,
-} from "./prompt_translation_manager.js?v=20260817-settings-v2";
+} from "./prompt_translation_manager.js?v=20260819-local-sqlite-v1";
 
 const TRANSLATION_MANAGER_SETTING_ID = "PromptWeaver.Autocomplete.TranslationManager";
 const TRANSLATION_MANAGER_COMMAND_ID = "PromptWeaver.Autocomplete.UpdateDictionary";
@@ -21,6 +21,7 @@ const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssistant";
 const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
 const BASE_TAG_SOURCE_PAGE = "https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv";
 const PRIMARY_TRANSLATION_SOURCE_PAGE = "https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery";
+const MAX_LOCAL_SUPPLEMENT_BYTES = 64 * 1024 * 1024;
 
 class TranslationApiClient {
     constructor(apiClient) {
@@ -75,12 +76,37 @@ class TranslationApiClient {
         }
         throw new Error(t("Danbooru dictionary update timed out."));
     }
+
+    importSupplement(file) {
+        return this.fetchJson(
+            "/prompt-weaver/tag-autocomplete/supplement/import",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/octet-stream" },
+                body: file,
+            },
+            t("Local tag.sqlite import"),
+        );
+    }
+
+    rescanSupplement(locale = "zh-CN") {
+        return this.fetchJson(
+            "/prompt-weaver/tag-autocomplete/supplement/rescan",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ locale }),
+            },
+            t("Local tag.sqlite rescan"),
+        );
+    }
 }
 
 const translationProvider = new TranslationApiClient(api);
 
 let activeTranslationManager = null;
 let activeUpdateOperation = null;
+let activeSupplementOperation = null;
 let fallbackId = 0;
 
 function element(tagName, className, text) {
@@ -103,7 +129,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260817-translation-manager-v2",
+        "./prompt_toggle_grid.css?v=20260819-local-sqlite-v1",
         import.meta.url,
     ).href;
     document.head.append(link);
@@ -147,6 +173,7 @@ function translationManagerSourceCard({
     tone,
     details,
     sourcePage,
+    actions = [],
 }) {
     const card = element("article", "cpw-translation-manager__source");
     const header = element("div", "cpw-translation-manager__source-header");
@@ -172,6 +199,11 @@ function translationManagerSourceCard({
         link.rel = "noopener noreferrer";
         card.append(link);
     }
+    if (actions.length) {
+        const actionRow = element("div", "cpw-translation-manager__source-actions");
+        actionRow.append(...actions);
+        card.append(actionRow);
+    }
     return card;
 }
 
@@ -187,11 +219,53 @@ function translationManagerSummary(state) {
         "not-installed": t("Download the local dictionary and Simplified Chinese translations to get started."),
         updating: t("Downloading and validating prompt translation data…"),
         failed: state.error || t("Prompt translation data could not be installed."),
-        warning: state.error || state.supplementError
+        warning: state.error || state.supplementError || state.supplementLocalError
             || t("The local dictionary remains usable, but part of the translation data needs attention."),
         ready: t("Local prompt translations are ready. Prompt text stays on this device."),
     };
     return { label: labels[state.summary], description: descriptions[state.summary] };
+}
+
+function translationManagerActionButton(text, onClick, { disabled = false } = {}) {
+    const button = element(
+        "button",
+        "cpw-translation-manager__button cpw-translation-manager__button--compact",
+        text,
+    );
+    button.type = "button";
+    button.disabled = disabled;
+    button.addEventListener("click", onClick);
+    return button;
+}
+
+async function copyLocalSupplementPath(manager, path) {
+    if (!path) return;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(path);
+        } else {
+            const temporary = element("textarea");
+            temporary.value = path;
+            temporary.style.position = "fixed";
+            temporary.style.opacity = "0";
+            document.body.append(temporary);
+            temporary.select();
+            document.execCommand("copy");
+            temporary.remove();
+        }
+        if (manager === activeTranslationManager) {
+            manager.notice = { tone: "info", text: t("Local database path copied.") };
+            renderPromptTranslationManager(manager);
+        }
+    } catch (error) {
+        if (manager === activeTranslationManager) {
+            manager.notice = {
+                tone: "warning",
+                text: error instanceof Error ? error.message : String(error),
+            };
+            renderPromptTranslationManager(manager);
+        }
+    }
 }
 
 function renderPromptTranslationManager(manager) {
@@ -206,7 +280,14 @@ function renderPromptTranslationManager(manager) {
     );
     const summaryHeader = element("div", "cpw-translation-manager__summary-header");
     const heading = element("div", "cpw-translation-manager__summary-heading");
-    if (state.updating || manager.busy || activeUpdateOperation) {
+    const operationInProgress = Boolean(
+        state.updating
+        || state.supplementImporting
+        || manager.busy
+        || activeUpdateOperation
+        || activeSupplementOperation
+    );
+    if (operationInProgress) {
         heading.append(element("span", "cpw-translation-manager__spinner"));
     }
     heading.append(element("strong", "cpw-translation-manager__summary-title", summary.label));
@@ -281,6 +362,7 @@ function renderPromptTranslationManager(manager) {
         failed: t("Update failed"),
         available: t("Installed"),
         "available-local-use": t("Installed for local use"),
+        "available-local-file": t("Local file active"),
         "not-installed": t("Not installed"),
         "not-installed-local-use": t("Ready for local download"),
         disabled: t("Disabled"),
@@ -290,9 +372,35 @@ function renderPromptTranslationManager(manager) {
         failed: state.supplementError,
         available: t("Only fills base-dictionary tags still missing from the primary translation layer."),
         "available-local-use": t("Downloaded from the user-selected source for local missing-translation completion; the source has not declared a data license."),
+        "available-local-file": t("Using the validated tag.sqlite supplied in the current ComfyUI user directory."),
         "not-installed": t("This approved supplement will be downloaded during the next manual update."),
         "not-installed-local-use": t("The next manual update downloads tag.sqlite from the user-selected source and applies it only to missing local translations."),
         disabled: t("The optional missing-translation supplement is disabled by the source manifest."),
+    };
+    if (state.supplementLocalError && state.supplementAvailable) {
+        supplementDescriptions[state.supplementState] = t(
+            "The local tag.sqlite is invalid, so the last valid downloaded supplement remains active: {message}",
+            { message: state.supplementLocalError },
+        );
+    }
+    const chooseLocalButton = translationManagerActionButton(
+        t("Choose local tag.sqlite…"),
+        () => manager.fileInput.click(),
+        { disabled: operationInProgress || !state.supplementEnabled },
+    );
+    const rescanLocalButton = translationManagerActionButton(
+        t("Rescan local file"),
+        () => void rescanLocalSupplement(manager),
+        { disabled: operationInProgress },
+    );
+    const copyPathButton = translationManagerActionButton(
+        t("Copy path"),
+        () => void copyLocalSupplementPath(manager, state.supplementDropInPath),
+        { disabled: !state.supplementDropInPath },
+    );
+    const originLabels = {
+        local: t("Local file"),
+        downloaded: t("Downloaded"),
     };
     sources.append(translationManagerSourceCard({
         title: t("Missing-translation supplement"),
@@ -301,10 +409,15 @@ function renderPromptTranslationManager(manager) {
         tone: state.supplementTone,
         details: [
             [t("Added translations"), formatNumber(state.supplementTranslationCount)],
-            [t("Blob SHA"), shortBlobSha(state.supplementBlobSha) || "—"],
-            [t("Updated"), translationManagerDate(state.supplementLastUpdatedAt)],
+            [t("Active source"), originLabels[state.supplementOrigin] || t("None")],
+            [t("Drop-in path"), state.supplementDropInPath || "—"],
+            [t("Database rows"), formatNumber(state.supplementRowCount)],
+            [t("File SHA-256"), shortBlobSha(state.supplementFileSha256) || "—"],
+            [t("Blob SHA"), shortBlobSha(state.supplementBlobSha)],
+            [t("File modified"), translationManagerDate(state.supplementFileModifiedAt)],
         ],
         sourcePage: state.supplementSourcePage,
+        actions: [chooseLocalButton, rescanLocalButton, copyPathButton],
     }));
     manager.content.append(sources);
 
@@ -316,7 +429,7 @@ function renderPromptTranslationManager(manager) {
         ));
     }
 
-    const updateInProgress = state.updating || manager.busy || Boolean(activeUpdateOperation);
+    const updateInProgress = operationInProgress;
     manager.updateButton.disabled = updateInProgress;
     manager.updateButton.textContent = updateInProgress
         ? t("Updating…")
@@ -407,6 +520,9 @@ async function loadPromptTranslationManagerStatus(manager) {
 
 function beginPromptTranslationUpdate() {
     if (activeUpdateOperation) return activeUpdateOperation;
+    if (activeSupplementOperation) {
+        return Promise.reject(new Error(t("A local database operation is already running.")));
+    }
     translationProvider.invalidateStatus("zh-CN");
     activeUpdateOperation = translationProvider.update("zh-CN")
         .then((status) => {
@@ -457,8 +573,118 @@ function beginPromptTranslationUpdate() {
     return activeUpdateOperation;
 }
 
+function beginLocalSupplementOperation(operation, successTitle) {
+    if (activeSupplementOperation) return activeSupplementOperation;
+    if (activeUpdateOperation) {
+        return Promise.reject(new Error(t("A prompt translation update is already running.")));
+    }
+    activeSupplementOperation = Promise.resolve()
+        .then(operation)
+        .then((status) => {
+            dispatchAutocompleteSettingsChanged();
+            showAutocompleteToast(
+                "success",
+                successTitle,
+                t("{translated} of {total} local tags have Chinese translations.", {
+                    translated: formatNumber(status?.translated_tag_count),
+                    total: formatNumber(status?.row_count),
+                }),
+            );
+            return status;
+        })
+        .catch((error) => {
+            showAutocompleteToast(
+                "error",
+                t("Local tag.sqlite operation failed"),
+                error instanceof Error ? error.message : String(error),
+            );
+            throw error;
+        })
+        .finally(() => {
+            activeSupplementOperation = null;
+            if (activeTranslationManager) {
+                void loadPromptTranslationManagerStatus(activeTranslationManager);
+            }
+        });
+    return activeSupplementOperation;
+}
+
+async function importLocalSupplement(manager, file) {
+    if (!manager || !file || manager.busy || activeUpdateOperation || activeSupplementOperation) return;
+    if (file.size <= 0 || file.size > MAX_LOCAL_SUPPLEMENT_BYTES) {
+        manager.notice = {
+            tone: "error",
+            text: t("tag.sqlite must be larger than 0 bytes and no larger than 64 MiB."),
+        };
+        renderPromptTranslationManager(manager);
+        return;
+    }
+    manager.busy = true;
+    manager.notice = {
+        tone: "info",
+        text: t("Uploading and validating local tag.sqlite…"),
+    };
+    renderPromptTranslationManager(manager);
+    try {
+        const status = await beginLocalSupplementOperation(
+            () => translationProvider.importSupplement(file),
+            t("Local tag.sqlite imported"),
+        );
+        if (manager !== activeTranslationManager) return;
+        manager.status = status;
+        manager.notice = {
+            tone: "info",
+            text: t("The validated local database is now the active supplement."),
+        };
+    } catch (error) {
+        if (manager !== activeTranslationManager) return;
+        manager.notice = {
+            tone: "error",
+            text: error instanceof Error ? error.message : String(error),
+        };
+    } finally {
+        if (manager === activeTranslationManager) {
+            manager.busy = false;
+            renderPromptTranslationManager(manager);
+        }
+    }
+}
+
+async function rescanLocalSupplement(manager) {
+    if (!manager || manager.busy || activeUpdateOperation || activeSupplementOperation) return;
+    manager.busy = true;
+    manager.notice = { tone: "info", text: t("Rescanning local tag.sqlite…") };
+    renderPromptTranslationManager(manager);
+    try {
+        const status = await beginLocalSupplementOperation(
+            () => translationProvider.rescanSupplement("zh-CN"),
+            t("Local tag.sqlite rescanned"),
+        );
+        if (manager !== activeTranslationManager) return;
+        manager.status = status;
+        manager.notice = null;
+    } catch (error) {
+        if (manager !== activeTranslationManager) return;
+        manager.notice = {
+            tone: "error",
+            text: error instanceof Error ? error.message : String(error),
+        };
+    } finally {
+        if (manager === activeTranslationManager) {
+            manager.busy = false;
+            renderPromptTranslationManager(manager);
+        }
+    }
+}
+
 async function updatePromptTranslations(manager) {
-    if (!manager || manager.busy || manager.status?.updating || activeUpdateOperation) return;
+    if (
+        !manager
+        || manager.busy
+        || manager.status?.updating
+        || activeUpdateOperation
+        || activeSupplementOperation
+    ) return;
     manager.busy = true;
     manager.notice = null;
     manager.status = { ...manager.status, updating: true };
@@ -569,8 +795,12 @@ export function openPromptTranslationManager(opener = document.activeElement) {
     );
     closeButton.type = "button";
     updateButton.type = "button";
+    const fileInput = element("input", "cpw-translation-manager__file-input");
+    fileInput.type = "file";
+    fileInput.accept = ".sqlite,application/vnd.sqlite3,application/octet-stream";
+    fileInput.hidden = true;
     footer.append(closeButton, updateButton);
-    dialog.append(header, content, footer);
+    dialog.append(header, content, footer, fileInput);
     overlay.append(dialog);
 
     const manager = {
@@ -581,6 +811,7 @@ export function openPromptTranslationManager(opener = document.activeElement) {
         content,
         closeButton,
         updateButton,
+        fileInput,
         opener: opener?.focus ? opener : null,
         controller: new AbortController(),
         status: {},
@@ -601,6 +832,11 @@ export function openPromptTranslationManager(opener = document.activeElement) {
     closeIcon.addEventListener("click", closePromptTranslationManager);
     closeButton.addEventListener("click", closePromptTranslationManager);
     updateButton.addEventListener("click", () => void updatePromptTranslations(manager));
+    fileInput.addEventListener("change", () => {
+        const [file] = fileInput.files || [];
+        fileInput.value = "";
+        if (file) void importLocalSupplement(manager, file);
+    });
     overlay.addEventListener("pointerdown", (event) => {
         if (event.target === overlay) closePromptTranslationManager();
     });

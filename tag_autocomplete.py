@@ -53,6 +53,10 @@ SUPPLEMENT_QUERY_BATCH_SIZE = 500
 SUPPLEMENT_REPOSITORY = "ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
 SUPPLEMENT_REF = "main"
 SUPPLEMENT_REMOTE_PATH = "tag.sqlite"
+LOCAL_SUPPLEMENT_FILENAME = "tag.sqlite"
+LOCAL_SUPPLEMENT_DROP_IN_PATH = (
+    "ComfyUI-Prompt-Weaver/tag-autocomplete/tag.sqlite"
+)
 
 
 class TagAutocompleteError(Exception):
@@ -64,6 +68,10 @@ class TagAutocompleteValidationError(TagAutocompleteError):
 
 
 class TagAutocompleteUnavailableError(TagAutocompleteError):
+    pass
+
+
+class TagAutocompleteCapacityError(TagAutocompleteError):
     pass
 
 
@@ -139,6 +147,22 @@ def _ordered_subsequence_score_compact(field, query):
 
 def _iso_timestamp(now):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError as error:
+        raise TagAutocompleteValidationError(
+            f"could not hash local supplement source: {error}"
+        ) from error
+    return digest.hexdigest()
 
 
 def _atomic_write_json(path, payload):
@@ -529,7 +553,18 @@ class TagAutocompleteStore:
         self.now = now or time.time
         self._update_task = None
         self._update_lock = asyncio.Lock()
+        self._local_import_lock = threading.Lock()
         self._cache_lock = threading.RLock()
+        self._local_supplement_cache_key = None
+        self._local_supplement_cache = {
+            "exists": False,
+            "valid": False,
+            "error": "",
+            "sha256": "",
+            "rows": 0,
+            "size_bytes": 0,
+            "modified_at": "",
+        }
         self._search_cache_key = None
         self._search_records = []
         self._resolve_cache_key = None
@@ -569,6 +604,191 @@ class TagAutocompleteStore:
 
     def _source_path(self, source_id):
         return self.root / EXPECTED_SOURCE_FILES[source_id]
+
+    def _local_supplement_path(self):
+        return self.root / LOCAL_SUPPLEMENT_FILENAME
+
+    def _reset_data_caches(self):
+        with self._cache_lock:
+            self._search_cache_key = None
+            self._search_records = []
+            self._resolve_cache_key = None
+            self._resolve_index = {}
+            self._coverage_cache_key = None
+
+    def _invalidate_local_supplement(self):
+        with self._cache_lock:
+            self._local_supplement_cache_key = None
+            self._local_supplement_cache = {
+                "exists": False,
+                "valid": False,
+                "error": "",
+                "sha256": "",
+                "rows": 0,
+                "size_bytes": 0,
+                "modified_at": "",
+            }
+        self._reset_data_caches()
+
+    def _local_supplement_state(self, *, force=False):
+        path = self._local_supplement_path()
+        try:
+            stat = path.stat()
+            cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
+        except FileNotFoundError:
+            cache_key = (str(path), 0, 0)
+            state = {
+                "exists": False,
+                "valid": False,
+                "error": "",
+                "sha256": "",
+                "rows": 0,
+                "size_bytes": 0,
+                "modified_at": "",
+            }
+            with self._cache_lock:
+                changed = cache_key != self._local_supplement_cache_key
+                self._local_supplement_cache_key = cache_key
+                self._local_supplement_cache = state
+            if changed:
+                self._reset_data_caches()
+            return dict(state)
+        except OSError as error:
+            cache_key = (str(path), "error", str(error))
+            state = {
+                "exists": True,
+                "valid": False,
+                "error": f"could not inspect local supplement source: {error}",
+                "sha256": "",
+                "rows": 0,
+                "size_bytes": 0,
+                "modified_at": "",
+            }
+            with self._cache_lock:
+                changed = cache_key != self._local_supplement_cache_key
+                self._local_supplement_cache_key = cache_key
+                self._local_supplement_cache = state
+            if changed:
+                self._reset_data_caches()
+            return dict(state)
+
+        with self._cache_lock:
+            if not force and cache_key == self._local_supplement_cache_key:
+                return dict(self._local_supplement_cache)
+
+        state = {
+            "exists": True,
+            "valid": False,
+            "error": "",
+            "sha256": "",
+            "rows": 0,
+            "size_bytes": stat.st_size,
+            "modified_at": _iso_timestamp(stat.st_mtime),
+        }
+        try:
+            source = self._supplement_config({})
+            if not source or not source.get("enabled"):
+                raise TagAutocompleteValidationError(
+                    "local supplement source is disabled by the bundled source policy"
+                )
+            if stat.st_size <= 0 or stat.st_size > source["max_size_bytes"]:
+                raise TagAutocompleteCapacityError(
+                    "local supplement source is empty or exceeds the size limit"
+                )
+            state["rows"] = _validate_sqlite_dataset(path, source)
+            state["sha256"] = _sha256_file(path)
+            state["valid"] = True
+        except TagAutocompleteError as error:
+            state["error"] = str(error)
+
+        with self._cache_lock:
+            changed = cache_key != self._local_supplement_cache_key
+            self._local_supplement_cache_key = cache_key
+            self._local_supplement_cache = state
+        if changed or force:
+            self._reset_data_caches()
+        return dict(state)
+
+    def _active_supplement(self, metadata=None):
+        if metadata is None:
+            try:
+                metadata = self._read_metadata()
+            except TagAutocompleteError:
+                metadata = {"sources": {}}
+        source = self._supplement_config(metadata)
+        enabled = bool(source and source.get("enabled"))
+        local = self._local_supplement_state()
+        if enabled and local["valid"]:
+            return {
+                "available": True,
+                "origin": "local",
+                "path": self._local_supplement_path(),
+                "local": local,
+            }
+        if enabled and self._source_is_available(metadata, SUPPLEMENT_SOURCE_ID):
+            return {
+                "available": True,
+                "origin": "downloaded",
+                "path": self._source_path(SUPPLEMENT_SOURCE_ID),
+                "local": local,
+            }
+        return {
+            "available": False,
+            "origin": "",
+            "path": None,
+            "local": local,
+        }
+
+    def begin_local_import(self):
+        if self._update_task and not self._update_task.done():
+            raise TagAutocompleteUnavailableError(
+                "a prompt translation update is already running"
+            )
+        if not self._local_import_lock.acquire(blocking=False):
+            raise TagAutocompleteUnavailableError(
+                "a local supplement import is already running"
+            )
+
+    def finish_local_import(self):
+        if self._local_import_lock.locked():
+            self._local_import_lock.release()
+
+    def install_local_supplement(self, temporary_path):
+        source = self._supplement_config({})
+        if not source or not source.get("enabled"):
+            raise TagAutocompleteValidationError(
+                "local supplement source is disabled by the bundled source policy"
+            )
+        temporary_path = Path(temporary_path)
+        try:
+            size_bytes = temporary_path.stat().st_size
+        except OSError as error:
+            raise TagAutocompleteValidationError(
+                f"could not inspect uploaded local supplement source: {error}"
+            ) from error
+        if size_bytes <= 0:
+            raise TagAutocompleteValidationError("local supplement upload is empty")
+        if size_bytes > source["max_size_bytes"]:
+            raise TagAutocompleteCapacityError(
+                "local supplement upload exceeds the size limit"
+            )
+        _validate_sqlite_dataset(temporary_path, source)
+        self.root.mkdir(parents=True, exist_ok=True)
+        os.replace(temporary_path, self._local_supplement_path())
+        self._invalidate_local_supplement()
+        return self._local_supplement_state(force=True)
+
+    def rescan_local_supplement(self):
+        if self._update_task and not self._update_task.done():
+            raise TagAutocompleteUnavailableError(
+                "a prompt translation update is already running"
+            )
+        if self._local_import_lock.locked():
+            raise TagAutocompleteUnavailableError(
+                "a local supplement import is already running"
+            )
+        self._invalidate_local_supplement()
+        return self._local_supplement_state(force=True)
 
     def _source_is_available(self, metadata, source_id):
         source_metadata = metadata.get("sources", {}).get(source_id)
@@ -616,7 +836,9 @@ class TagAutocompleteStore:
         primary_translation_available = self._source_is_available(metadata, "zh-CN")
         supplement_config = self._supplement_config(metadata)
         supplement_enabled = bool(supplement_config and supplement_config.get("enabled"))
-        supplement_available = self._source_is_available(metadata, SUPPLEMENT_SOURCE_ID)
+        active_supplement = self._active_supplement(metadata)
+        supplement_available = active_supplement["available"]
+        local_supplement = active_supplement["local"]
         translation_available = primary_translation_available or (
             supplement_enabled and supplement_available
         )
@@ -637,6 +859,32 @@ class TagAutocompleteStore:
         source_metadata = metadata.get("sources", {}).get("base")
         if isinstance(source_metadata, dict) and isinstance(source_metadata.get("rows"), int):
             row_count = source_metadata["rows"]
+        supplement_translation_count = (
+            max(
+                0,
+                coverage["translated_tag_count"]
+                - coverage["primary_translation_count"],
+            )
+            if supplement_available else 0
+        )
+        if active_supplement["origin"] == "local":
+            supplement_file_sha256 = local_supplement["sha256"]
+            supplement_row_count = local_supplement["rows"]
+            supplement_file_modified_at = local_supplement["modified_at"]
+            supplement_last_updated_at = local_supplement["modified_at"]
+        else:
+            supplement_file_sha256 = str(supplement_metadata.get("sha256") or "")
+            supplement_row_count = supplement_metadata.get("rows", 0)
+            supplement_file_modified_at = str(
+                supplement_metadata.get("downloaded_at") or ""
+            )
+            supplement_last_updated_at = str(
+                supplement_metadata.get("downloaded_at") or ""
+            )
+        effective_supplement_error = (
+            "" if active_supplement["origin"] == "local"
+            else self._last_supplement_error
+        )
         return {
             "available": base_available,
             "ready": base_available and (not translation_required or translation_available),
@@ -649,14 +897,24 @@ class TagAutocompleteStore:
             "last_checked_at": metadata.get("last_checked_at") or "",
             "last_updated_at": metadata.get("last_updated_at") or "",
             "updating": bool(self._update_task and not self._update_task.done()),
-            "error": self._last_error or self._last_supplement_error,
+            "error": self._last_error or effective_supplement_error,
             "content_scope": "full",
             "supplement_enabled": supplement_enabled,
             "supplement_available": supplement_available,
-            "supplement_translation_count": supplement_metadata.get("translations", 0),
-            "supplement_blob_sha": supplement_metadata.get("blob_sha") or "",
-            "supplement_last_updated_at": supplement_metadata.get("downloaded_at") or "",
-            "supplement_error": self._last_supplement_error,
+            "supplement_translation_count": supplement_translation_count,
+            "supplement_blob_sha": (
+                supplement_metadata.get("blob_sha") or ""
+                if active_supplement["origin"] == "downloaded" else ""
+            ),
+            "supplement_last_updated_at": supplement_last_updated_at,
+            "supplement_error": effective_supplement_error,
+            "supplement_origin": active_supplement["origin"],
+            "supplement_drop_in_path": LOCAL_SUPPLEMENT_DROP_IN_PATH,
+            "supplement_local_error": local_supplement["error"],
+            "supplement_file_sha256": supplement_file_sha256,
+            "supplement_row_count": supplement_row_count,
+            "supplement_file_modified_at": supplement_file_modified_at,
+            "supplement_importing": self._local_import_lock.locked(),
             "supplement_license_status": (
                 str(supplement_config.get("license_status") or "")
                 if supplement_config else ""
@@ -671,6 +929,10 @@ class TagAutocompleteStore:
     def start_update(self, locale="en", *, force=True):
         if self._update_task and not self._update_task.done():
             return self._update_task
+        if self._local_import_lock.locked():
+            raise TagAutocompleteUnavailableError(
+                "a local supplement import is already running"
+            )
         self._update_task = asyncio.create_task(self.update(locale, force=force))
         return self._update_task
 
@@ -934,21 +1196,23 @@ class TagAutocompleteStore:
                     and supplement_source
                     and supplement_source.get("enabled")
                 ):
-                    try:
-                        supplement_changed, supplement_metadata = (
-                            await self._update_supplement_source(
-                                supplement_source,
-                                next_sources.get(SUPPLEMENT_SOURCE_ID),
-                                now,
+                    local_supplement = self._local_supplement_state()
+                    if not local_supplement["valid"]:
+                        try:
+                            supplement_changed, supplement_metadata = (
+                                await self._update_supplement_source(
+                                    supplement_source,
+                                    next_sources.get(SUPPLEMENT_SOURCE_ID),
+                                    now,
+                                )
                             )
-                        )
-                        next_sources[SUPPLEMENT_SOURCE_ID] = supplement_metadata
-                        changed = changed or supplement_changed
-                        supplement_metadata["translations"] = (
-                            self._count_supplement_translations()
-                        )
-                    except Exception as error:
-                        self._last_supplement_error = str(error)
+                            next_sources[SUPPLEMENT_SOURCE_ID] = supplement_metadata
+                            changed = changed or supplement_changed
+                            supplement_metadata["translations"] = (
+                                self._count_supplement_translations()
+                            )
+                        except Exception as error:
+                            self._last_supplement_error = str(error)
 
                 metadata = {
                     **metadata,
@@ -964,12 +1228,7 @@ class TagAutocompleteStore:
                 }
                 self._write_metadata(metadata)
                 if changed:
-                    with self._cache_lock:
-                        self._search_cache_key = None
-                        self._search_records = []
-                        self._resolve_cache_key = None
-                        self._resolve_index = {}
-                        self._coverage_cache_key = None
+                    self._reset_data_caches()
                 return self.status(normalized_locale)
             except Exception as error:
                 self._last_error = str(error)
@@ -995,7 +1254,9 @@ class TagAutocompleteStore:
         if locale == "zh-CN":
             paths.append(self._source_path("zh-CN"))
         if supplement_enabled:
-            paths.append(self._source_path(SUPPLEMENT_SOURCE_ID))
+            active_supplement = self._active_supplement()
+            if active_supplement["path"] is not None:
+                paths.append(active_supplement["path"])
         result = [locale, supplement_enabled]
         for path in paths:
             if path.is_file():
@@ -1066,8 +1327,9 @@ class TagAutocompleteStore:
     def _query_supplement_translations(self, tags):
         if not tags:
             return {}
-        path = self._source_path(SUPPLEMENT_SOURCE_ID)
-        if not path.is_file():
+        active_supplement = self._active_supplement()
+        path = active_supplement["path"]
+        if path is None or not path.is_file():
             return {}
         try:
             connection = sqlite3.connect(
