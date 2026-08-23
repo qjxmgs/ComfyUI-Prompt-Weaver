@@ -21,7 +21,7 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260812-item-context-menu-pink";
+} from "./prompt_grid_archives.js?v=20260823-prefix-prompt-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -76,7 +76,7 @@ const DEFAULT_CARD_COUNT = 4;
 const MIN_COLUMNS = 1;
 const MAX_COLUMNS = 6;
 const DEFAULT_NODE_SIZE = [600, 420];
-const NODE_CHROME_HEIGHT = 74;
+const NODE_CHROME_HEIGHT = 94;
 const MIN_WIDGET_HEIGHT = 160;
 const MIN_NODE_HEIGHT = MIN_WIDGET_HEIGHT + NODE_CHROME_HEIGHT;
 const HEIGHT_FIT_TOLERANCE = 2;

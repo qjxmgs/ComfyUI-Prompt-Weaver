@@ -46,6 +46,8 @@ The built-in default archive is identified by its stable ID and is displayed as 
 
 Add **Prompt Toggle Grid** from the `Prompt Weaver/Prompt` node category. The node outputs a standard `STRING`, which can connect directly to `CLIPTextEncode.text` or any other string input.
 
+The optional `prefix_prompt` string input can receive trigger words or any other prompt text. When connected, its value is placed before the enabled grid cards with an automatic `, ` separator. The combined result is deduplicated case-insensitively at top-level English/Chinese commas and line breaks, preserving the first spelling and keeping separators inside brackets, quotes, and escaped content intact. Leaving the input disconnected or empty preserves the existing grid-only output.
+
 Each card contains:
 
 - An enable switch.

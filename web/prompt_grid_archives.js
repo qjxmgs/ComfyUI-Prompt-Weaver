@@ -19,7 +19,7 @@ export const PROMPT_GRID_ITEM_COLORS = Object.freeze({
     black: Object.freeze({ label: "Black", hex: "#212121" }),
 });
 const MIN_ARCHIVE_NODE_WIDTH = 600;
-const MIN_ARCHIVE_NODE_HEIGHT = 234;
+const MIN_ARCHIVE_NODE_HEIGHT = 254;
 const MAX_ARCHIVE_NODE_SIZE = 10_000;
 
 export function normalizePromptGridItemColor(value) {

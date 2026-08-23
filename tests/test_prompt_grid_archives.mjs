@@ -107,6 +107,10 @@ test("node size is canonical archive metadata and never enters execution config"
         width: 600,
         height: 10_000,
     });
+    assert.deepEqual(normalizeArchiveNodeSize({ width: 20, height: 20 }), {
+        width: 600,
+        height: 254,
+    });
     assert.deepEqual(configFromArchiveSnapshot(saved), {
         version: 1,
         columns: 2,

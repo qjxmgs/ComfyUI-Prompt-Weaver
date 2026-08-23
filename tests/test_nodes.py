@@ -15,14 +15,18 @@ SPEC.loader.exec_module(NODES)
 
 
 class PromptWeaverPromptToggleGridTests(unittest.TestCase):
-    def combine(self, config):
-        return NODES.PromptWeaverPromptToggleGrid().combine(config)[0]
+    def combine(self, config, prefix_prompt=""):
+        return NODES.PromptWeaverPromptToggleGrid().combine(config, prefix_prompt)[0]
 
     def test_node_contract_and_default_config(self):
         input_spec = NODES.PromptWeaverPromptToggleGrid.INPUT_TYPES()
         widget_type, options = input_spec["required"]["config"]
+        prefix_type, prefix_options = input_spec["optional"]["prefix_prompt"]
 
         self.assertEqual(widget_type, "PROMPT_WEAVER_PROMPT_GRID")
+        self.assertEqual(prefix_type, "STRING")
+        self.assertEqual(prefix_options["default"], "")
+        self.assertTrue(prefix_options["forceInput"])
         self.assertEqual(NODES.PromptWeaverPromptToggleGrid.RETURN_TYPES, ("STRING",))
         self.assertEqual(NODES.PromptWeaverPromptToggleGrid.RETURN_NAMES, ("prompt",))
         self.assertEqual(NODES.PromptWeaverPromptToggleGrid.FUNCTION, "combine")
@@ -46,6 +50,73 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
         self.assertTrue(all(item["enabled"] for item in default["items"]))
         self.assertTrue(all(item["prompt"] == "" for item in default["items"]))
         self.assertEqual(self.combine(options["default"]), "")
+
+    def test_prefix_is_optional_and_precedes_enabled_grid_prompts(self):
+        config = json.dumps(
+            {
+                "items": [
+                    {"enabled": True, "prompt": "best quality"},
+                    {"enabled": False, "prompt": "disabled"},
+                    {"enabled": True, "prompt": "blue eyes"},
+                ]
+            }
+        )
+
+        self.assertEqual(
+            self.combine(config, "trigger one, trigger two"),
+            "trigger one, trigger two, best quality, blue eyes",
+        )
+
+    def test_prefix_and_grid_tokens_are_deduplicated_case_insensitively(self):
+        config = json.dumps(
+            {
+                "items": [
+                    {
+                        "enabled": True,
+                        "prompt": "masterpiece, best quality, (red, blue:1.2)",
+                    },
+                    {
+                        "enabled": True,
+                        "prompt": 'BLUE EYES, "quoted, value", escaped\\, comma',
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(
+            self.combine(
+                config,
+                'MasterPiece, blue eyes, MASTERPIECE, "quoted, value"',
+            ),
+            'MasterPiece, blue eyes, "quoted, value", best quality, '
+            '(red, blue:1.2), escaped\\, comma',
+        )
+
+    def test_prefix_can_be_the_only_output(self):
+        config = json.dumps({"items": []})
+        self.assertEqual(
+            self.combine(config, "trigger one，trigger two\ntrigger one"),
+            "trigger one, trigger two",
+        )
+
+    def test_separator_only_prefix_preserves_legacy_grid_formatting(self):
+        config = json.dumps(
+            {
+                "items": [
+                    {"enabled": True, "prompt": "写实人像,\n柔和光线"},
+                    {"enabled": True, "prompt": "，，夜景，，"},
+                ]
+            },
+            ensure_ascii=False,
+        )
+        self.assertEqual(
+            self.combine(config, " ,，\r\n "),
+            "写实人像,\n柔和光线, ，，夜景，，",
+        )
+
+    def test_prefix_must_be_a_string(self):
+        with self.assertRaisesRegex(ValueError, "'prefix_prompt' must be a string"):
+            self.combine(json.dumps({"items": []}), None)
 
     def test_empty_config_returns_empty_output(self):
         for config in ("", "   \n\t  "):

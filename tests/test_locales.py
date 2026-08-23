@@ -19,6 +19,7 @@ class LocaleResourceTests(unittest.TestCase):
             self.assertIn("Prompt", main["nodeCategories"])
             self.assertTrue(node["display_name"])
             self.assertTrue(node["description"])
+            self.assertIn("prefix_prompt", node["inputs"])
             self.assertIn("config", node["inputs"])
             self.assertIn("0", node["outputs"])
 

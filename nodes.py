@@ -86,7 +86,119 @@ def _clean_prompt(prompt):
     return prompt.strip().lstrip(",").rstrip(",").strip()
 
 
-def combine_prompt_grid_config(config):
+def _is_word_character(character):
+    return bool(character) and (character.isalnum() or character == "_")
+
+
+def _quote_end_at(text, index):
+    character = text[index]
+    if character == '"':
+        return '"'
+    if character == "“":
+        return "”"
+    if character == "‘":
+        return "’"
+    if character == "'" and not (
+        index > 0
+        and index + 1 < len(text)
+        and _is_word_character(text[index - 1])
+        and _is_word_character(text[index + 1])
+    ):
+        return "'"
+    return None
+
+
+def _is_contraction_apostrophe(text, index):
+    return (
+        text[index] in ("'", "’")
+        and index > 0
+        and index + 1 < len(text)
+        and _is_word_character(text[index - 1])
+        and _is_word_character(text[index + 1])
+    )
+
+
+def _split_prompt_tokens(value):
+    text = value if isinstance(value, str) else ""
+    tokens = []
+    current = []
+    parenthesis_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    quote_end = None
+    escaped = False
+
+    def flush():
+        token = "".join(current).strip()
+        if token:
+            tokens.append(token)
+        current.clear()
+
+    for index, character in enumerate(text):
+        if escaped:
+            current.append(character)
+            escaped = False
+            continue
+        if character == "\\":
+            current.append(character)
+            escaped = True
+            continue
+        if quote_end:
+            current.append(character)
+            if character == quote_end and not _is_contraction_apostrophe(text, index):
+                quote_end = None
+            continue
+
+        next_quote_end = _quote_end_at(text, index)
+        if next_quote_end:
+            quote_end = next_quote_end
+            current.append(character)
+            continue
+
+        if (
+            character in (",", "，", "\n", "\r")
+            and parenthesis_depth == 0
+            and bracket_depth == 0
+            and brace_depth == 0
+        ):
+            flush()
+            continue
+
+        current.append(character)
+        if character == "(":
+            parenthesis_depth += 1
+        elif character == ")" and parenthesis_depth > 0:
+            parenthesis_depth -= 1
+        elif character == "[":
+            bracket_depth += 1
+        elif character == "]" and bracket_depth > 0:
+            bracket_depth -= 1
+        elif character == "{":
+            brace_depth += 1
+        elif character == "}" and brace_depth > 0:
+            brace_depth -= 1
+
+    flush()
+    return tokens
+
+
+def _deduplicated_prompt(parts):
+    result = []
+    seen = set()
+    for part in parts:
+        for token in _split_prompt_tokens(part):
+            key = token.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(token)
+    return ", ".join(result)
+
+
+def combine_prompt_grid_config(config, prefix_prompt=""):
+    if not isinstance(prefix_prompt, str):
+        raise _config_error("'prefix_prompt' must be a string")
+
     prompts = []
     for enabled, prompt in _parse_config(config):
         if not enabled:
@@ -94,7 +206,13 @@ def combine_prompt_grid_config(config):
         cleaned = _clean_prompt(prompt)
         if cleaned:
             prompts.append(cleaned)
-    return ", ".join(prompts)
+
+    # Preserve the exact legacy grid-only output when no usable prefix is
+    # supplied. Once a prefix participates, normalize both sources with the
+    # same top-level token rules as the prompt editor and keep the first copy.
+    if not _split_prompt_tokens(prefix_prompt):
+        return ", ".join(prompts)
+    return _deduplicated_prompt([prefix_prompt, *prompts])
 
 
 class PromptWeaverPromptToggleGrid:
@@ -106,6 +224,16 @@ class PromptWeaverPromptToggleGrid:
                     CONFIG_WIDGET_TYPE,
                     {"default": DEFAULT_CONFIG},
                 )
+            },
+            "optional": {
+                "prefix_prompt": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "forceInput": True,
+                        "tooltip": "Optional text prepended to enabled prompt cards; duplicates are removed.",
+                    },
+                )
             }
         }
 
@@ -113,7 +241,9 @@ class PromptWeaverPromptToggleGrid:
     RETURN_NAMES = ("prompt",)
     FUNCTION = "combine"
     CATEGORY = "Prompt Weaver/Prompt"
-    DESCRIPTION = "Combine enabled prompt cards into one comma-separated prompt."
+    DESCRIPTION = (
+        "Prepend optional prompt text, then combine enabled prompt cards and remove duplicates."
+    )
 
-    def combine(self, config):
-        return (combine_prompt_grid_config(config),)
+    def combine(self, config, prefix_prompt=""):
+        return (combine_prompt_grid_config(config, prefix_prompt),)
