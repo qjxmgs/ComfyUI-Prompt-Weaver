@@ -57,7 +57,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260819-escaped-grouping-v1";
+} from "./prompt_tag_autocomplete.js?v=20260823-popup-controls-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -549,7 +549,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260819-local-sqlite-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260823-popup-close-v2", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -3382,6 +3382,8 @@ function createPromptGridWidget(node, inputName, inputData) {
                         getLocale,
                         getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                         getExistingPrompt: () => freeTextArea?.value || "",
+                        popupHorizontalInset: 10,
+                        suppressInitialFocusSearch: true,
                     },
                 );
                 if (focusFreeText) {

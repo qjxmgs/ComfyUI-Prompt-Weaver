@@ -58,7 +58,7 @@ test("external autocomplete refresh only targets the focused input", async () =>
     assert.match(source, /this\.handleSettings = \(\) => this\.refreshForExternalChange\(\)/);
     assert.match(source, /if \(!autocompleteInputOwnsFocus\(this\.input\)\) \{[\s\S]*this\.close\(\)/);
     assert.match(source, /refreshLocale\(\) \{[\s\S]*this\.refreshForExternalChange\(\)/);
-    assert.match(source, /this\.handleBlur = \(\) => \{\s*this\.cancelPending\(\)/);
+    assert.match(source, /this\.handleBlur = \(event\) => \{\s*this\.cancelPending\(\)/);
     assert.match(source, /schedule\(\{ immediate = false \} = \{\}\) \{[\s\S]*autocompleteInputOwnsFocus\(this\.input\)/);
     assert.match(source, /abortController\.signal\.aborted[\s\S]*!autocompleteInputOwnsFocus\(this\.input\)/);
 });
@@ -224,11 +224,35 @@ test("free-mode popup placement uses the caret line instead of the textarea bott
         viewportWidth: 1280,
         viewportHeight: 720,
         popupScrollHeight: 240,
+        horizontalInset: 10,
     });
     assert.equal(position.openAbove, false);
     assert.equal(position.top, 178);
-    assert.equal(position.left, 20);
-    assert.equal(position.width, 600);
+    assert.equal(position.left, 30);
+    assert.equal(position.width, 580);
+});
+
+test("free mode suppresses its initial focus search and autocomplete exposes a close control", async () => {
+    const controllerSource = await readFile(
+        new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
+        "utf8",
+    );
+    const gridSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(gridSource, /popupHorizontalInset: 10/);
+    assert.match(gridSource, /suppressInitialFocusSearch: true/);
+    assert.match(controllerSource, /if \(this\.suppressNextFocusSearch\) \{[\s\S]*this\.close\(\)/);
+    assert.match(controllerSource, /cpw-tag-autocomplete__close/);
+    assert.match(controllerSource, /this\.closeButton\.addEventListener\("click", this\.handleCloseClick\)/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete__close\s*\{[\s\S]*top: 3px;[\s\S]*right: 3px;/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete__close::before,[\s\S]*top: 50%;[\s\S]*left: 50%;/);
+    assert.match(styleSource, /translate\(-50%, -50%\) rotate\(45deg\)/);
 });
 
 test("autocomplete defaults to twenty results", () => {
@@ -419,8 +443,8 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260819-escaped-grouping-v1/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260819-local-sqlite-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260823-popup-controls-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260823-popup-close-v2/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {

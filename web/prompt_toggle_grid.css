@@ -70,8 +70,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    overflow: auto;
-    overscroll-behavior: contain;
+    overflow: hidden;
     padding: 5px;
     border: 1px solid var(--border-color, #4b4d52);
     border-radius: 8px;
@@ -84,6 +83,72 @@
 
 .cpw-tag-autocomplete[hidden] {
     display: none;
+}
+
+.cpw-tag-autocomplete__results {
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 2px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.cpw-tag-autocomplete__results > :first-child {
+    padding-right: 38px;
+}
+
+.cpw-tag-autocomplete__close {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    display: block;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: #e53935;
+    font-size: 0;
+    line-height: 0;
+    cursor: pointer;
+}
+
+.cpw-tag-autocomplete__close::before,
+.cpw-tag-autocomplete__close::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 13px;
+    height: 3px;
+    border-radius: 999px;
+    background: #fff;
+    content: "";
+    pointer-events: none;
+}
+
+.cpw-tag-autocomplete__close::before {
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.cpw-tag-autocomplete__close::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.cpw-tag-autocomplete__close:hover,
+.cpw-tag-autocomplete__close:focus-visible {
+    outline: 2px solid color-mix(in srgb, #ff8a80 76%, transparent);
+    outline-offset: 1px;
+    background: #ff4d4f;
+}
+
+.cpw-tag-autocomplete__close:active {
+    outline: 0;
+    background: #c62828;
 }
 
 .cpw-tag-autocomplete__option {

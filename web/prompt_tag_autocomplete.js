@@ -729,15 +729,18 @@ export function resolveAutocompletePopupPosition({
     viewportWidth,
     viewportHeight,
     popupScrollHeight = 240,
+    horizontalInset = 0,
     margin = 8,
     gap = 4,
 }) {
+    const safeHorizontalInset = Math.max(0, Number(horizontalInset) || 0);
+    const inputWidth = Math.max(0, inputRect.width - safeHorizontalInset * 2);
     const width = Math.max(
         0,
-        Math.min(Math.max(inputRect.width, 420), viewportWidth - margin * 2),
+        Math.min(Math.max(inputWidth, 420), viewportWidth - margin * 2),
     );
     const left = Math.min(
-        Math.max(margin, inputRect.left),
+        Math.max(margin, inputRect.left + safeHorizontalInset),
         Math.max(margin, viewportWidth - margin - width),
     );
     const preferredHeight = Math.min(320, popupScrollHeight || 240);
@@ -766,6 +769,8 @@ export class PromptAutocompleteController {
         debounceMs = DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS,
         limit = DEFAULT_AUTOCOMPLETE_LIMIT,
         popupParent = document.body,
+        popupHorizontalInset = 0,
+        suppressInitialFocusSearch = false,
     } = {}) {
         this.input = input;
         this.provider = provider;
@@ -781,11 +786,20 @@ export class PromptAutocompleteController {
         this.debounceMs = debounceMs;
         this.limit = limit;
         this.popupParent = popupParent;
+        this.popupHorizontalInset = Math.max(0, Number(popupHorizontalInset) || 0);
+        this.suppressNextFocusSearch = Boolean(suppressInitialFocusSearch);
         this.popup = createElement("div", "cpw-tag-autocomplete");
         this.popup.id = `cpw-tag-autocomplete-${Math.random().toString(36).slice(2)}`;
-        this.popup.setAttribute("role", "listbox");
-        this.popup.setAttribute("aria-label", t("Prompt tag matches"));
+        this.resultsContainer = createElement("div", "cpw-tag-autocomplete__results");
+        this.resultsContainer.id = `${this.popup.id}-results`;
+        this.resultsContainer.setAttribute("role", "listbox");
+        this.resultsContainer.setAttribute("aria-label", t("Prompt tag matches"));
+        this.closeButton = createElement("button", "cpw-tag-autocomplete__close", "×");
+        this.closeButton.type = "button";
+        this.closeButton.title = t("Close");
+        this.closeButton.setAttribute("aria-label", t("Close"));
         this.popup.hidden = true;
+        this.popup.append(this.resultsContainer, this.closeButton);
         this.popupParent.append(this.popup);
         this.results = [];
         this.resultButtons = [];
@@ -802,7 +816,7 @@ export class PromptAutocompleteController {
 
         input.setAttribute("role", "combobox");
         input.setAttribute("aria-autocomplete", "list");
-        input.setAttribute("aria-controls", this.popup.id);
+        input.setAttribute("aria-controls", this.resultsContainer.id);
         input.setAttribute("aria-expanded", "false");
 
         this.handleInput = () => {
@@ -818,25 +832,51 @@ export class PromptAutocompleteController {
             this.composing = false;
             this.schedule();
         };
-        this.handleBlur = () => {
+        this.handleBlur = (event) => {
             this.cancelPending();
             clearTimeout(this.blurTimer);
+            if (event.relatedTarget === this.closeButton) return;
             this.blurTimer = setTimeout(() => this.close(), 100);
         };
-        this.handleFocus = () => this.schedule();
+        this.handleFocus = () => {
+            if (this.suppressNextFocusSearch) {
+                this.suppressNextFocusSearch = false;
+                this.close();
+                return;
+            }
+            this.schedule();
+        };
         this.handleCaretMove = () => this.position();
         this.handleViewport = () => this.position();
         this.handleSettings = () => this.refreshForExternalChange();
         this.handlePopupWheel = (event) => event.stopPropagation();
+        this.handleClosePointerDown = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        };
+        this.handleCloseClick = (event) => {
+            this.handleClosePointerDown(event);
+            const restoreInputFocus = document.activeElement === this.closeButton;
+            this.cancelPending();
+            this.sequence += 1;
+            this.close();
+            if (restoreInputFocus && !this.destroyed) {
+                this.suppressNextFocusSearch = true;
+                this.input.focus({ preventScroll: true });
+            }
+        };
         this.handleGlobalKeyDown = (event) => {
             if (
                 event.key !== "Escape"
                 || this.popup.hidden
-                || document.activeElement !== this.input
+                || (
+                    document.activeElement !== this.input
+                    && document.activeElement !== this.closeButton
+                )
             ) return;
             event.preventDefault();
             event.stopImmediatePropagation();
-            this.close();
+            this.handleCloseClick(event);
         };
 
         input.addEventListener("input", this.handleInput);
@@ -853,6 +893,9 @@ export class PromptAutocompleteController {
         document.addEventListener("scroll", this.handleViewport, true);
         globalThis.addEventListener(AUTOCOMPLETE_SETTINGS_EVENT, this.handleSettings);
         this.popup.addEventListener("wheel", this.handlePopupWheel, { passive: true });
+        this.closeButton.addEventListener("pointerdown", this.handleClosePointerDown);
+        this.closeButton.addEventListener("mousedown", this.handleClosePointerDown);
+        this.closeButton.addEventListener("click", this.handleCloseClick);
     }
 
     cancelPending() {
@@ -888,7 +931,9 @@ export class PromptAutocompleteController {
 
     refreshLocale() {
         if (this.destroyed) return;
-        this.popup.setAttribute("aria-label", t("Prompt tag matches"));
+        this.resultsContainer.setAttribute("aria-label", t("Prompt tag matches"));
+        this.closeButton.title = t("Close");
+        this.closeButton.setAttribute("aria-label", t("Close"));
         this.refreshForExternalChange();
     }
 
@@ -938,7 +983,7 @@ export class PromptAutocompleteController {
     }
 
     render() {
-        this.popup.replaceChildren();
+        this.resultsContainer.replaceChildren();
         this.resultButtons = [];
         const existing = promptPresenceKeys(this.getExistingPrompt());
         this.results.forEach((record, index) => {
@@ -979,7 +1024,7 @@ export class PromptAutocompleteController {
                 keepInputFocused(event);
                 this.select(index);
             });
-            this.popup.append(option);
+            this.resultsContainer.append(option);
             this.resultButtons.push(option);
         });
 
@@ -1005,10 +1050,10 @@ export class PromptAutocompleteController {
                     });
                 }
             });
-            this.popup.append(action);
+            this.resultsContainer.append(action);
         }
 
-        const visible = this.popup.childElementCount > 0;
+        const visible = this.resultsContainer.childElementCount > 0;
         this.popup.hidden = !visible;
         this.input.setAttribute("aria-expanded", String(visible));
         this.input.removeAttribute("aria-activedescendant");
@@ -1026,7 +1071,8 @@ export class PromptAutocompleteController {
             anchorRect,
             viewportWidth,
             viewportHeight,
-            popupScrollHeight: this.popup.scrollHeight,
+            popupScrollHeight: this.resultsContainer.scrollHeight + 10,
+            horizontalInset: this.popupHorizontalInset,
         });
         this.popup.style.width = `${position.width}px`;
         this.popup.style.left = `${position.left}px`;
@@ -1090,6 +1136,8 @@ export class PromptAutocompleteController {
         if (event.key === "Escape" && !this.popup.hidden) {
             event.preventDefault();
             event.stopImmediatePropagation();
+            this.cancelPending();
+            this.sequence += 1;
             this.close();
         }
     }
@@ -1123,7 +1171,7 @@ export class PromptAutocompleteController {
         this.resultButtons = [];
         this.activeIndex = -1;
         this.popup.hidden = true;
-        this.popup.replaceChildren();
+        this.resultsContainer.replaceChildren();
         this.input.setAttribute("aria-expanded", "false");
         this.input.removeAttribute("aria-activedescendant");
     }
@@ -1147,6 +1195,9 @@ export class PromptAutocompleteController {
         document.removeEventListener("scroll", this.handleViewport, true);
         globalThis.removeEventListener(AUTOCOMPLETE_SETTINGS_EVENT, this.handleSettings);
         this.popup.removeEventListener("wheel", this.handlePopupWheel);
+        this.closeButton.removeEventListener("pointerdown", this.handleClosePointerDown);
+        this.closeButton.removeEventListener("mousedown", this.handleClosePointerDown);
+        this.closeButton.removeEventListener("click", this.handleCloseClick);
         this.popup.remove();
     }
 }

@@ -129,7 +129,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260819-local-sqlite-v1",
+        "./prompt_toggle_grid.css?v=20260823-popup-close-v2",
         import.meta.url,
     ).href;
     document.head.append(link);
