@@ -18,6 +18,7 @@ const TRANSLATION_MANAGER_SETTING_ID = "PromptWeaver.Autocomplete.TranslationMan
 const TRANSLATION_MANAGER_COMMAND_ID = "PromptWeaver.Autocomplete.UpdateDictionary";
 const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
 const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssistant";
+const AUTOCOMPLETE_LIMIT_SETTING_ID = "PromptWeaver.Autocomplete.MaxResults";
 const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
 const BASE_TAG_SOURCE_PAGE = "https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv";
 const PRIMARY_TRANSLATION_SOURCE_PAGE = "https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery";
@@ -891,6 +892,22 @@ app.registerExtension({
             category: ["Prompt Weaver", "Autocomplete", "Prompt Assistant"],
             type: "boolean",
             defaultValue: true,
+            onChange: dispatchAutocompleteSettingsChanged,
+        },
+        {
+            id: AUTOCOMPLETE_LIMIT_SETTING_ID,
+            name: t("Maximum autocomplete suggestions"),
+            tooltip: t("Choose how many prompt suggestions can be shown (1–100)."),
+            category: ["Prompt Weaver", "Autocomplete", "Maximum autocomplete suggestions"],
+            type: "number",
+            defaultValue: 30,
+            attrs: {
+                min: 1,
+                max: 100,
+                step: 1,
+                showButtons: true,
+                useGrouping: false,
+            },
             onChange: dispatchAutocompleteSettingsChanged,
         },
         {

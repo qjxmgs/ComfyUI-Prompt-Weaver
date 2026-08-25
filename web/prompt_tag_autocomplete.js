@@ -5,13 +5,16 @@ import {
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260819-escaped-grouping-v1";
+} from "./prompt_assistant_tags.js?v=20260825-configurable-limit-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
 export const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssistant";
+export const AUTOCOMPLETE_LIMIT_SETTING_ID = "PromptWeaver.Autocomplete.MaxResults";
 export const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
-export const DEFAULT_AUTOCOMPLETE_LIMIT = 20;
+export const DEFAULT_AUTOCOMPLETE_LIMIT = 30;
+export const MIN_AUTOCOMPLETE_LIMIT = 1;
+export const MAX_AUTOCOMPLETE_LIMIT = 100;
 export const DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS = 120;
 export const DANBOORU_UPDATE_POLL_MS = 500;
 export const DANBOORU_UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -96,6 +99,21 @@ export function autocompleteInputOwnsFocus(
     activeElement = globalThis.document?.activeElement,
 ) {
     return Boolean(input && activeElement === input);
+}
+
+
+export function normalizeAutocompleteLimit(value, fallback = DEFAULT_AUTOCOMPLETE_LIMIT) {
+    const fallbackNumber = Number(fallback);
+    const safeFallback = Number.isFinite(fallbackNumber)
+        ? Math.min(MAX_AUTOCOMPLETE_LIMIT, Math.max(MIN_AUTOCOMPLETE_LIMIT, Math.round(fallbackNumber)))
+        : DEFAULT_AUTOCOMPLETE_LIMIT;
+    if (value === undefined || value === null || value === "") return safeFallback;
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return safeFallback;
+    return Math.min(
+        MAX_AUTOCOMPLETE_LIMIT,
+        Math.max(MIN_AUTOCOMPLETE_LIMIT, Math.round(numericValue)),
+    );
 }
 
 
@@ -768,6 +786,7 @@ export class PromptAutocompleteController {
         onSelect,
         debounceMs = DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS,
         limit = DEFAULT_AUTOCOMPLETE_LIMIT,
+        getLimit,
         popupParent = document.body,
         popupHorizontalInset = 0,
         suppressInitialFocusSearch = false,
@@ -784,7 +803,8 @@ export class PromptAutocompleteController {
         this.getExistingPrompt = getExistingPrompt;
         this.onSelect = typeof onSelect === "function" ? onSelect : null;
         this.debounceMs = debounceMs;
-        this.limit = limit;
+        this.limit = normalizeAutocompleteLimit(limit);
+        this.getLimit = typeof getLimit === "function" ? getLimit : () => this.limit;
         this.popupParent = popupParent;
         this.popupHorizontalInset = Math.max(0, Number(popupHorizontalInset) || 0);
         this.suppressNextFocusSearch = Boolean(suppressInitialFocusSearch);
@@ -959,7 +979,7 @@ export class PromptAutocompleteController {
             const response = await this.provider.search(
                 query,
                 this.getLocale(),
-                this.limit,
+                normalizeAutocompleteLimit(this.getLimit(), this.limit),
                 { signal: abortController.signal },
             );
             if (

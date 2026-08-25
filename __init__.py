@@ -21,6 +21,7 @@ from .archive_store import (
 )
 from .nodes import PromptWeaverPromptToggleGrid
 from .tag_autocomplete import (
+    DEFAULT_RESULT_LIMIT,
     MAX_QUERY_LENGTH,
     MAX_RESOLVE_TAGS,
     MAX_SQLITE_DATASET_BYTES,
@@ -326,7 +327,7 @@ async def rescan_tag_autocomplete_supplement(request):
 async def search_tag_autocomplete(request):
     query = request.query.get("q", "")
     locale = request.query.get("locale", "en")
-    limit = request.query.get("limit", "20")
+    limit = request.query.get("limit", str(DEFAULT_RESULT_LIMIT))
     if len(query) > MAX_QUERY_LENGTH:
         return _tag_autocomplete_error_response(
             TagAutocompleteValidationError("tag autocomplete query is too long")

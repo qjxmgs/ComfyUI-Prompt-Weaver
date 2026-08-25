@@ -173,7 +173,7 @@ test("ranks exact before prefix before substring and applies a stable result lim
         { name: "超级杰作", value: "super masterpiece", aliases: ["超级杰作"] },
         { name: "杰作风格", value: "masterpiece style", aliases: ["杰作风格"] },
         { name: "杰作", value: "masterpiece", aliases: ["杰作"] },
-        ...Array.from({ length: 20 }, (_value, index) => ({
+        ...Array.from({ length: 35 }, (_value, index) => ({
             name: `测试标签 ${index}`,
             value: `test tag ${index}`,
             aliases: [`测试标签 ${index}`],
@@ -184,9 +184,9 @@ test("ranks exact before prefix before substring and applies a stable result lim
         ["杰作", "杰作风格", "超级杰作"],
     );
     const limited = searchPromptAssistantTags(records, "test");
-    assert.equal(limited.length, 20);
+    assert.equal(limited.length, 30);
     assert.equal(limited[0].value, "test tag 0");
-    assert.equal(limited[19].value, "test tag 19");
+    assert.equal(limited[29].value, "test tag 29");
 });
 
 test("keyboard suggestion navigation starts unselected and wraps", () => {

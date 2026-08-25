@@ -391,7 +391,7 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.payload["locale"], "zh-CN")
         self.assertEqual(store.calls, ["zh-CN"])
 
-    def test_tag_autocomplete_search_route_defaults_to_twenty_results(self):
+    def test_tag_autocomplete_search_route_defaults_to_thirty_results(self):
         class _FakeStore:
             def __init__(self):
                 self.calls = []
@@ -407,7 +407,7 @@ class ArchiveRouteTests(unittest.TestCase):
             ))
         self.assertEqual(response.status, 200)
         self.assertEqual(response.payload, {"results": []})
-        self.assertEqual(store.calls, [("bl", "en", "20")])
+        self.assertEqual(store.calls, [("bl", "en", "30")])
 
     def test_tag_autocomplete_resolve_route_preserves_batch_and_locale(self):
         class _FakeStore:

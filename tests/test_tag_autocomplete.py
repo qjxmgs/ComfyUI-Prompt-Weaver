@@ -277,18 +277,21 @@ class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
             ["卡琳（蔚蓝档案）", "卡琳（兔女郎）（蔚蓝档案）"],
         )
 
-    async def test_search_defaults_to_twenty_results(self):
+    async def test_search_defaults_to_thirty_results(self):
         self.base_payload = base_csv([
             (f"test_tag_{index:02d}", 0, 10_000 - index, "")
-            for index in range(25)
+            for index in range(35)
         ])
-        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-20-limit")
+        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-30-limit")
         await self.store.update("en")
 
         results = self.store.search("test", "en")
-        self.assertEqual(len(results), 20)
+        self.assertEqual(len(results), 30)
         self.assertEqual(results[0]["tag"], "test_tag_00")
-        self.assertEqual(results[-1]["tag"], "test_tag_19")
+        self.assertEqual(results[-1]["tag"], "test_tag_29")
+        self.assertEqual(len(self.store.search("test", "en", 100)), 35)
+        with self.assertRaises(TagAutocompleteValidationError):
+            self.store.search("test", "en", 101)
 
     async def test_character_skip_fuzzy_matching_ranks_after_contiguous_matches(self):
         self.base_payload = base_csv([

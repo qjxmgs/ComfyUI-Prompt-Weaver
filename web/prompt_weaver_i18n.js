@@ -214,6 +214,8 @@ const CHINESE_MESSAGES = Object.freeze({
     "Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local.": "使用 Prompt-Weaver 本地 Danbooru CSV 词库，输入内容不会发送到网络。",
     "Enable Prompt Assistant autocomplete": "启用 Prompt Assistant 联想",
     "Uses tag CSV files exposed by an installed ComfyUI-Prompt-Assistant plugin.": "使用已安装 ComfyUI-Prompt-Assistant 插件提供的标签 CSV。",
+    "Maximum autocomplete suggestions": "最大联想数量",
+    "Choose how many prompt suggestions can be shown (1–100).": "设置提示词联想最多显示多少条（1–100）。",
     "Update Danbooru Dictionary": "更新 Danbooru 词库",
     "Danbooru Dictionary": "Danbooru 词库",
     "Checking for Danbooru dictionary updates…": "正在检查 Danbooru 词库更新…",

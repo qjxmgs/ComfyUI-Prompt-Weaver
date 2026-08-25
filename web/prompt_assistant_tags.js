@@ -1,7 +1,7 @@
 import { t } from "./prompt_weaver_i18n.js";
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
-const DEFAULT_RESULT_LIMIT = 20;
+const DEFAULT_RESULT_LIMIT = 30;
 const EXTENSION_MODULE_PATTERN = /^\/extensions\/([^/]+)\/modules\/tag\.js$/i;
 const PROMPT_ASSISTANT_FOLDER_PATTERN = /prompt[-_]?assistant/i;
 const HAN_CHARACTER_PATTERN = /\p{Script=Han}/u;

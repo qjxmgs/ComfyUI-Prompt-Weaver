@@ -17,12 +17,15 @@ const moduleSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_weaver_i18n.js", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260819-escaped-grouping-v1", assistantUrl);
+    .replace("./prompt_assistant_tags.js?v=20260825-configurable-limit-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
+    AUTOCOMPLETE_LIMIT_SETTING_ID,
     DANBOORU_UPDATE_POLL_MS,
     DANBOORU_UPDATE_TIMEOUT_MS,
     DEFAULT_AUTOCOMPLETE_LIMIT,
+    MAX_AUTOCOMPLETE_LIMIT,
+    MIN_AUTOCOMPLETE_LIMIT,
     DanbooruTagProvider,
     PromptAssistantTagProvider,
     PromptTagAutocompleteProvider,
@@ -32,6 +35,7 @@ const {
     autocompleteTranslationText,
     formatAutocompleteCount,
     mergeAutocompleteResults,
+    normalizeAutocompleteLimit,
     normalizeAutocompleteInsertionKey,
     promptTokenHasHanText,
     promptTokenLookupText,
@@ -255,16 +259,24 @@ test("free mode suppresses its initial focus search and autocomplete exposes a c
     assert.match(styleSource, /translate\(-50%, -50%\) rotate\(45deg\)/);
 });
 
-test("autocomplete defaults to twenty results", () => {
-    const records = Array.from({ length: 25 }, (_value, index) => ({
+test("autocomplete defaults to thirty results and normalizes configured limits", () => {
+    const records = Array.from({ length: 35 }, (_value, index) => ({
         source: "danbooru",
         tag: `test_${index}`,
         insertText: `test ${index}`,
         matchRank: 1,
         postCount: 25 - index,
     }));
-    assert.equal(DEFAULT_AUTOCOMPLETE_LIMIT, 20);
-    assert.equal(mergeAutocompleteResults([records]).length, 20);
+    assert.equal(AUTOCOMPLETE_LIMIT_SETTING_ID, "PromptWeaver.Autocomplete.MaxResults");
+    assert.equal(DEFAULT_AUTOCOMPLETE_LIMIT, 30);
+    assert.equal(MIN_AUTOCOMPLETE_LIMIT, 1);
+    assert.equal(MAX_AUTOCOMPLETE_LIMIT, 100);
+    assert.equal(normalizeAutocompleteLimit(undefined), 30);
+    assert.equal(normalizeAutocompleteLimit("12"), 12);
+    assert.equal(normalizeAutocompleteLimit(0), 1);
+    assert.equal(normalizeAutocompleteLimit(101), 100);
+    assert.equal(normalizeAutocompleteLimit("invalid"), 30);
+    assert.equal(mergeAutocompleteResults([records]).length, 30);
 });
 
 test("Danbooru provider keeps status local, maps rows, and starts updates", async () => {
@@ -440,10 +452,15 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /new PromptAutocompleteController\(\s*freeTextArea,/);
     assert.match(settingsSource, /id:\s*DANBOORU_SETTING_ID/);
     assert.match(settingsSource, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
+    assert.match(settingsSource, /id:\s*AUTOCOMPLETE_LIMIT_SETTING_ID/);
+    assert.match(settingsSource, /type:\s*"number"/);
+    assert.match(settingsSource, /defaultValue:\s*30/);
+    assert.match(settingsSource, /min:\s*1,[\s\S]*max:\s*100,[\s\S]*step:\s*1/);
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260823-popup-controls-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-configurable-limit-v2/);
+    assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
     assert.match(source, /prompt_toggle_grid\.css\?v=20260823-popup-close-v2/);
 });
 

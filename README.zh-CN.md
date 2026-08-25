@@ -62,7 +62,7 @@ git pull --ff-only origin master
 
 卡片 Prompt 输入框、“+”添加框和自由模式共用双源提示词联想：**Danbooru** 来源使用 Prompt-Weaver 自管本地 CSV；**Prompt Assistant** 来源读取本机已安装 [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant) 暴露的全部 CSV。两个来源默认同时开启，并可在 ComfyUI 设置中独立关闭。候选依次按完整相等、开头匹配、连续子串和字符跳跃匹配排序。字符跳跃会忽略空格、下划线和连字符，并优先首次命中位置更靠前、跳过字符更少、候选更短的结果；其余同级结果由 Prompt Assistant 优先，Danbooru 再按使用量降序。最终写入内容会跨来源去重。
 
-输入中文 1 个字或拉丁字符 2 个后开始普通匹配，字符跳跃匹配分别从中文 2 个字或拉丁字符 3 个开始，最多显示 20 项。两个来源统一显示英文提示词及下方中文释义、分类、来源和使用量；无中文释义时显示 `—`，Prompt Assistant 没有可靠使用量时保留空白。选中 Danbooru 候选后固定写入规范英文 tag，并把下划线转换为空格。浮层会根据空间向上或向下展开；上下方向键移动高亮，只有存在高亮项时 Enter/Tab 才会选中，`Esc` 关闭。中文 IME 组合期间不会查询或抢占按键。卡片与自由模式只替换光标所在片段，保留分隔符、括号、引号、转义及权重后缀。
+输入中文 1 个字或拉丁字符 2 个后开始普通匹配，字符跳跃匹配分别从中文 2 个字或拉丁字符 3 个开始。设置页可将最大联想数量配置为 1–100，默认显示 30 项。两个来源统一显示英文提示词及下方中文释义、分类、来源和使用量；无中文释义时显示 `—`，Prompt Assistant 没有可靠使用量时保留空白。选中 Danbooru 候选后固定写入规范英文 tag，并把下划线转换为空格。浮层会根据空间向上或向下展开；上下方向键移动高亮，只有存在高亮项时 Enter/Tab 才会选中，`Esc` 关闭。中文 IME 组合期间不会查询或抢占按键。卡片与自由模式只替换光标所在片段，保留分隔符、括号、引号、转义及权重后缀。
 
 Danbooru 词库不随插件打包。首次输入达到联想条件时，浮层提供明确的下载按钮；平时输入内容不会发送给 Danbooru 或其他远程搜索 API。数据按 ComfyUI 用户保存在 `ComfyUI-Prompt-Weaver/tag-autocomplete/`。插件不会自动联网检查更新；可在“设置 → Prompt Weaver → 提示词翻译”点击“管理提示词翻译…”，或使用菜单“Prompt Weaver → 管理提示词翻译…”，查看本地标签数、中文覆盖率、三层数据源状态及更新时间。打开面板和查看状态只读取本地文件，只有点击“检查并更新”才访问远程数据源。下载使用固定 HTTPS 地址与 SHA-256，完整验证后才原子替换，失败继续使用上一个可用版本。简体中文释义是独立的检索/展示覆盖层，写入始终使用规范英文 tag。完整词库可能包含成人向标签，插件不声称能自动准确过滤。基础词库来自 MIT 授权的 [newtextdoc1111/danbooru-tag-csv](https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv)，简体中文主覆盖层来自 MIT 授权的 [Aaalice233/ComfyUI-Danbooru-Gallery](https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery)。
 

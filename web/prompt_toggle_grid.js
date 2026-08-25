@@ -48,16 +48,19 @@ import {
     normalizePromptEditorSize,
 } from "./prompt_editor_window.js?v=20260814-min-width-600";
 import {
+    AUTOCOMPLETE_LIMIT_SETTING_ID,
     AUTOCOMPLETE_SETTINGS_EVENT,
+    DEFAULT_AUTOCOMPLETE_LIMIT,
     DANBOORU_SETTING_ID,
     PROMPT_ASSISTANT_SETTING_ID,
     PromptAutocompleteController,
     PromptTagAutocompleteProvider,
     autocompleteTranslationText,
+    normalizeAutocompleteLimit,
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260823-popup-controls-v1";
+} from "./prompt_tag_autocomplete.js?v=20260825-configurable-limit-v2";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -102,14 +105,21 @@ const PROMPT_EDITOR_MAX_FONT_SIZE = 30;
 const PROMPT_TOKEN_GESTURE_SAMPLE_STEP = 6;
 
 const archiveClient = new PromptGridArchiveClient(api);
-const readAutocompleteSetting = (settingId) => {
+const readAutocompleteSettingValue = (settingId) => {
     try {
-        const value = app?.extensionManager?.setting?.get?.(settingId);
-        return value === undefined || value === null ? true : Boolean(value);
+        return app?.extensionManager?.setting?.get?.(settingId);
     } catch (_error) {
-        return true;
+        return undefined;
     }
 };
+const readAutocompleteSetting = (settingId) => {
+    const value = readAutocompleteSettingValue(settingId);
+    return value === undefined || value === null ? true : Boolean(value);
+};
+const readAutocompleteLimit = () => normalizeAutocompleteLimit(
+    readAutocompleteSettingValue(AUTOCOMPLETE_LIMIT_SETTING_ID),
+    DEFAULT_AUTOCOMPLETE_LIMIT,
+);
 const promptTagAutocompleteProvider = new PromptTagAutocompleteProvider(api, {
     danbooruEnabled: () => readAutocompleteSetting(DANBOORU_SETTING_ID),
     promptAssistantEnabled: () => readAutocompleteSetting(PROMPT_ASSISTANT_SETTING_ID),
@@ -3380,6 +3390,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     promptTagAutocompleteProvider,
                     {
                         getLocale,
+                        getLimit: readAutocompleteLimit,
                         getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                         getExistingPrompt: () => freeTextArea?.value || "",
                         popupHorizontalInset: 10,
@@ -3455,6 +3466,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     promptTagAutocompleteProvider,
                     {
                         getLocale,
+                        getLimit: readAutocompleteLimit,
                         getExistingPrompt: () => tokens.join(", "),
                         onSelect(record) {
                             clearAddBlurTimer();
@@ -3805,6 +3817,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             promptTagAutocompleteProvider,
             {
                 getLocale,
+                getLimit: readAutocompleteLimit,
                 getExistingPrompt: () => prompt.value,
             },
         ));
