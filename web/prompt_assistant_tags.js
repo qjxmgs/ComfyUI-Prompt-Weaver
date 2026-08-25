@@ -220,12 +220,12 @@ function matchFieldsWithContext(fields, context) {
         const field = normalizePromptAssistantSearchText(value);
         if (!field) continue;
         let match = null;
-        if (field === query) match = { rank: 0, score: null };
-        else if (field.startsWith(query)) match = { rank: 1, score: null };
-        else if (field.includes(query)) match = { rank: 2, score: null };
+        if (field === query) match = { rank: 0, score: null, value };
+        else if (field.startsWith(query)) match = { rank: 1, score: null, value };
+        else if (field.includes(query)) match = { rank: 2, score: null, value };
         else {
             const score = orderedSubsequenceScoreWithContext(field, context);
-            if (score) match = { rank: 3, score };
+            if (score) match = { rank: 3, score, value };
         }
         if (!match) continue;
         if (
@@ -240,7 +240,14 @@ function matchFieldsWithContext(fields, context) {
 }
 
 export function matchPromptAssistantFields(fields, queryValue) {
-    return matchFieldsWithContext(fields, promptAssistantMatchContext(queryValue));
+    const match = matchFieldsWithContext(fields, promptAssistantMatchContext(queryValue));
+    return match ? { rank: match.rank, score: match.score } : null;
+}
+
+
+export function findPromptAssistantMatchField(fields, queryValue) {
+    const match = matchFieldsWithContext(fields, promptAssistantMatchContext(queryValue));
+    return match ? { value: match.value, rank: match.rank, score: match.score } : null;
 }
 
 export function searchPromptAssistantTags(records, queryValue, limit = DEFAULT_RESULT_LIMIT) {

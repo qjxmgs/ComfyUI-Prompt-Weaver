@@ -15,6 +15,7 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toStr
 const {
     PromptAssistantTagCatalog,
     findPromptAssistantApiBases,
+    findPromptAssistantMatchField,
     flattenPromptAssistantTagData,
     fuzzyPromptAssistantQueryIsEligible,
     formatPromptAssistantTagOption,
@@ -151,6 +152,11 @@ test("character-skip matching starts at three Latin or two Chinese characters", 
     assert.deepEqual(matchPromptAssistantFields(["蓝眼睛"], "蓝睛"), {
         rank: 3,
         score: { start: 0, gaps: 1, length: 3 },
+    });
+    assert.deepEqual(findPromptAssistantMatchField(["打底裤", "紧身裤"], "紧"), {
+        value: "紧身裤",
+        rank: 1,
+        score: null,
     });
 });
 

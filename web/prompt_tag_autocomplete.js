@@ -1,11 +1,12 @@
 import { getLocale, t } from "./prompt_weaver_i18n.js";
 import {
     PromptAssistantTagCatalog,
+    findPromptAssistantMatchField,
     matchPromptAssistantFields,
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260825-configurable-limit-v1";
+} from "./prompt_assistant_tags.js?v=20260825-matched-alias-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
@@ -496,11 +497,18 @@ export class PromptAssistantTagProvider {
                 [record.value, ...(record.aliases || [])],
                 query,
             );
+            const matchingTranslation = promptTokenHasHanText(query)
+                ? findPromptAssistantMatchField([record.name, ...(record.aliases || [])], query)
+                : null;
             return {
                 source: "prompt-assistant",
                 tag: String(record.value || ""),
                 insertText: String(record.value || ""),
-                translation: String(record.name || ""),
+                translation: String(
+                    matchingTranslation && matchingTranslation.rank === match?.rank
+                        ? matchingTranslation.value
+                        : record.name || "",
+                ),
                 category: null,
                 categoryPath: Array.isArray(record.categoryPath) ? record.categoryPath : [],
                 postCount: 0,

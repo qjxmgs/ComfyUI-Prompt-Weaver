@@ -17,7 +17,7 @@ const moduleSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_weaver_i18n.js", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260825-configurable-limit-v1", assistantUrl);
+    .replace("./prompt_assistant_tags.js?v=20260825-matched-alias-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
@@ -208,6 +208,25 @@ test("Prompt Assistant maps English above Chinese while preserving English inser
     assert.equal(record.insertText, "blue eyes");
     assert.deepEqual(record.categoryPath, ["人物", "眼睛"]);
     assert.equal(record.postCount, 0);
+});
+
+test("Prompt Assistant displays the Chinese alias that caused a Chinese match", async () => {
+    const provider = new PromptAssistantTagProvider(null, {
+        catalog: {
+            async load() {
+                return [{
+                    name: "打底裤",
+                    value: "leggings",
+                    aliases: ["打底裤", "紧身裤"],
+                    categoryPath: ["人物", "服饰"],
+                }];
+            },
+        },
+    });
+    const [record] = await provider.search("紧");
+    assert.equal(record.tag, "leggings");
+    assert.equal(record.translation, "紧身裤");
+    assert.equal(record.insertText, "leggings");
 });
 
 test("Prompt Assistant batch resolution is exact and preserves missing entries", async () => {
@@ -560,7 +579,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-match-highlight-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-matched-alias-v1/);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
     assert.match(source, /prompt_toggle_grid\.css\?v=20260825-match-highlight-v1/);
 });

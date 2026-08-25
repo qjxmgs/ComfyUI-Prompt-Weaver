@@ -60,7 +60,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260825-match-highlight-v1";
+} from "./prompt_tag_autocomplete.js?v=20260825-matched-alias-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
