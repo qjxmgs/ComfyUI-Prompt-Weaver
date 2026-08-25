@@ -34,6 +34,7 @@ const {
     PromptAssistantTagProvider,
     PromptTagAutocompleteProvider,
     applyPromptCompletion,
+    applyPromptCompletionWithSeparator,
     autocompleteHighlightRanges,
     autocompleteInputOwnsFocus,
     autocompleteQueryIsEligible,
@@ -117,6 +118,58 @@ test("completion context preserves separators, wrappers, weights, and apostrophe
 
     const apostrophe = "artist's_style, blue_ey";
     assert.equal(resolvePromptCompletionContext(apostrophe, 6).query, "artist's_style");
+});
+
+test("grid completion appends a top-level comma separator", () => {
+    const plain = "masterpiece, blue ey";
+    assert.deepEqual(applyPromptCompletionWithSeparator(
+        plain,
+        resolvePromptCompletionContext(plain, plain.length),
+        "blue eyes",
+    ), {
+        value: "masterpiece, blue eyes, ",
+        cursor: 24,
+    });
+
+    const weighted = "masterpiece, ((blue_ey:1.25))";
+    assert.deepEqual(applyPromptCompletionWithSeparator(
+        weighted,
+        resolvePromptCompletionContext(weighted, weighted.indexOf(":1.25")),
+        "blue eyes",
+    ), {
+        value: "masterpiece, ((blue eyes:1.25)), ",
+        cursor: 33,
+    });
+
+    const middle = "masterpiece, blue ey, smile";
+    assert.deepEqual(applyPromptCompletionWithSeparator(
+        middle,
+        resolvePromptCompletionContext(middle, middle.indexOf("blue ey") + 7),
+        "blue eyes",
+    ), {
+        value: "masterpiece, blue eyes, smile",
+        cursor: 24,
+    });
+
+    const trailingSpaces = "blue ey   ";
+    assert.deepEqual(applyPromptCompletionWithSeparator(
+        trailingSpaces,
+        resolvePromptCompletionContext(trailingSpaces, 7),
+        "blue eyes",
+    ), {
+        value: "blue eyes, ",
+        cursor: 11,
+    });
+
+    const chineseSeparator = "blue ey，smile";
+    assert.deepEqual(applyPromptCompletionWithSeparator(
+        chineseSeparator,
+        resolvePromptCompletionContext(chineseSeparator, 7),
+        "blue eyes",
+    ), {
+        value: "blue eyes，smile",
+        cursor: 10,
+    });
 });
 
 test("editor token lookup strips wrappers and weights and detects Chinese tokens", () => {
@@ -579,7 +632,9 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-matched-alias-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-grid-delimiter-v1/);
+    assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
+    assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
     assert.match(source, /prompt_toggle_grid\.css\?v=20260825-match-highlight-v1/);
 });

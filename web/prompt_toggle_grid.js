@@ -60,7 +60,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260825-matched-alias-v1";
+} from "./prompt_tag_autocomplete.js?v=20260825-grid-delimiter-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -3819,6 +3819,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 getLocale,
                 getLimit: readAutocompleteLimit,
                 getExistingPrompt: () => prompt.value,
+                completionSeparator: ", ",
             },
         ));
         promptEditButton.addEventListener("click", () => openPromptEditor(prompt, item.id, promptEditButton));

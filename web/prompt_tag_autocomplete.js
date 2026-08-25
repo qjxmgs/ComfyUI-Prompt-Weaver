@@ -334,6 +334,31 @@ export function applyPromptCompletion(value, context, insertion) {
 }
 
 
+export function applyPromptCompletionWithSeparator(value, context, insertion, separator = ", ") {
+    const result = applyPromptCompletion(value, context, insertion);
+    const normalizedSeparator = typeof separator === "string" ? separator : "";
+    if (!normalizedSeparator) return result;
+
+    const segment = topLevelSegmentBounds(result.value, result.cursor);
+    const followingSeparator = result.value.slice(segment.end).match(/^(?:[,，][\t ]*|\r?\n[\t ]*)/u);
+    if (followingSeparator) {
+        return {
+            value: result.value,
+            cursor: segment.end + followingSeparator[0].length,
+        };
+    }
+
+    let insertionPoint = segment.end;
+    while (insertionPoint > segment.start && /[\t ]/u.test(result.value[insertionPoint - 1])) {
+        insertionPoint -= 1;
+    }
+    return {
+        value: `${result.value.slice(0, insertionPoint)}${normalizedSeparator}${result.value.slice(segment.end)}`,
+        cursor: insertionPoint + normalizedSeparator.length,
+    };
+}
+
+
 export function promptPresenceKeys(value) {
     const text = typeof value === "string" ? value : "";
     const keys = new Set();
@@ -1008,6 +1033,7 @@ export class PromptAutocompleteController {
         popupParent = document.body,
         popupHorizontalInset = 0,
         suppressInitialFocusSearch = false,
+        completionSeparator = "",
     } = {}) {
         this.input = input;
         this.provider = provider;
@@ -1026,6 +1052,7 @@ export class PromptAutocompleteController {
         this.popupParent = popupParent;
         this.popupHorizontalInset = Math.max(0, Number(popupHorizontalInset) || 0);
         this.suppressNextFocusSearch = Boolean(suppressInitialFocusSearch);
+        this.completionSeparator = typeof completionSeparator === "string" ? completionSeparator : "";
         this.popup = createElement("div", "cpw-tag-autocomplete");
         this.popup.id = `cpw-tag-autocomplete-${Math.random().toString(36).slice(2)}`;
         this.header = createElement("div", "cpw-tag-autocomplete__header");
@@ -1515,7 +1542,14 @@ export class PromptAutocompleteController {
         if (this.onSelect) {
             this.onSelect(record, this.context);
         } else {
-            const result = applyPromptCompletion(this.input.value, this.context, record.insertText);
+            const result = this.completionSeparator
+                ? applyPromptCompletionWithSeparator(
+                    this.input.value,
+                    this.context,
+                    record.insertText,
+                    this.completionSeparator,
+                )
+                : applyPromptCompletion(this.input.value, this.context, record.insertText);
             this.input.value = result.value;
             this.input.setSelectionRange?.(result.cursor, result.cursor);
             this.applyingCompletion = true;
