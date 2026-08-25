@@ -21,11 +21,15 @@ const moduleSource = (await readFile(
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
+    AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY,
     DANBOORU_UPDATE_POLL_MS,
     DANBOORU_UPDATE_TIMEOUT_MS,
     DEFAULT_AUTOCOMPLETE_LIMIT,
+    DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT,
     MAX_AUTOCOMPLETE_LIMIT,
+    MAX_AUTOCOMPLETE_POPUP_HEIGHT,
     MIN_AUTOCOMPLETE_LIMIT,
+    MIN_AUTOCOMPLETE_POPUP_HEIGHT,
     DanbooruTagProvider,
     PromptAssistantTagProvider,
     PromptTagAutocompleteProvider,
@@ -36,10 +40,14 @@ const {
     formatAutocompleteCount,
     mergeAutocompleteResults,
     normalizeAutocompleteLimit,
+    normalizeAutocompletePopupHeight,
     normalizeAutocompleteInsertionKey,
+    persistAutocompletePopupHeight,
     promptTokenHasHanText,
     promptTokenLookupText,
     promptPresenceKeys,
+    readAutocompletePopupHeight,
+    resizedAutocompletePopupHeight,
     resolveAutocompletePopupPosition,
     resolvePromptCompletionContext,
 } = await import(moduleUrl);
@@ -234,9 +242,68 @@ test("free-mode popup placement uses the caret line instead of the textarea bott
     assert.equal(position.top, 178);
     assert.equal(position.left, 30);
     assert.equal(position.width, 580);
+    assert.equal(position.maxHeight, 320);
 });
 
-test("free mode suppresses its initial focus search and autocomplete exposes a close control", async () => {
+test("popup height is normalized, persisted, and resized away from its anchor", () => {
+    const values = new Map();
+    const storage = {
+        getItem(key) {
+            return values.has(key) ? values.get(key) : null;
+        },
+        setItem(key, value) {
+            values.set(key, value);
+        },
+    };
+    assert.equal(AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY, "cpw-prompt-autocomplete-height-v1");
+    assert.equal(DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT, 320);
+    assert.equal(MIN_AUTOCOMPLETE_POPUP_HEIGHT, 120);
+    assert.equal(MAX_AUTOCOMPLETE_POPUP_HEIGHT, 720);
+    assert.equal(normalizeAutocompletePopupHeight(undefined), 320);
+    assert.equal(normalizeAutocompletePopupHeight(0), 120);
+    assert.equal(normalizeAutocompletePopupHeight(900), 720);
+    assert.equal(normalizeAutocompletePopupHeight("invalid"), 320);
+    assert.equal(persistAutocompletePopupHeight(540, storage), 540);
+    assert.equal(values.get(AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY), "540");
+    assert.equal(readAutocompletePopupHeight(storage), 540);
+    values.set(AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY, "broken");
+    assert.equal(readAutocompletePopupHeight(storage), 320);
+    assert.equal(resizedAutocompletePopupHeight({
+        startHeight: 320,
+        deltaY: 80,
+        openAbove: false,
+    }), 400);
+    assert.equal(resizedAutocompletePopupHeight({
+        startHeight: 320,
+        deltaY: -80,
+        openAbove: true,
+    }), 400);
+});
+
+test("popup placement honors preferred height and a locked expansion direction", () => {
+    const common = {
+        inputRect: { left: 20, top: 560, right: 620, bottom: 600, width: 600, height: 40 },
+        anchorRect: { left: 300, top: 560, right: 300, bottom: 584, width: 0, height: 24 },
+        viewportWidth: 1280,
+        viewportHeight: 720,
+        popupScrollHeight: 900,
+        preferredMaxHeight: 540,
+    };
+    const automatic = resolveAutocompletePopupPosition(common);
+    assert.equal(automatic.openAbove, true);
+    assert.equal(automatic.maxHeight, 540);
+    assert.equal(automatic.bottom, 164);
+
+    const lockedBelow = resolveAutocompletePopupPosition({
+        ...common,
+        forceOpenAbove: false,
+    });
+    assert.equal(lockedBelow.openAbove, false);
+    assert.equal(lockedBelow.top, 588);
+    assert.equal(lockedBelow.maxHeight, 124);
+});
+
+test("free mode suppresses initial search and autocomplete exposes header, close, and resize controls", async () => {
     const controllerSource = await readFile(
         new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
         "utf8",
@@ -252,11 +319,21 @@ test("free mode suppresses its initial focus search and autocomplete exposes a c
     assert.match(gridSource, /popupHorizontalInset: 10/);
     assert.match(gridSource, /suppressInitialFocusSearch: true/);
     assert.match(controllerSource, /if \(this\.suppressNextFocusSearch\) \{[\s\S]*this\.close\(\)/);
+    assert.match(controllerSource, /cpw-tag-autocomplete__header/);
+    assert.match(controllerSource, /cpw-tag-autocomplete__result-count/);
     assert.match(controllerSource, /cpw-tag-autocomplete__close/);
     assert.match(controllerSource, /this\.closeButton\.addEventListener\("click", this\.handleCloseClick\)/);
-    assert.match(styleSource, /\.cpw-tag-autocomplete__close\s*\{[\s\S]*top: 3px;[\s\S]*right: 3px;/);
+    assert.match(controllerSource, /cpw-tag-autocomplete__resize-handle/);
+    assert.match(controllerSource, /this\.resizeHandle\.addEventListener\("pointerdown", this\.handleResizePointerDown\)/);
+    assert.match(controllerSource, /event\.relatedTarget && this\.popup\.contains\(event\.relatedTarget\)/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete__header\s*\{/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete__close\s*\{[\s\S]*position: relative;/);
     assert.match(styleSource, /\.cpw-tag-autocomplete__close::before,[\s\S]*top: 50%;[\s\S]*left: 50%;/);
     assert.match(styleSource, /translate\(-50%, -50%\) rotate\(45deg\)/);
+    assert.match(styleSource, /cpw-tag-autocomplete-border-flow 6s linear infinite/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete--below \.cpw-tag-autocomplete__resize-handle/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete--above \.cpw-tag-autocomplete__resize-handle/);
+    assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.cpw-tag-autocomplete\s*\{[\s\S]*animation: none;/);
 });
 
 test("autocomplete defaults to thirty results and normalizes configured limits", () => {
@@ -459,9 +536,9 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-configurable-limit-v2/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-resizable-popup-v1/);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260823-popup-close-v2/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260825-resizable-popup-v1/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {

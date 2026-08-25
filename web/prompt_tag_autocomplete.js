@@ -15,6 +15,10 @@ export const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-cha
 export const DEFAULT_AUTOCOMPLETE_LIMIT = 30;
 export const MIN_AUTOCOMPLETE_LIMIT = 1;
 export const MAX_AUTOCOMPLETE_LIMIT = 100;
+export const AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY = "cpw-prompt-autocomplete-height-v1";
+export const DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT = 320;
+export const MIN_AUTOCOMPLETE_POPUP_HEIGHT = 120;
+export const MAX_AUTOCOMPLETE_POPUP_HEIGHT = 720;
 export const DEFAULT_AUTOCOMPLETE_DEBOUNCE_MS = 120;
 export const DANBOORU_UPDATE_POLL_MS = 500;
 export const DANBOORU_UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -114,6 +118,61 @@ export function normalizeAutocompleteLimit(value, fallback = DEFAULT_AUTOCOMPLET
         MAX_AUTOCOMPLETE_LIMIT,
         Math.max(MIN_AUTOCOMPLETE_LIMIT, Math.round(numericValue)),
     );
+}
+
+
+export function normalizeAutocompletePopupHeight(
+    value,
+    fallback = DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT,
+) {
+    const fallbackNumber = Number(fallback);
+    const safeFallback = Number.isFinite(fallbackNumber)
+        ? Math.min(
+            MAX_AUTOCOMPLETE_POPUP_HEIGHT,
+            Math.max(MIN_AUTOCOMPLETE_POPUP_HEIGHT, Math.round(fallbackNumber)),
+        )
+        : DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT;
+    if (value === undefined || value === null || value === "") return safeFallback;
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return safeFallback;
+    return Math.min(
+        MAX_AUTOCOMPLETE_POPUP_HEIGHT,
+        Math.max(MIN_AUTOCOMPLETE_POPUP_HEIGHT, Math.round(numericValue)),
+    );
+}
+
+
+export function readAutocompletePopupHeight(
+    storage = undefined,
+    fallback = DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT,
+) {
+    try {
+        const resolvedStorage = storage === undefined ? globalThis.localStorage : storage;
+        const storedValue = resolvedStorage?.getItem?.(AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY);
+        return storedValue === undefined || storedValue === null
+            ? normalizeAutocompletePopupHeight(fallback)
+            : normalizeAutocompletePopupHeight(storedValue, fallback);
+    } catch (_error) {
+        return normalizeAutocompletePopupHeight(fallback);
+    }
+}
+
+
+export function persistAutocompletePopupHeight(value, storage = undefined) {
+    const normalized = normalizeAutocompletePopupHeight(value);
+    try {
+        const resolvedStorage = storage === undefined ? globalThis.localStorage : storage;
+        resolvedStorage?.setItem?.(AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY, String(normalized));
+    } catch (_error) {
+        // Storage may be disabled; the active controller still keeps the value for this session.
+    }
+    return normalized;
+}
+
+
+export function resizedAutocompletePopupHeight({ startHeight, deltaY, openAbove }) {
+    const signedDelta = (openAbove ? -1 : 1) * (Number(deltaY) || 0);
+    return normalizeAutocompletePopupHeight(Number(startHeight) + signedDelta);
 }
 
 
@@ -747,6 +806,8 @@ export function resolveAutocompletePopupPosition({
     viewportWidth,
     viewportHeight,
     popupScrollHeight = 240,
+    preferredMaxHeight = DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT,
+    forceOpenAbove = null,
     horizontalInset = 0,
     margin = 8,
     gap = 4,
@@ -761,15 +822,22 @@ export function resolveAutocompletePopupPosition({
         Math.max(margin, inputRect.left + safeHorizontalInset),
         Math.max(margin, viewportWidth - margin - width),
     );
-    const preferredHeight = Math.min(320, popupScrollHeight || 240);
+    const normalizedPreferredHeight = normalizeAutocompletePopupHeight(preferredMaxHeight);
+    const contentHeight = Math.max(0, Number(popupScrollHeight) || 0);
+    const desiredHeight = Math.min(
+        normalizedPreferredHeight,
+        contentHeight || normalizedPreferredHeight,
+    );
     const below = viewportHeight - anchorRect.bottom - margin - gap;
     const above = anchorRect.top - margin - gap;
-    const openAbove = below < preferredHeight && above > below;
+    const openAbove = typeof forceOpenAbove === "boolean"
+        ? forceOpenAbove
+        : below < desiredHeight && above > below;
     const available = Math.max(64, openAbove ? above : below);
     return {
         width: Math.round(width),
         left: Math.round(left),
-        maxHeight: Math.round(Math.min(320, available)),
+        maxHeight: Math.round(Math.min(normalizedPreferredHeight, available)),
         top: openAbove ? null : Math.round(anchorRect.bottom + gap),
         bottom: openAbove ? Math.round(viewportHeight - anchorRect.top + gap) : null,
         openAbove,
@@ -810,6 +878,11 @@ export class PromptAutocompleteController {
         this.suppressNextFocusSearch = Boolean(suppressInitialFocusSearch);
         this.popup = createElement("div", "cpw-tag-autocomplete");
         this.popup.id = `cpw-tag-autocomplete-${Math.random().toString(36).slice(2)}`;
+        this.header = createElement("div", "cpw-tag-autocomplete__header");
+        this.heading = createElement("div", "cpw-tag-autocomplete__heading");
+        this.title = createElement("span", "cpw-tag-autocomplete__title", t("Prompt autocomplete"));
+        this.resultCount = createElement("span", "cpw-tag-autocomplete__result-count", "0");
+        this.heading.append(this.title, this.resultCount);
         this.resultsContainer = createElement("div", "cpw-tag-autocomplete__results");
         this.resultsContainer.id = `${this.popup.id}-results`;
         this.resultsContainer.setAttribute("role", "listbox");
@@ -818,8 +891,17 @@ export class PromptAutocompleteController {
         this.closeButton.type = "button";
         this.closeButton.title = t("Close");
         this.closeButton.setAttribute("aria-label", t("Close"));
+        this.header.append(this.heading, this.closeButton);
+        this.resizeHandle = createElement("div", "cpw-tag-autocomplete__resize-handle");
+        this.resizeHandle.tabIndex = 0;
+        this.resizeHandle.setAttribute("role", "separator");
+        this.resizeHandle.setAttribute("aria-orientation", "horizontal");
+        this.resizeHandle.setAttribute("aria-valuemin", String(MIN_AUTOCOMPLETE_POPUP_HEIGHT));
+        this.resizeHandle.setAttribute("aria-valuemax", String(MAX_AUTOCOMPLETE_POPUP_HEIGHT));
+        this.resizeHandle.title = t("Drag to resize; double-click to reset");
+        this.resizeHandle.setAttribute("aria-label", t("Resize prompt autocomplete"));
         this.popup.hidden = true;
-        this.popup.append(this.resultsContainer, this.closeButton);
+        this.popup.append(this.header, this.resultsContainer, this.resizeHandle);
         this.popupParent.append(this.popup);
         this.results = [];
         this.resultButtons = [];
@@ -833,6 +915,10 @@ export class PromptAutocompleteController {
         this.destroyed = false;
         this.blurTimer = 0;
         this.applyingCompletion = false;
+        this.preferredPopupHeight = readAutocompletePopupHeight();
+        this.lastOpenAbove = false;
+        this.resizeSession = null;
+        this.syncResizeAccessibility();
 
         input.setAttribute("role", "combobox");
         input.setAttribute("aria-autocomplete", "list");
@@ -855,7 +941,7 @@ export class PromptAutocompleteController {
         this.handleBlur = (event) => {
             this.cancelPending();
             clearTimeout(this.blurTimer);
-            if (event.relatedTarget === this.closeButton) return;
+            if (event.relatedTarget && this.popup.contains(event.relatedTarget)) return;
             this.blurTimer = setTimeout(() => this.close(), 100);
         };
         this.handleFocus = () => {
@@ -876,7 +962,7 @@ export class PromptAutocompleteController {
         };
         this.handleCloseClick = (event) => {
             this.handleClosePointerDown(event);
-            const restoreInputFocus = document.activeElement === this.closeButton;
+            const restoreInputFocus = this.popup.contains(document.activeElement);
             this.cancelPending();
             this.sequence += 1;
             this.close();
@@ -891,12 +977,68 @@ export class PromptAutocompleteController {
                 || this.popup.hidden
                 || (
                     document.activeElement !== this.input
-                    && document.activeElement !== this.closeButton
+                    && !this.popup.contains(document.activeElement)
                 )
             ) return;
             event.preventDefault();
             event.stopImmediatePropagation();
             this.handleCloseClick(event);
+        };
+        this.handleResizePointerDown = (event) => {
+            if (event.button !== 0 || this.resizeSession || this.popup.hidden) return;
+            const rect = this.popup.getBoundingClientRect();
+            this.resizeSession = {
+                pointerId: event.pointerId,
+                startY: event.clientY,
+                startHeight: rect.height,
+                openAbove: this.lastOpenAbove,
+            };
+            this.popup.classList.add("cpw-tag-autocomplete--resizing");
+            event.preventDefault();
+            event.stopPropagation();
+            this.resizeHandle.setPointerCapture(event.pointerId);
+        };
+        this.handleResizePointerMove = (event) => {
+            if (!this.resizeSession || event.pointerId !== this.resizeSession.pointerId) return;
+            this.setPreferredPopupHeight(resizedAutocompletePopupHeight({
+                startHeight: this.resizeSession.startHeight,
+                deltaY: event.clientY - this.resizeSession.startY,
+                openAbove: this.resizeSession.openAbove,
+            }), { persist: false });
+            this.position({ forceOpenAbove: this.resizeSession.openAbove });
+            event.preventDefault();
+            event.stopPropagation();
+        };
+        this.handleResizePointerEnd = (event) => {
+            if (!this.resizeSession || event.pointerId !== this.resizeSession.pointerId) return;
+            this.finishResize();
+            event.preventDefault();
+            event.stopPropagation();
+        };
+        this.handleResizeDoubleClick = (event) => {
+            this.finishResize({ persist: false });
+            this.setPreferredPopupHeight(DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT);
+            this.position({ forceOpenAbove: this.lastOpenAbove });
+            event.preventDefault();
+            event.stopPropagation();
+        };
+        this.handleResizeKeyDown = (event) => {
+            const step = event.shiftKey ? 48 : 16;
+            let nextHeight = null;
+            if (event.key === "Home") {
+                nextHeight = MIN_AUTOCOMPLETE_POPUP_HEIGHT;
+            } else if (event.key === "End") {
+                nextHeight = MAX_AUTOCOMPLETE_POPUP_HEIGHT;
+            } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                const movingTowardTop = event.key === "ArrowUp";
+                const expands = this.lastOpenAbove ? movingTowardTop : !movingTowardTop;
+                nextHeight = this.preferredPopupHeight + (expands ? step : -step);
+            }
+            if (nextHeight === null) return;
+            this.setPreferredPopupHeight(nextHeight);
+            this.position({ forceOpenAbove: this.lastOpenAbove });
+            event.preventDefault();
+            event.stopPropagation();
         };
 
         input.addEventListener("input", this.handleInput);
@@ -916,6 +1058,38 @@ export class PromptAutocompleteController {
         this.closeButton.addEventListener("pointerdown", this.handleClosePointerDown);
         this.closeButton.addEventListener("mousedown", this.handleClosePointerDown);
         this.closeButton.addEventListener("click", this.handleCloseClick);
+        this.resizeHandle.addEventListener("pointerdown", this.handleResizePointerDown);
+        this.resizeHandle.addEventListener("pointermove", this.handleResizePointerMove);
+        this.resizeHandle.addEventListener("pointerup", this.handleResizePointerEnd);
+        this.resizeHandle.addEventListener("pointercancel", this.handleResizePointerEnd);
+        this.resizeHandle.addEventListener("lostpointercapture", this.handleResizePointerEnd);
+        this.resizeHandle.addEventListener("dblclick", this.handleResizeDoubleClick);
+        this.resizeHandle.addEventListener("keydown", this.handleResizeKeyDown);
+    }
+
+    syncResizeAccessibility() {
+        const value = normalizeAutocompletePopupHeight(this.preferredPopupHeight);
+        this.resizeHandle.setAttribute("aria-valuenow", String(value));
+        this.resizeHandle.setAttribute("aria-valuetext", t("{size} pixels", { size: value }));
+    }
+
+    setPreferredPopupHeight(value, { persist = true } = {}) {
+        this.preferredPopupHeight = persist
+            ? persistAutocompletePopupHeight(value)
+            : normalizeAutocompletePopupHeight(value);
+        this.syncResizeAccessibility();
+        return this.preferredPopupHeight;
+    }
+
+    finishResize({ persist = true } = {}) {
+        const session = this.resizeSession;
+        if (!session) return;
+        this.resizeSession = null;
+        this.popup.classList.remove("cpw-tag-autocomplete--resizing");
+        if (persist) this.setPreferredPopupHeight(this.preferredPopupHeight);
+        if (this.resizeHandle.hasPointerCapture?.(session.pointerId)) {
+            this.resizeHandle.releasePointerCapture(session.pointerId);
+        }
     }
 
     cancelPending() {
@@ -951,9 +1125,16 @@ export class PromptAutocompleteController {
 
     refreshLocale() {
         if (this.destroyed) return;
+        this.title.textContent = t("Prompt autocomplete");
+        this.resultCount.setAttribute("aria-label", t("{count} suggestions", {
+            count: this.results.length,
+        }));
         this.resultsContainer.setAttribute("aria-label", t("Prompt tag matches"));
         this.closeButton.title = t("Close");
         this.closeButton.setAttribute("aria-label", t("Close"));
+        this.resizeHandle.title = t("Drag to resize; double-click to reset");
+        this.resizeHandle.setAttribute("aria-label", t("Resize prompt autocomplete"));
+        this.syncResizeAccessibility();
         this.refreshForExternalChange();
     }
 
@@ -1003,6 +1184,8 @@ export class PromptAutocompleteController {
     }
 
     render() {
+        this.preferredPopupHeight = readAutocompletePopupHeight(undefined, this.preferredPopupHeight);
+        this.syncResizeAccessibility();
         this.resultsContainer.replaceChildren();
         this.resultButtons = [];
         const existing = promptPresenceKeys(this.getExistingPrompt());
@@ -1073,6 +1256,10 @@ export class PromptAutocompleteController {
             this.resultsContainer.append(action);
         }
 
+        this.resultCount.textContent = String(this.results.length);
+        this.resultCount.setAttribute("aria-label", t("{count} suggestions", {
+            count: this.results.length,
+        }));
         const visible = this.resultsContainer.childElementCount > 0;
         this.popup.hidden = !visible;
         this.input.setAttribute("aria-expanded", String(visible));
@@ -1080,7 +1267,7 @@ export class PromptAutocompleteController {
         if (visible) this.position();
     }
 
-    position() {
+    position({ forceOpenAbove = null } = {}) {
         if (this.destroyed || this.popup.hidden || !this.input.isConnected) return;
         const inputRect = this.input.getBoundingClientRect();
         const anchorRect = this.getAnchorRect?.() || inputRect;
@@ -1091,9 +1278,14 @@ export class PromptAutocompleteController {
             anchorRect,
             viewportWidth,
             viewportHeight,
-            popupScrollHeight: this.resultsContainer.scrollHeight + 10,
+            popupScrollHeight: this.header.offsetHeight + this.resultsContainer.scrollHeight + 10,
+            preferredMaxHeight: this.preferredPopupHeight,
+            forceOpenAbove,
             horizontalInset: this.popupHorizontalInset,
         });
+        this.lastOpenAbove = position.openAbove;
+        this.popup.classList.toggle("cpw-tag-autocomplete--above", position.openAbove);
+        this.popup.classList.toggle("cpw-tag-autocomplete--below", !position.openAbove);
         this.popup.style.width = `${position.width}px`;
         this.popup.style.left = `${position.left}px`;
         this.popup.style.maxHeight = `${position.maxHeight}px`;
@@ -1187,6 +1379,7 @@ export class PromptAutocompleteController {
     }
 
     close() {
+        this.finishResize();
         this.results = [];
         this.resultButtons = [];
         this.activeIndex = -1;
@@ -1199,6 +1392,7 @@ export class PromptAutocompleteController {
     destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
+        this.finishResize();
         this.cancelPending();
         clearTimeout(this.blurTimer);
         this.input.removeEventListener("input", this.handleInput);
@@ -1218,6 +1412,13 @@ export class PromptAutocompleteController {
         this.closeButton.removeEventListener("pointerdown", this.handleClosePointerDown);
         this.closeButton.removeEventListener("mousedown", this.handleClosePointerDown);
         this.closeButton.removeEventListener("click", this.handleCloseClick);
+        this.resizeHandle.removeEventListener("pointerdown", this.handleResizePointerDown);
+        this.resizeHandle.removeEventListener("pointermove", this.handleResizePointerMove);
+        this.resizeHandle.removeEventListener("pointerup", this.handleResizePointerEnd);
+        this.resizeHandle.removeEventListener("pointercancel", this.handleResizePointerEnd);
+        this.resizeHandle.removeEventListener("lostpointercapture", this.handleResizePointerEnd);
+        this.resizeHandle.removeEventListener("dblclick", this.handleResizeDoubleClick);
+        this.resizeHandle.removeEventListener("keydown", this.handleResizeKeyDown);
         this.popup.remove();
     }
 }

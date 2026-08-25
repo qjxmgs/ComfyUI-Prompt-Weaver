@@ -69,20 +69,79 @@
     z-index: 2147483500;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
     overflow: hidden;
-    padding: 5px;
-    border: 1px solid var(--border-color, #4b4d52);
+    padding: 0;
+    border: 2px solid transparent;
     border-radius: 8px;
     color: var(--input-text, var(--fg-color, #e8e8ea));
-    background: var(--comfy-menu-bg, #202124);
-    box-shadow: 0 12px 30px rgb(0 0 0 / 34%);
+    background:
+        linear-gradient(
+            var(--comfy-menu-bg, #202124),
+            var(--comfy-menu-bg, #202124)
+        ) padding-box,
+        linear-gradient(
+            90deg,
+            #5b9cff 0%,
+            #55d6d1 25%,
+            #a879ff 50%,
+            #55d6d1 75%,
+            #5b9cff 100%
+        ) border-box;
+    background-position: 0 0, 0 0;
+    background-size: 100% 100%, 300% 100%;
+    box-shadow:
+        0 16px 40px rgb(0 0 0 / 46%),
+        0 0 18px color-mix(in srgb, var(--p-primary-color, #58a6ff) 22%, transparent);
     font: 12px/1.35 Inter, system-ui, sans-serif;
     user-select: none;
+    animation: cpw-tag-autocomplete-border-flow 6s linear infinite;
 }
 
 .cpw-tag-autocomplete[hidden] {
     display: none;
+}
+
+@keyframes cpw-tag-autocomplete-border-flow {
+    to { background-position: 0 0, 150% 0; }
+}
+
+.cpw-tag-autocomplete__header {
+    min-height: 30px;
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 4px 3px 9px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color, #4b4d52) 68%, transparent);
+    background: color-mix(in srgb, var(--comfy-input-bg, #17181a) 58%, transparent);
+}
+
+.cpw-tag-autocomplete__heading {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.cpw-tag-autocomplete__title {
+    overflow: hidden;
+    color: color-mix(in srgb, var(--input-text, #fff) 90%, var(--p-primary-color, #58a6ff));
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cpw-tag-autocomplete__result-count {
+    min-width: 24px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    color: color-mix(in srgb, var(--p-primary-color, #58a6ff) 88%, var(--input-text, #fff));
+    background: color-mix(in srgb, var(--p-primary-color, #58a6ff) 15%, transparent);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
 }
 
 .cpw-tag-autocomplete__results {
@@ -91,19 +150,15 @@
     flex: 1 1 auto;
     flex-direction: column;
     gap: 2px;
+    padding: 4px;
     overflow: auto;
     overscroll-behavior: contain;
 }
 
-.cpw-tag-autocomplete__results > :first-child {
-    padding-right: 38px;
-}
-
 .cpw-tag-autocomplete__close {
-    position: absolute;
-    top: 3px;
-    right: 3px;
+    position: relative;
     z-index: 2;
+    flex: 0 0 24px;
     width: 24px;
     height: 24px;
     min-width: 24px;
@@ -149,6 +204,50 @@
 .cpw-tag-autocomplete__close:active {
     outline: 0;
     background: #c62828;
+}
+
+.cpw-tag-autocomplete__resize-handle {
+    position: absolute;
+    left: 32px;
+    right: 32px;
+    z-index: 3;
+    height: 10px;
+    outline: 0;
+    cursor: ns-resize;
+    touch-action: none;
+    user-select: none;
+}
+
+.cpw-tag-autocomplete--below .cpw-tag-autocomplete__resize-handle {
+    bottom: -2px;
+}
+
+.cpw-tag-autocomplete--above .cpw-tag-autocomplete__resize-handle {
+    top: -2px;
+}
+
+.cpw-tag-autocomplete__resize-handle::after {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 48px;
+    height: 3px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--p-primary-color, #58a6ff) 72%, var(--input-text, #fff));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--comfy-menu-bg, #202124) 78%, transparent);
+    content: "";
+    opacity: 0.68;
+    transform: translate(-50%, -50%);
+}
+
+.cpw-tag-autocomplete__resize-handle:hover::after,
+.cpw-tag-autocomplete__resize-handle:focus-visible::after,
+.cpw-tag-autocomplete--resizing .cpw-tag-autocomplete__resize-handle::after {
+    background: var(--p-primary-color, #58a6ff);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--comfy-menu-bg, #202124) 78%, transparent),
+        0 0 8px color-mix(in srgb, var(--p-primary-color, #58a6ff) 54%, transparent);
+    opacity: 1;
 }
 
 .cpw-tag-autocomplete__option {
@@ -2096,6 +2195,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .cpw-tag-autocomplete {
+        animation: none;
+        background-position: 0 0, 50% 0;
+    }
+
     .cpw-prompt-grid__card,
     .cpw-archive-manager__row,
     .cpw-prompt-grid__switch-track,
