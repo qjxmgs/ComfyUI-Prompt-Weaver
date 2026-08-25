@@ -333,6 +333,14 @@
     font-size: 11px;
 }
 
+.cpw-tag-autocomplete__match {
+    padding: 0;
+    color: color-mix(in srgb, #ff3b30 86%, var(--input-text, #fff));
+    background: transparent;
+    font: inherit;
+    font-weight: 750;
+}
+
 .cpw-tag-autocomplete__source {
     max-width: 106px;
     overflow: hidden;

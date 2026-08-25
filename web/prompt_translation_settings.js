@@ -130,7 +130,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260825-resizable-popup-v1",
+        "./prompt_toggle_grid.css?v=20260825-match-highlight-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

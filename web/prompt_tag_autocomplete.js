@@ -29,6 +29,7 @@ const OPENING_BRACKETS = new Map([["(", ")"], ["[", "]"], ["{", "}"]]);
 const CLOSING_BRACKETS = new Set(OPENING_BRACKETS.values());
 const WEIGHT_SUFFIX_PATTERN = /:\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*$/u;
 const HAN_CHARACTER_PATTERN = /\p{Script=Han}/u;
+const AUTOCOMPLETE_HIGHLIGHT_SEPARATOR_PATTERN = /[\s_-]/u;
 const CATEGORY_NAMES = Object.freeze({
     0: "General",
     1: "Artist",
@@ -722,6 +723,147 @@ export function autocompleteTranslationText(record) {
 }
 
 
+function normalizeAutocompleteHighlightCharacter(value) {
+    try {
+        return value.normalize("NFKC").toLowerCase();
+    } catch (_error) {
+        return value.toLowerCase();
+    }
+}
+
+
+function autocompleteHighlightUnits(value, { compact = false } = {}) {
+    const units = [];
+    let offset = 0;
+    for (const originalCharacter of Array.from(String(value || ""))) {
+        const start = offset;
+        offset += originalCharacter.length;
+        for (const normalizedCharacter of Array.from(
+            normalizeAutocompleteHighlightCharacter(originalCharacter),
+        )) {
+            if (compact && AUTOCOMPLETE_HIGHLIGHT_SEPARATOR_PATTERN.test(normalizedCharacter)) {
+                continue;
+            }
+            units.push({ character: normalizedCharacter, start, end: offset });
+        }
+    }
+    return units;
+}
+
+
+function contiguousAutocompleteHighlightIndexes(units, queryCharacters) {
+    if (!queryCharacters.length || queryCharacters.length > units.length) return null;
+    const lastStart = units.length - queryCharacters.length;
+    for (let start = 0; start <= lastStart; start += 1) {
+        let matched = true;
+        for (let index = 0; index < queryCharacters.length; index += 1) {
+            if (units[start + index].character !== queryCharacters[index]) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) {
+            return Array.from({ length: queryCharacters.length }, (_value, index) => start + index);
+        }
+    }
+    return null;
+}
+
+
+function orderedAutocompleteHighlightIndexes(units, queryCharacters) {
+    if (!queryCharacters.length || queryCharacters.length > units.length) return null;
+    const indexes = [];
+    let queryIndex = 0;
+    for (let index = 0; index < units.length && queryIndex < queryCharacters.length; index += 1) {
+        if (units[index].character !== queryCharacters[queryIndex]) continue;
+        indexes.push(index);
+        queryIndex += 1;
+    }
+    return queryIndex === queryCharacters.length ? indexes : null;
+}
+
+
+function autocompleteHighlightRangesFromIndexes(units, indexes) {
+    if (!indexes?.length) return [];
+    const sourceRanges = indexes
+        .map((index) => units[index])
+        .filter(Boolean)
+        .map(({ start, end }) => ({ start, end }))
+        .sort((left, right) => left.start - right.start || left.end - right.end);
+    const ranges = [];
+    for (const range of sourceRanges) {
+        const previous = ranges.at(-1);
+        if (previous && range.start <= previous.end) {
+            previous.end = Math.max(previous.end, range.end);
+        } else {
+            ranges.push(range);
+        }
+    }
+    return ranges;
+}
+
+
+export function autocompleteHighlightRanges(value, queryValue) {
+    const text = String(value || "");
+    const normalizedQuery = normalizeAutocompleteText(queryValue);
+    if (!text || !normalizedQuery) return [];
+
+    const queryCharacters = Array.from(normalizedQuery);
+    const directUnits = autocompleteHighlightUnits(text);
+    const directIndexes = contiguousAutocompleteHighlightIndexes(directUnits, queryCharacters);
+    if (directIndexes) return autocompleteHighlightRangesFromIndexes(directUnits, directIndexes);
+
+    const compactQueryCharacters = queryCharacters.filter(
+        (character) => !AUTOCOMPLETE_HIGHLIGHT_SEPARATOR_PATTERN.test(character),
+    );
+    const compactUnits = autocompleteHighlightUnits(text, { compact: true });
+    const compactIndexes = contiguousAutocompleteHighlightIndexes(
+        compactUnits,
+        compactQueryCharacters,
+    );
+    if (compactIndexes) {
+        return autocompleteHighlightRangesFromIndexes(compactUnits, compactIndexes);
+    }
+
+    const compactQuery = compactQueryCharacters.join("");
+    const fuzzyEligible = Boolean(compactQuery) && (
+        HAN_CHARACTER_PATTERN.test(compactQuery)
+            ? compactQueryCharacters.length >= 2
+            : compactQueryCharacters.length >= 3
+    );
+    if (!fuzzyEligible) return [];
+    return autocompleteHighlightRangesFromIndexes(
+        compactUnits,
+        orderedAutocompleteHighlightIndexes(compactUnits, compactQueryCharacters),
+    );
+}
+
+
+export function appendAutocompleteHighlightedText(element, value, queryValue) {
+    const text = String(value || "");
+    const ranges = autocompleteHighlightRanges(text, queryValue);
+    element.replaceChildren();
+    if (!ranges.length) {
+        element.textContent = text;
+        return element;
+    }
+    const ownerDocument = element.ownerDocument || document;
+    let offset = 0;
+    for (const range of ranges) {
+        if (range.start > offset) {
+            element.append(ownerDocument.createTextNode(text.slice(offset, range.start)));
+        }
+        const highlight = ownerDocument.createElement("mark");
+        highlight.className = "cpw-tag-autocomplete__match";
+        highlight.textContent = text.slice(range.start, range.end);
+        element.append(highlight);
+        offset = range.end;
+    }
+    if (offset < text.length) element.append(ownerDocument.createTextNode(text.slice(offset)));
+    return element;
+}
+
+
 export function textareaCaretClientRect(textarea) {
     if (!textarea?.isConnected || typeof document === "undefined") return null;
     const inputRect = textarea.getBoundingClientRect();
@@ -1189,6 +1331,7 @@ export class PromptAutocompleteController {
         this.resultsContainer.replaceChildren();
         this.resultButtons = [];
         const existing = promptPresenceKeys(this.getExistingPrompt());
+        const highlightQuery = this.context?.query || "";
         this.results.forEach((record, index) => {
             const option = createElement(
                 "button",
@@ -1205,12 +1348,15 @@ export class PromptAutocompleteController {
 
             const category = createElement("span", "cpw-tag-autocomplete__category", categoryLabel(record));
             const main = createElement("span", "cpw-tag-autocomplete__main");
-            main.append(createElement("span", "cpw-tag-autocomplete__tag", record.tag));
-            main.append(createElement(
-                "span",
-                "cpw-tag-autocomplete__translation",
+            const tag = createElement("span", "cpw-tag-autocomplete__tag");
+            const translation = createElement("span", "cpw-tag-autocomplete__translation");
+            appendAutocompleteHighlightedText(tag, record.tag, highlightQuery);
+            appendAutocompleteHighlightedText(
+                translation,
                 autocompleteTranslationText(record),
-            ));
+                highlightQuery,
+            );
+            main.append(tag, translation);
             const source = createElement("span", "cpw-tag-autocomplete__source", sourceLabel(record));
             const countText = record.source === "danbooru" && record.postCount > 0
                 ? formatAutocompleteCount(record.postCount)

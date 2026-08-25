@@ -34,6 +34,7 @@ const {
     PromptAssistantTagProvider,
     PromptTagAutocompleteProvider,
     applyPromptCompletion,
+    autocompleteHighlightRanges,
     autocompleteInputOwnsFocus,
     autocompleteQueryIsEligible,
     autocompleteTranslationText,
@@ -227,6 +228,29 @@ test("translation display uses an em dash when Chinese text is unavailable", () 
     assert.equal(autocompleteTranslationText({ tag: "blue_eyes", translation: "蓝眼睛" }), "蓝眼睛");
     assert.equal(autocompleteTranslationText({ tag: "blue_eyes", translation: "" }), "—");
     assert.equal(autocompleteTranslationText({ tag: "blue eyes", translation: "blue eyes" }), "—");
+});
+
+test("visible autocomplete text highlights direct, separator-normalized, and fuzzy matches", () => {
+    assert.deepEqual(autocompleteHighlightRanges("紧张的双手", "紧"), [
+        { start: 0, end: 1 },
+    ]);
+    assert.deepEqual(autocompleteHighlightRanges("blue_eyes", "blue eyes"), [
+        { start: 0, end: 4 },
+        { start: 5, end: 9 },
+    ]);
+    assert.deepEqual(autocompleteHighlightRanges("blue_eyes", "bleyes"), [
+        { start: 0, end: 2 },
+        { start: 3, end: 4 },
+        { start: 6, end: 9 },
+    ]);
+    assert.deepEqual(autocompleteHighlightRanges("蓝眼睛", "蓝睛"), [
+        { start: 0, end: 1 },
+        { start: 2, end: 3 },
+    ]);
+    assert.deepEqual(autocompleteHighlightRanges("ＭＡＳＴＥＲ", "mast"), [
+        { start: 0, end: 4 },
+    ]);
+    assert.deepEqual(autocompleteHighlightRanges("blue eyes", "be"), []);
 });
 
 test("free-mode popup placement uses the caret line instead of the textarea bottom", () => {
@@ -536,9 +560,9 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-resizable-popup-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-match-highlight-v1/);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260825-resizable-popup-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260825-match-highlight-v1/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {
@@ -568,6 +592,10 @@ test("result DOM and CSS use prompt, category, source, and count columns", async
         cssSource,
         /grid-template-columns:\s*minmax\(0, 1fr\) minmax\(72px, auto\) auto minmax\(54px, auto\)/,
     );
+    assert.match(autocompleteSource, /appendAutocompleteHighlightedText\(tag, record\.tag, highlightQuery\)/);
+    assert.match(autocompleteSource, /ownerDocument\.createElement\("mark"\)/);
+    assert.doesNotMatch(autocompleteSource, /\.innerHTML\s*=/);
+    assert.match(cssSource, /\.cpw-tag-autocomplete__match\s*\{[\s\S]*#ff3b30[\s\S]*font-weight:\s*750/);
 });
 
 test("handled keys stay inside autocomplete and inserted text does not reopen results", async () => {
