@@ -12,7 +12,10 @@ import {
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
 export const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssistant";
 export const AUTOCOMPLETE_LIMIT_SETTING_ID = "PromptWeaver.Autocomplete.MaxResults";
+export const AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID = "PromptWeaver.Autocomplete.SourceOrder";
 export const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
+export const AUTOCOMPLETE_SOURCE_IDS = Object.freeze(["prompt-assistant", "danbooru"]);
+export const DEFAULT_AUTOCOMPLETE_SOURCE_ORDER = AUTOCOMPLETE_SOURCE_IDS;
 export const DEFAULT_AUTOCOMPLETE_LIMIT = 30;
 export const MIN_AUTOCOMPLETE_LIMIT = 1;
 export const MAX_AUTOCOMPLETE_LIMIT = 100;
@@ -120,6 +123,20 @@ export function normalizeAutocompleteLimit(value, fallback = DEFAULT_AUTOCOMPLET
         MAX_AUTOCOMPLETE_LIMIT,
         Math.max(MIN_AUTOCOMPLETE_LIMIT, Math.round(numericValue)),
     );
+}
+
+
+export function normalizeAutocompleteSourceOrder(value) {
+    const normalized = [];
+    for (const source of Array.isArray(value) ? value : []) {
+        if (AUTOCOMPLETE_SOURCE_IDS.includes(source) && !normalized.includes(source)) {
+            normalized.push(source);
+        }
+    }
+    for (const source of DEFAULT_AUTOCOMPLETE_SOURCE_ORDER) {
+        if (!normalized.includes(source)) normalized.push(source);
+    }
+    return normalized;
 }
 
 
@@ -569,12 +586,18 @@ export class PromptAssistantTagProvider {
 }
 
 
-export function mergeAutocompleteResults(resultGroups, limit = DEFAULT_AUTOCOMPLETE_LIMIT) {
+export function mergeAutocompleteResults(
+    resultGroups,
+    limit = DEFAULT_AUTOCOMPLETE_LIMIT,
+    sourceOrder = DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
+) {
+    const normalizedSourceOrder = normalizeAutocompleteSourceOrder(sourceOrder);
+    const sourcePriorities = new Map(normalizedSourceOrder.map((source, index) => [source, index]));
     const candidates = [];
     let sequence = 0;
     for (const group of Array.isArray(resultGroups) ? resultGroups : []) {
         for (const record of Array.isArray(group) ? group : []) {
-            const sourcePriority = record?.source === "prompt-assistant" ? 0 : 1;
+            const sourcePriority = sourcePriorities.get(record?.source) ?? normalizedSourceOrder.length;
             candidates.push({
                 record,
                 rank: Number.isFinite(record?.matchRank) ? record.matchRank : 2,
@@ -609,10 +632,14 @@ export class PromptTagAutocompleteProvider {
     constructor(api, {
         danbooruEnabled = () => true,
         promptAssistantEnabled = () => true,
+        sourceOrder = () => DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
         onDiagnostic,
     } = {}) {
         this.danbooruEnabled = danbooruEnabled;
         this.promptAssistantEnabled = promptAssistantEnabled;
+        this.sourceOrder = typeof sourceOrder === "function"
+            ? sourceOrder
+            : () => DEFAULT_AUTOCOMPLETE_SOURCE_ORDER;
         this.onDiagnostic = typeof onDiagnostic === "function" ? onDiagnostic : null;
         this.danbooru = new DanbooruTagProvider(api);
         this.promptAssistant = new PromptAssistantTagProvider(api, { onDiagnostic });
@@ -624,6 +651,7 @@ export class PromptTagAutocompleteProvider {
             return { results: [], danbooruStatus: null, danbooruEnabled: this.danbooruEnabled() };
         }
         const groups = [];
+        const sourceOrder = normalizeAutocompleteSourceOrder(this.sourceOrder());
         let danbooruStatus = null;
         const tasks = [];
         if (this.promptAssistantEnabled()) {
@@ -647,7 +675,7 @@ export class PromptTagAutocompleteProvider {
         await Promise.all(tasks);
         ensureNotAborted(signal);
         return {
-            results: mergeAutocompleteResults(groups, limit),
+            results: mergeAutocompleteResults(groups, limit, sourceOrder),
             danbooruStatus,
             danbooruEnabled,
         };
@@ -663,7 +691,8 @@ export class PromptTagAutocompleteProvider {
         ensureNotAborted(signal);
         const danbooruEnabled = this.danbooruEnabled();
         const promptAssistantEnabled = this.promptAssistantEnabled();
-        const sourceKey = `${promptAssistantEnabled ? 1 : 0}:${danbooruEnabled ? 1 : 0}`;
+        const sourceOrder = normalizeAutocompleteSourceOrder(this.sourceOrder());
+        const sourceKey = `${promptAssistantEnabled ? 1 : 0}:${danbooruEnabled ? 1 : 0}:${sourceOrder.join(",")}`;
         const inputKeys = values.map(normalizeAutocompleteInsertionKey);
         const missing = [];
         const seen = new Set();
@@ -698,9 +727,13 @@ export class PromptTagAutocompleteProvider {
             await Promise.all(tasks);
             ensureNotAborted(signal);
             for (let index = 0; index < batch.length; index += 1) {
+                const resultsBySource = {
+                    "prompt-assistant": promptAssistantResults[index],
+                    danbooru: danbooruResults[index],
+                };
                 this.translationCache.set(
                     `${sourceKey}:${batch[index]}`,
-                    promptAssistantResults[index] || danbooruResults[index] || null,
+                    sourceOrder.map((source) => resultsBySource[source]).find(Boolean) || null,
                 );
             }
         }

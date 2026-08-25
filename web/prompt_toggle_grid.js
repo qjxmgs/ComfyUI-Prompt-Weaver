@@ -49,6 +49,7 @@ import {
 } from "./prompt_editor_window.js?v=20260814-min-width-600";
 import {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
+    AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
     AUTOCOMPLETE_SETTINGS_EVENT,
     DEFAULT_AUTOCOMPLETE_LIMIT,
     DANBOORU_SETTING_ID,
@@ -57,10 +58,11 @@ import {
     PromptTagAutocompleteProvider,
     autocompleteTranslationText,
     normalizeAutocompleteLimit,
+    normalizeAutocompleteSourceOrder,
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260825-grid-delimiter-v1";
+} from "./prompt_tag_autocomplete.js?v=20260825-source-order-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -120,9 +122,13 @@ const readAutocompleteLimit = () => normalizeAutocompleteLimit(
     readAutocompleteSettingValue(AUTOCOMPLETE_LIMIT_SETTING_ID),
     DEFAULT_AUTOCOMPLETE_LIMIT,
 );
+const readAutocompleteSourceOrder = () => normalizeAutocompleteSourceOrder(
+    readAutocompleteSettingValue(AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID),
+);
 const promptTagAutocompleteProvider = new PromptTagAutocompleteProvider(api, {
     danbooruEnabled: () => readAutocompleteSetting(DANBOORU_SETTING_ID),
     promptAssistantEnabled: () => readAutocompleteSetting(PROMPT_ASSISTANT_SETTING_ID),
+    sourceOrder: readAutocompleteSourceOrder,
     onDiagnostic(message, error) {
         console.warn(`[Prompt Weaver] ${message}`, error || "");
     },
@@ -559,7 +565,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260825-match-highlight-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260825-source-order-v1", import.meta.url).href;
     document.head.append(link);
 }
 

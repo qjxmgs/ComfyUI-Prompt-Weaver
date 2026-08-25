@@ -13,13 +13,18 @@ import {
     shortBlobSha,
     translationManagerState,
 } from "./prompt_translation_manager.js?v=20260819-local-sqlite-v1";
+import {
+    AUTOCOMPLETE_LIMIT_SETTING_ID,
+    AUTOCOMPLETE_SETTINGS_EVENT,
+    AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
+    DANBOORU_SETTING_ID,
+    DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
+    PROMPT_ASSISTANT_SETTING_ID,
+    normalizeAutocompleteSourceOrder,
+} from "./prompt_tag_autocomplete.js?v=20260825-source-order-v1";
 
 const TRANSLATION_MANAGER_SETTING_ID = "PromptWeaver.Autocomplete.TranslationManager";
 const TRANSLATION_MANAGER_COMMAND_ID = "PromptWeaver.Autocomplete.UpdateDictionary";
-const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
-const PROMPT_ASSISTANT_SETTING_ID = "PromptWeaver.Autocomplete.PromptAssistant";
-const AUTOCOMPLETE_LIMIT_SETTING_ID = "PromptWeaver.Autocomplete.MaxResults";
-const AUTOCOMPLETE_SETTINGS_EVENT = "cpw-prompt-autocomplete-settings-changed";
 const BASE_TAG_SOURCE_PAGE = "https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv";
 const PRIMARY_TRANSLATION_SOURCE_PAGE = "https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery";
 const MAX_LOCAL_SUPPLEMENT_BYTES = 64 * 1024 * 1024;
@@ -130,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260825-match-highlight-v1",
+        "./prompt_toggle_grid.css?v=20260825-source-order-v1",
         import.meta.url,
     ).href;
     document.head.append(link);
@@ -865,33 +870,330 @@ function createTranslationManagerSettingButton() {
     return button;
 }
 
+const AUTOCOMPLETE_SOURCE_DEFINITIONS = Object.freeze({
+    "prompt-assistant": Object.freeze({
+        settingId: PROMPT_ASSISTANT_SETTING_ID,
+        label: "Prompt Assistant",
+        description: "Uses tag CSV files exposed by an installed ComfyUI-Prompt-Assistant plugin.",
+    }),
+    danbooru: Object.freeze({
+        settingId: DANBOORU_SETTING_ID,
+        label: "Danbooru",
+        description: "Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local.",
+    }),
+});
+
+function readBooleanAutocompleteSetting(settingId) {
+    try {
+        const value = app?.extensionManager?.setting?.get?.(settingId);
+        return value === undefined || value === null ? true : Boolean(value);
+    } catch (_error) {
+        return true;
+    }
+}
+
+async function writeAutocompleteSetting(settingId, value) {
+    const currentSettings = app?.extensionManager?.setting;
+    if (typeof currentSettings?.set === "function") {
+        await currentSettings.set(settingId, value);
+        return;
+    }
+    if (typeof app?.ui?.settings?.setSettingValue === "function") {
+        await app.ui.settings.setSettingValue(settingId, value);
+        return;
+    }
+    if (typeof api?.storeSetting === "function") {
+        await api.storeSetting(settingId, value);
+        return;
+    }
+    throw new Error(t("The ComfyUI settings service is unavailable."));
+}
+
+function sourceOrderFromControl(control) {
+    return normalizeAutocompleteSourceOrder(
+        [...control.querySelectorAll(".cpw-autocomplete-sources__row[data-source]")]
+            .map((row) => row.dataset.source),
+    );
+}
+
+function refreshAutocompleteSourceControlLocale(control) {
+    control.setAttribute("aria-label", t("Prompt library sources"));
+    for (const node of control.querySelectorAll("[data-cpw-i18n]")) {
+        node.textContent = t(node.dataset.cpwI18n);
+    }
+    for (const handle of control.querySelectorAll(".cpw-autocomplete-sources__handle")) {
+        const source = AUTOCOMPLETE_SOURCE_DEFINITIONS[handle.closest("[data-source]")?.dataset.source];
+        if (!source) continue;
+        handle.title = t("Drag to change the priority of {source}", { source: source.label });
+        handle.setAttribute("aria-label", handle.title);
+    }
+    for (const input of control.querySelectorAll(".cpw-autocomplete-sources__switch-input[data-source]")) {
+        const source = AUTOCOMPLETE_SOURCE_DEFINITIONS[input.dataset.source];
+        if (source) input.setAttribute("aria-label", t("Enable {source} autocomplete", { source: source.label }));
+    }
+}
+
+function createAutocompleteSourceOrderControl(_name, setter, storedValue) {
+    ensureTranslationStylesheet();
+    const initialOrder = normalizeAutocompleteSourceOrder(storedValue);
+    const control = element("div", "cpw-autocomplete-sources");
+    control.dataset.cpwAutocompleteSourceControl = "true";
+    control.setAttribute("role", "list");
+    control.setAttribute("aria-label", t("Prompt library sources"));
+    const liveRegion = element("span", "cpw-autocomplete-sources__live");
+    liveRegion.setAttribute("aria-live", "polite");
+    control.append(liveRegion);
+
+    const rows = new Map();
+    let keyboardSession = null;
+    let pointerSession = null;
+
+    const announce = (message, values = {}) => {
+        liveRegion.textContent = "";
+        requestAnimationFrame(() => { liveRegion.textContent = t(message, values); });
+    };
+
+    const persistCurrentOrder = () => {
+        const order = sourceOrderFromControl(control);
+        setter(order);
+        announce("Source priority updated. {source} is first.", {
+            source: AUTOCOMPLETE_SOURCE_DEFINITIONS[order[0]]?.label || order[0],
+        });
+    };
+
+    const clearKeyboardSession = ({ cancel = false } = {}) => {
+        if (!keyboardSession) return;
+        const { row, handle, originalOrder } = keyboardSession;
+        if (cancel) {
+            for (const source of originalOrder) control.append(rows.get(source));
+        }
+        row.classList.remove("cpw-autocomplete-sources__row--dragging");
+        handle.setAttribute("aria-grabbed", "false");
+        control.classList.remove("cpw-autocomplete-sources--dragging");
+        keyboardSession = null;
+        if (cancel) announce("Source priority change cancelled.");
+        else persistCurrentOrder();
+    };
+
+    const beginKeyboardDrag = (row, handle) => {
+        if (pointerSession) return;
+        keyboardSession = {
+            row,
+            handle,
+            originalOrder: sourceOrderFromControl(control),
+        };
+        row.classList.add("cpw-autocomplete-sources__row--dragging");
+        handle.setAttribute("aria-grabbed", "true");
+        control.classList.add("cpw-autocomplete-sources--dragging");
+        announce("Picked up {source}. Use the arrow keys to change priority.", {
+            source: AUTOCOMPLETE_SOURCE_DEFINITIONS[row.dataset.source]?.label || row.dataset.source,
+        });
+    };
+
+    const moveKeyboardRow = (direction) => {
+        if (!keyboardSession) return;
+        const order = sourceOrderFromControl(control);
+        const source = keyboardSession.row.dataset.source;
+        const index = order.indexOf(source);
+        const nextIndex = Math.max(0, Math.min(order.length - 1, index + direction));
+        if (nextIndex === index) return;
+        const other = rows.get(order[nextIndex]);
+        if (direction < 0) control.insertBefore(keyboardSession.row, other);
+        else control.insertBefore(keyboardSession.row, other.nextSibling);
+        announce("{source} moved to priority {position}.", {
+            source: AUTOCOMPLETE_SOURCE_DEFINITIONS[source]?.label || source,
+            position: nextIndex + 1,
+        });
+    };
+
+    const finishPointerDrag = (cancel = false) => {
+        if (!pointerSession) return;
+        const session = pointerSession;
+        pointerSession = null;
+        session.abort.abort();
+        session.placeholder.replaceWith(session.row);
+        if (cancel) {
+            for (const source of session.originalOrder) control.append(rows.get(source));
+        }
+        session.row.classList.remove("cpw-autocomplete-sources__row--dragging");
+        session.handle.setAttribute("aria-grabbed", "false");
+        for (const property of ["position", "zIndex", "left", "top", "width", "height", "pointerEvents"]) {
+            session.row.style[property] = "";
+        }
+        control.classList.remove("cpw-autocomplete-sources--dragging");
+        if (cancel) announce("Source priority change cancelled.");
+        else persistCurrentOrder();
+    };
+
+    const beginPointerDrag = (event, row, handle) => {
+        if (event.button !== 0 || pointerSession) return;
+        clearKeyboardSession({ cancel: true });
+        event.preventDefault();
+        const originalOrder = sourceOrderFromControl(control);
+        const rect = row.getBoundingClientRect();
+        const placeholder = element("div", "cpw-autocomplete-sources__placeholder");
+        placeholder.style.height = `${rect.height}px`;
+        placeholder.setAttribute("aria-hidden", "true");
+        row.after(placeholder);
+        document.body.append(row);
+        row.classList.add("cpw-autocomplete-sources__row--dragging");
+        control.classList.add("cpw-autocomplete-sources--dragging");
+        handle.setAttribute("aria-grabbed", "true");
+        Object.assign(row.style, {
+            position: "fixed",
+            zIndex: "100000",
+            left: `${rect.left}px`,
+            top: `${rect.top}px`,
+            width: `${rect.width}px`,
+            height: `${rect.height}px`,
+            pointerEvents: "none",
+        });
+        const abort = new AbortController();
+        pointerSession = {
+            row,
+            handle,
+            placeholder,
+            originalOrder,
+            pointerId: event.pointerId,
+            grabOffsetY: event.clientY - rect.top,
+            abort,
+        };
+        announce("Picked up {source}. Drag it above or below the other source.", {
+            source: AUTOCOMPLETE_SOURCE_DEFINITIONS[row.dataset.source]?.label || row.dataset.source,
+        });
+
+        window.addEventListener("pointermove", (moveEvent) => {
+            if (!pointerSession || moveEvent.pointerId !== pointerSession.pointerId) return;
+            row.style.top = `${moveEvent.clientY - pointerSession.grabOffsetY}px`;
+            const other = [...control.querySelectorAll(".cpw-autocomplete-sources__row[data-source]")][0];
+            if (!other) return;
+            const midpoint = other.getBoundingClientRect().top + other.getBoundingClientRect().height / 2;
+            if (moveEvent.clientY < midpoint) control.insertBefore(placeholder, other);
+            else control.insertBefore(placeholder, other.nextSibling);
+        }, { signal: abort.signal });
+        window.addEventListener("pointerup", (upEvent) => {
+            if (pointerSession && upEvent.pointerId === pointerSession.pointerId) finishPointerDrag(false);
+        }, {
+            signal: abort.signal,
+        });
+        window.addEventListener("pointercancel", (cancelEvent) => {
+            if (pointerSession && cancelEvent.pointerId === pointerSession.pointerId) finishPointerDrag(true);
+        }, {
+            signal: abort.signal,
+        });
+        window.addEventListener("blur", () => finishPointerDrag(true), {
+            once: true,
+            signal: abort.signal,
+        });
+    };
+
+    for (const sourceId of initialOrder) {
+        const source = AUTOCOMPLETE_SOURCE_DEFINITIONS[sourceId];
+        const row = element("div", "cpw-autocomplete-sources__row");
+        row.dataset.source = sourceId;
+        row.setAttribute("role", "listitem");
+        const handle = element("button", "cpw-autocomplete-sources__handle");
+        handle.type = "button";
+        handle.setAttribute("aria-grabbed", "false");
+        handle.append(
+            element("span", "cpw-autocomplete-sources__grip-dot"),
+            element("span", "cpw-autocomplete-sources__grip-dot"),
+            element("span", "cpw-autocomplete-sources__grip-dot"),
+            element("span", "cpw-autocomplete-sources__grip-dot"),
+            element("span", "cpw-autocomplete-sources__grip-dot"),
+            element("span", "cpw-autocomplete-sources__grip-dot"),
+        );
+        handle.addEventListener("pointerdown", (event) => beginPointerDrag(event, row, handle));
+        handle.addEventListener("keydown", (event) => {
+            if (event.key === " " || event.key === "Enter") {
+                event.preventDefault();
+                if (keyboardSession?.row === row) clearKeyboardSession();
+                else {
+                    clearKeyboardSession({ cancel: true });
+                    beginKeyboardDrag(row, handle);
+                }
+                return;
+            }
+            if (event.key === "Escape" && keyboardSession?.row === row) {
+                event.preventDefault();
+                clearKeyboardSession({ cancel: true });
+                return;
+            }
+            if (keyboardSession?.row === row && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+                event.preventDefault();
+                moveKeyboardRow(event.key === "ArrowUp" ? -1 : 1);
+            }
+        });
+
+        const copy = element("div", "cpw-autocomplete-sources__copy");
+        const label = element("strong", "cpw-autocomplete-sources__label", source.label);
+        const description = element("span", "cpw-autocomplete-sources__description");
+        description.dataset.cpwI18n = source.description;
+        copy.append(label, description);
+
+        const switchLabel = element("label", "cpw-autocomplete-sources__switch");
+        const switchInput = element("input", "cpw-autocomplete-sources__switch-input");
+        switchInput.type = "checkbox";
+        switchInput.dataset.source = sourceId;
+        switchInput.checked = readBooleanAutocompleteSetting(source.settingId);
+        switchInput.setAttribute("role", "switch");
+        switchInput.setAttribute("aria-label", t("Enable {source} autocomplete", { source: source.label }));
+        const switchTrack = element("span", "cpw-autocomplete-sources__switch-track");
+        switchTrack.setAttribute("aria-hidden", "true");
+        switchLabel.append(switchInput, switchTrack);
+        row.classList.toggle("cpw-autocomplete-sources__row--disabled", !switchInput.checked);
+        switchInput.addEventListener("change", async () => {
+            const nextValue = switchInput.checked;
+            switchInput.disabled = true;
+            row.classList.toggle("cpw-autocomplete-sources__row--disabled", !nextValue);
+            try {
+                await writeAutocompleteSetting(source.settingId, nextValue);
+                dispatchAutocompleteSettingsChanged();
+            } catch (error) {
+                switchInput.checked = !nextValue;
+                row.classList.toggle("cpw-autocomplete-sources__row--disabled", nextValue);
+                showAutocompleteToast(
+                    "error",
+                    t("Could not save autocomplete settings"),
+                    error?.message || String(error),
+                );
+            } finally {
+                switchInput.disabled = false;
+            }
+        });
+        row.append(handle, copy, switchLabel);
+        rows.set(sourceId, row);
+        control.append(row);
+    }
+
+    refreshAutocompleteSourceControlLocale(control);
+    if (JSON.stringify(storedValue) !== JSON.stringify(initialOrder)) {
+        queueMicrotask(() => setter([...initialOrder]));
+    }
+    return control;
+}
+
 connectLocale(app);
 subscribeLocale(() => {
     for (const button of document.querySelectorAll("[data-cpw-translation-manager-button]")) {
         button.textContent = t("Manage prompt translations…");
     }
     if (activeTranslationManager) refreshPromptTranslationManagerLocale(activeTranslationManager);
+    for (const control of document.querySelectorAll("[data-cpw-autocomplete-source-control]")) {
+        refreshAutocompleteSourceControlLocale(control);
+    }
 });
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.TranslationSettings",
     settings: [
         {
-            id: DANBOORU_SETTING_ID,
-            name: t("Enable Danbooru tag autocomplete"),
-            tooltip: t("Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local."),
-            category: ["Prompt Weaver", "Autocomplete", "Danbooru"],
-            type: "boolean",
-            defaultValue: true,
-            onChange: dispatchAutocompleteSettingsChanged,
-        },
-        {
-            id: PROMPT_ASSISTANT_SETTING_ID,
-            name: t("Enable Prompt Assistant autocomplete"),
-            tooltip: t("Uses tag CSV files exposed by an installed ComfyUI-Prompt-Assistant plugin."),
-            category: ["Prompt Weaver", "Autocomplete", "Prompt Assistant"],
-            type: "boolean",
-            defaultValue: true,
+            id: AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
+            name: t("Prompt library sources"),
+            tooltip: t("Drag sources to change their priority. Higher sources win equal-quality matches."),
+            category: ["Prompt Weaver", "Autocomplete", "Prompt library sources"],
+            type: createAutocompleteSourceOrderControl,
+            defaultValue: [...DEFAULT_AUTOCOMPLETE_SOURCE_ORDER],
             onChange: dispatchAutocompleteSettingsChanged,
         },
         {

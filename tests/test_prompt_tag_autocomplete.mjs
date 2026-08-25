@@ -21,10 +21,12 @@ const moduleSource = (await readFile(
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
+    AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
     AUTOCOMPLETE_POPUP_HEIGHT_STORAGE_KEY,
     DANBOORU_UPDATE_POLL_MS,
     DANBOORU_UPDATE_TIMEOUT_MS,
     DEFAULT_AUTOCOMPLETE_LIMIT,
+    DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
     DEFAULT_AUTOCOMPLETE_POPUP_HEIGHT,
     MAX_AUTOCOMPLETE_LIMIT,
     MAX_AUTOCOMPLETE_POPUP_HEIGHT,
@@ -43,6 +45,7 @@ const {
     mergeAutocompleteResults,
     normalizeAutocompleteLimit,
     normalizeAutocompletePopupHeight,
+    normalizeAutocompleteSourceOrder,
     normalizeAutocompleteInsertionKey,
     persistAutocompletePopupHeight,
     promptTokenHasHanText,
@@ -204,6 +207,18 @@ test("Chinese queries start at one character and Latin queries at two", () => {
     assert.equal(autocompleteQueryIsEligible("bl"), true);
 });
 
+test("autocomplete source order normalizes missing, duplicate, unknown, and damaged values", () => {
+    assert.equal(AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID, "PromptWeaver.Autocomplete.SourceOrder");
+    assert.deepEqual(DEFAULT_AUTOCOMPLETE_SOURCE_ORDER, ["prompt-assistant", "danbooru"]);
+    assert.deepEqual(normalizeAutocompleteSourceOrder(undefined), ["prompt-assistant", "danbooru"]);
+    assert.deepEqual(normalizeAutocompleteSourceOrder("danbooru"), ["prompt-assistant", "danbooru"]);
+    assert.deepEqual(
+        normalizeAutocompleteSourceOrder(["danbooru", "unknown", "danbooru"]),
+        ["danbooru", "prompt-assistant"],
+    );
+    assert.deepEqual(normalizeAutocompleteSourceOrder(["prompt-assistant"]), ["prompt-assistant", "danbooru"]);
+});
+
 test("dual-source merge ranks matches, prefers Prompt Assistant, and deduplicates insertions", () => {
     const merged = mergeAutocompleteResults([
         [
@@ -240,6 +255,44 @@ test("dual-source merge ranks matches, prefers Prompt Assistant, and deduplicate
         ],
     ]);
     assert.deepEqual(merged.map((record) => record.tag), ["杰作", "蓝眼睛", "blush"]);
+});
+
+test("source order breaks equal-quality ties without overriding match quality", () => {
+    const groups = [[{
+        source: "danbooru",
+        tag: "blue_eyes",
+        insertText: "blue eyes",
+        matchRank: 1,
+        postCount: 1_400_000,
+    }, {
+        source: "danbooru",
+        tag: "blue_eyeshadow",
+        insertText: "blue eyeshadow",
+        matchRank: 1,
+        postCount: 200_000,
+    }], [{
+        source: "prompt-assistant",
+        tag: "blue eyes custom",
+        insertText: "blue eyes",
+        matchRank: 1,
+        postCount: 0,
+    }, {
+        source: "prompt-assistant",
+        tag: "blue",
+        insertText: "blue",
+        matchRank: 0,
+        postCount: 0,
+    }]];
+    const danbooruFirst = mergeAutocompleteResults(groups, 30, ["danbooru", "prompt-assistant"]);
+    assert.deepEqual(
+        danbooruFirst.map((record) => record.tag),
+        ["blue", "blue_eyes", "blue_eyeshadow"],
+    );
+    const assistantFirst = mergeAutocompleteResults(groups, 30, ["prompt-assistant", "danbooru"]);
+    assert.deepEqual(
+        assistantFirst.map((record) => record.tag),
+        ["blue", "blue eyes custom", "blue_eyeshadow"],
+    );
 });
 
 test("Prompt Assistant maps English above Chinese while preserving English insertion and category", async () => {
@@ -538,11 +591,13 @@ test("dual-source merge compares fuzzy quality before source and count ties", ()
 
 test("translation resolution prefers Prompt Assistant, follows source toggles, and caches", async () => {
     let promptAssistantEnabled = true;
+    let sourceOrder = ["prompt-assistant", "danbooru"];
     let assistantCalls = 0;
     let danbooruCalls = 0;
     const provider = new PromptTagAutocompleteProvider(null, {
         danbooruEnabled: () => true,
         promptAssistantEnabled: () => promptAssistantEnabled,
+        sourceOrder: () => sourceOrder,
     });
     provider.danbooru = {
         async resolve(tags) {
@@ -573,10 +628,15 @@ test("translation resolution prefers Prompt Assistant, follows source toggles, a
     assert.equal(assistantCalls, 1);
     assert.equal(danbooruCalls, 1);
 
+    sourceOrder = ["danbooru", "prompt-assistant"];
+    assert.equal((await provider.resolveTagTranslations(["blue eyes"]))[0].translation, "丹博鲁翻译");
+    assert.equal(assistantCalls, 2);
+    assert.equal(danbooruCalls, 2);
+
     promptAssistantEnabled = false;
     assert.equal((await provider.resolveTagTranslations(["blue eyes"]))[0].translation, "丹博鲁翻译");
-    assert.equal(assistantCalls, 1);
-    assert.equal(danbooruCalls, 2);
+    assert.equal(assistantCalls, 2);
+    assert.equal(danbooruCalls, 3);
 });
 
 test("translation resolution honors cancellation before starting provider work", async () => {
@@ -623,8 +683,14 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,/);
     assert.match(source, /new PromptAutocompleteController\(\s*addInput,/);
     assert.match(source, /new PromptAutocompleteController\(\s*freeTextArea,/);
-    assert.match(settingsSource, /id:\s*DANBOORU_SETTING_ID/);
-    assert.match(settingsSource, /id:\s*PROMPT_ASSISTANT_SETTING_ID/);
+    assert.match(settingsSource, /settingId:\s*DANBOORU_SETTING_ID/);
+    assert.match(settingsSource, /settingId:\s*PROMPT_ASSISTANT_SETTING_ID/);
+    assert.match(settingsSource, /id:\s*AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID/);
+    assert.match(settingsSource, /type:\s*createAutocompleteSourceOrderControl/);
+    assert.match(settingsSource, /defaultValue:\s*\[\.\.\.DEFAULT_AUTOCOMPLETE_SOURCE_ORDER\]/);
+    assert.match(settingsSource, /addEventListener\("pointerdown"/);
+    assert.match(settingsSource, /event\.key === "ArrowUp" \|\| event\.key === "ArrowDown"/);
+    assert.doesNotMatch(settingsSource, /autocomplete-sources__move-(?:up|down)/);
     assert.match(settingsSource, /id:\s*AUTOCOMPLETE_LIMIT_SETTING_ID/);
     assert.match(settingsSource, /type:\s*"number"/);
     assert.match(settingsSource, /defaultValue:\s*30/);
@@ -632,11 +698,17 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-grid-delimiter-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-source-order-v1/);
+    assert.match(source, /sourceOrder:\s*readAutocompleteSourceOrder/);
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260825-match-highlight-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260825-source-order-v1/);
+    const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
+    assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
+    assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);
+    assert.match(cssSource, /\.cpw-autocomplete-sources__placeholder/);
+    assert.match(cssSource, /\.cpw-autocomplete-sources__row--dragging/);
 });
 
 test("non-free editor renders every token as two rows and keeps add button square", async () => {
