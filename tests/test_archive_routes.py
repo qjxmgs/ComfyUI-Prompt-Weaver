@@ -66,6 +66,9 @@ class _Request:
     async def read(self):
         return self._raw
 
+    async def json(self):
+        return json.loads(self._raw.decode("utf-8"))
+
 
 def _snapshot(prompt="masterpiece"):
     return {
@@ -123,6 +126,60 @@ class ArchiveRouteTests(unittest.TestCase):
 
     def run_async(self, awaitable):
         return asyncio.run(awaitable)
+
+    def test_open_workflow_keeps_legacy_ui_workflow_payload(self):
+        workflow = {"nodes": [{"id": 1, "type": "KSampler"}]}
+        response = self.run_async(self.module.open_workflow(_Request({
+            "name": "legacy",
+            "workflow": workflow,
+        })))
+
+        self.assertEqual(response.status, 200)
+        self.assertFalse(response.payload["delivered"])
+        taken = self.run_async(self.module.take_workflow(_Request(
+            match_info={"token": response.payload["token"]},
+        )))
+        self.assertEqual(taken.payload["name"], "legacy")
+        self.assertEqual(taken.payload["workflow"], workflow)
+        self.assertNotIn("api_prompt", taken.payload)
+
+    def test_open_workflow_accepts_api_prompt_and_delivers_to_frontend(self):
+        events = []
+        self.module.PromptServer.instance.send_sync = lambda *args: events.append(args)
+        self.module._frontend_heartbeats["client-1"] = self.module.time.monotonic()
+        api_prompt = {"3": {"class_type": "KSampler", "inputs": {"seed": 7}}}
+
+        response = self.run_async(self.module.open_workflow(_Request({
+            "name": "api graph",
+            "api_prompt": api_prompt,
+        })))
+
+        self.assertEqual(response.status, 200)
+        self.assertTrue(response.payload["delivered"])
+        self.assertEqual(len(events), 1)
+        event_name, data, client_id = events[0]
+        self.assertEqual(event_name, "prompt-weaver-open-workflow")
+        self.assertEqual(client_id, "client-1")
+        self.assertEqual(data["api_prompt"], api_prompt)
+        self.assertNotIn("workflow", data)
+        self.assertNotIn(response.payload["token"], self.module._pending_workflows)
+
+    def test_open_workflow_rejects_ambiguous_or_invalid_graphs(self):
+        workflow = {"nodes": []}
+        api_prompt = {"1": {"class_type": "KSampler", "inputs": {}}}
+        cases = [
+            ({}, "provide exactly one"),
+            ({"workflow": workflow, "api_prompt": api_prompt}, "provide exactly one"),
+            ({"workflow": {"nodes": "invalid"}}, "invalid UI workflow"),
+            ({"api_prompt": {}}, "invalid API prompt"),
+            ({"api_prompt": {"1": {"class_type": "KSampler"}}}, "invalid API prompt"),
+        ]
+
+        for payload, message in cases:
+            with self.subTest(payload=payload):
+                response = self.run_async(self.module.open_workflow(_Request(payload)))
+                self.assertEqual(response.status, 400)
+                self.assertIn(message, response.payload["error"])
 
     def test_crud_status_codes_and_user_isolation(self):
         created = self.run_async(

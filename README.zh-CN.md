@@ -154,7 +154,7 @@ API-format Prompt 的 `inputs.config` 必须是 JSON 编码后的**字符串**�
 
 ## Workflow 打开桥接
 
-已经打开的 ComfyUI 前端会通过心跳向插件注册。桌面端发送 `/prompt-weaver/open-workflow` 后，插件优先把 Workflow 投递给最近活跃的页面并调用 `app.loadGraphData()`；只有没有可用前端时才打开新的浏览器页面。
+已经打开的 ComfyUI 前端会通过心跳向插件注册。桌面端发送 `/prompt-weaver/open-workflow` 后，插件优先把生成图投递给最近活跃的页面：UI Workflow 调用 `app.loadGraphData()`，仅含 API Prompt 的图片调用 ComfyUI 原生 `app.loadApiJson()`；只有没有可用前端时才打开新的浏览器页面。
 
 ## 开发与测试
 

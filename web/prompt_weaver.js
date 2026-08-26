@@ -1,14 +1,9 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { loadPromptWeaverGraph } from "./prompt_weaver_load.js";
 
 async function loadWorkflow(payload) {
-    if (!payload?.workflow) return;
-    await app.loadGraphData(
-        payload.workflow,
-        true,
-        true,
-        payload.name || "Prompt Weaver Workflow"
-    );
+    await loadPromptWeaverGraph(app, payload);
     window.focus();
 }
 

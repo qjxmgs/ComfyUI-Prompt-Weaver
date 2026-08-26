@@ -195,15 +195,38 @@ async def open_workflow(request):
     except Exception:
         return web.json_response({"error": "invalid json"}, status=400)
 
-    workflow = payload.get("workflow")
-    if not isinstance(workflow, dict) or not isinstance(workflow.get("nodes"), list):
-        return web.json_response({"error": "invalid UI workflow"}, status=400)
+    has_workflow = "workflow" in payload
+    has_api_prompt = "api_prompt" in payload
+    if has_workflow == has_api_prompt:
+        return web.json_response(
+            {"error": "provide exactly one of workflow or api_prompt"},
+            status=400,
+        )
+
+    if has_workflow:
+        graph_field = "workflow"
+        graph = payload.get(graph_field)
+        if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+            return web.json_response({"error": "invalid UI workflow"}, status=400)
+        default_name = "Prompt Weaver Workflow"
+    else:
+        graph_field = "api_prompt"
+        graph = payload.get(graph_field)
+        if not isinstance(graph, dict) or not graph or any(
+            not isinstance(node, dict)
+            or not isinstance(node.get("class_type"), str)
+            or not node["class_type"].strip()
+            or not isinstance(node.get("inputs"), dict)
+            for node in graph.values()
+        ):
+            return web.json_response({"error": "invalid API prompt"}, status=400)
+        default_name = "Prompt Weaver API Prompt"
 
     token = uuid.uuid4().hex
     data = {
         "token": token,
-        "name": str(payload.get("name") or "Prompt Weaver Workflow"),
-        "workflow": workflow,
+        "name": str(payload.get("name") or default_name),
+        graph_field: graph,
     }
     _pending_workflows[token] = data
     while len(_pending_workflows) > 16:

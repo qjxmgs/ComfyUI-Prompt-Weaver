@@ -154,7 +154,7 @@ Validated baseline: ComfyUI 0.31.1, frontend 1.48.7, Python 3.13.11.
 
 ## Workflow-opening bridge
 
-An open ComfyUI frontend registers through a heartbeat. When the desktop application sends `/prompt-weaver/open-workflow`, the plugin delivers the workflow to the most recently active page and calls `app.loadGraphData()`. It opens a new browser page only when no active frontend is available.
+An open ComfyUI frontend registers through a heartbeat. When the desktop application sends `/prompt-weaver/open-workflow`, the plugin delivers the graph to the most recently active page. UI workflows use `app.loadGraphData()`, while prompt-only API graphs use ComfyUI's native `app.loadApiJson()`. It opens a new browser page only when no active frontend is available.
 
 ## Development and testing
 
