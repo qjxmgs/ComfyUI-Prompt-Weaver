@@ -208,6 +208,10 @@ function createId() {
     return `prompt-${Date.now().toString(36)}-${fallbackId.toString(36)}`;
 }
 
+function cardTitle(index) {
+    return t("Card {index}", { index: String(index).padStart(2, "0") });
+}
+
 function createDefaultConfig() {
     return {
         version: CONFIG_VERSION,
@@ -215,7 +219,7 @@ function createDefaultConfig() {
         items: Array.from({ length: DEFAULT_CARD_COUNT }, (_, index) => ({
             id: `prompt-${index + 1}`,
             enabled: true,
-            title: t("Prompt {index}", { index: index + 1 }),
+            title: cardTitle(index + 1),
             prompt: "",
         })),
     };
@@ -351,7 +355,7 @@ function normalizeConfigValue(value) {
             enabled: hasEnabled ? item.enabled : false,
             title: typeof item.title === "string"
                 ? item.title
-                : t("Prompt {index}", { index: index + 1 }),
+                : cardTitle(index + 1),
             prompt,
             ...(color ? { color } : {}),
             ...(!retainUnselected ? { retain_unselected: false } : {}),
@@ -653,7 +657,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260830-archive-icons-v12", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260830-text-mode-tab-v14", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -760,7 +764,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     const addButton = element(
         "button",
         "cpw-prompt-grid__button cpw-prompt-grid__button--primary",
-        t("+ Add Prompt"),
+        t("+ Add Card"),
     );
     const enableAllButton = element("button", "cpw-prompt-grid__button", t("Enable All"));
     const disableAllButton = element("button", "cpw-prompt-grid__button", t("Disable All"));
@@ -822,7 +826,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         setArchiveActionLabel(quickSaveArchiveButton, t("Save"));
         setArchiveActionLabel(restoreArchiveButton, t("Restore"));
         setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
-        addButton.textContent = t("+ Add Prompt");
+        addButton.textContent = t("+ Add Card");
         enableAllButton.textContent = t("Enable All");
         disableAllButton.textContent = t("Disable All");
         errorTitle.textContent = t("Configuration could not be read");
@@ -1268,7 +1272,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const snapshot = archive.id === DEFAULT_ARCHIVE_ID || archive.is_default
             ? localizePristineDefaultSnapshot(
                 archive.snapshot,
-                (index) => t("Prompt {index}", { index }),
+                (index) => cardTitle(index),
             )
             : archive.snapshot;
         const normalized = normalizeConfigValue(JSON.stringify(configFromArchiveSnapshot(snapshot)));
@@ -2454,10 +2458,10 @@ function createPromptGridWidget(node, inputName, inputData) {
     function nextTitle() {
         let highest = 0;
         for (const item of state?.items ?? []) {
-            const match = /^(?:Prompt|提示词)\s+(\d+)$/i.exec(item.title.trim());
+            const match = /^(?:Card|\u5361\u7247|Prompt|\u63d0\u793a\u8bcd)\s+(\d+)$/i.exec(item.title.trim());
             if (match) highest = Math.max(highest, Number(match[1]));
         }
-        return t("Prompt {index}", { index: highest + 1 });
+        return cardTitle(highest + 1);
     }
 
     function updateItem(id, patch, captureHistory = true) {
@@ -3127,9 +3131,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
         freeModeInput.type = "checkbox";
         freeModeInput.checked = false;
-        freeModeInput.setAttribute("aria-label", t("Free Mode"));
+        freeModeInput.setAttribute("aria-label", t("Text Mode"));
         const freeModeIndicator = element("span", "cpw-prompt-editor__free-mode-indicator");
-        const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", t("Free Mode"));
+        const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", t("Text Mode"));
         freeModeLabel.append(freeModeInput, freeModeIndicator, freeModeText);
         const retainUnselectedLabel = element(
             "label",
@@ -3279,6 +3283,19 @@ function createPromptGridWidget(node, inputName, inputData) {
                 renderCopyButton();
             }, 1400);
         };
+        const refreshModeControlHints = () => {
+            const textModeHint = t(freeMode
+                ? "Press Tab to switch to Tag Mode"
+                : "Press Tab to switch to Text Mode");
+            freeModeLabel.title = textModeHint;
+            freeModeInput.setAttribute("aria-description", textModeHint);
+            const retainUnselectedHint = t(retainUnselected
+                ? "Unselected prompts will be retained"
+                : "Unselected prompts will be removed");
+            retainUnselectedLabel.title = retainUnselectedHint;
+            retainUnselectedInput.setAttribute("aria-description", retainUnselectedHint);
+        };
+        refreshModeControlHints();
         const handleSuggestionAnchorChange = () => editorAutocompleteController?.position();
         const applyPromptEditorSize = (size) => {
             dialog.style.width = `${size.width}px`;
@@ -3609,6 +3626,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             focusInput = false,
             focusAddButton = false,
             focusFreeText = false,
+            focusTagMode = false,
         } = {}) => {
             cancelPromptTokenTranslations();
             renderActivePromptCount();
@@ -3623,7 +3641,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             tokenList.classList.toggle("cpw-prompt-editor__tokens--free", freeMode);
             tokenList.setAttribute(
                 "aria-label",
-                freeMode ? t("Free-mode prompt text") : t("Prompt tags"),
+                freeMode ? t("Text-mode prompt text") : t("Prompt tags"),
             );
 
             if (freeMode) {
@@ -3632,7 +3650,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 freeTextArea.value = freePromptText;
                 freeTextArea.placeholder = t("Enter the full prompt");
                 freeTextArea.spellcheck = false;
-                freeTextArea.setAttribute("aria-label", t("Free-mode prompt text"));
+                freeTextArea.setAttribute("aria-label", t("Text-mode prompt text"));
                 freeTextArea.addEventListener("input", (event) => {
                     freePromptText = event.currentTarget.value;
                     renderActivePromptCount();
@@ -3852,6 +3870,13 @@ function createPromptGridWidget(node, inputName, inputData) {
             void resolvePromptTokenTranslations();
             if (focusInput) queueMicrotask(() => addInput?.focus());
             if (focusAddButton) queueMicrotask(() => addButton?.focus());
+            if (focusTagMode) {
+                queueMicrotask(() => (
+                    tokenList.querySelector(".cpw-prompt-editor__token")
+                    ?? addButton
+                    ?? confirmButton
+                ).focus());
+            }
         };
         const formatAddStatus = ({ addedCount, mergedCount, reactivatedCount }, hadInput) => {
             if (!addedCount && !mergedCount) {
@@ -3941,6 +3966,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 freePromptText = promptForFreeMode();
                 freeMode = true;
                 freeModeInput.checked = true;
+                refreshModeControlHints();
                 renderTokens({ focusFreeText: true });
                 return;
             }
@@ -3957,13 +3983,15 @@ function createPromptGridWidget(node, inputName, inputData) {
             freeMode = false;
             freeModeInput.checked = false;
             promptRequiresRebuild = true;
-            renderTokens();
+            refreshModeControlHints();
+            renderTokens({ focusTagMode: true });
             setAddStatus(tokens.length ? t("Formatted as {count} prompts.", { count: tokens.length }) : "");
         };
 
         const setRetainUnselectedEnabled = (enabled) => {
             retainUnselected = Boolean(enabled);
             retainUnselectedInput.checked = retainUnselected;
+            refreshModeControlHints();
             renderTokens();
         };
 
@@ -3997,10 +4025,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             title.childNodes[0].textContent = t("Edit Prompts (");
             title.childNodes[2].textContent = t(")");
             renderActivePromptCount();
-            freeModeInput.setAttribute("aria-label", t("Free Mode"));
-            freeModeText.textContent = t("Free Mode");
+            freeModeInput.setAttribute("aria-label", t("Text Mode"));
+            freeModeText.textContent = t("Text Mode");
             retainUnselectedInput.setAttribute("aria-label", t("Retain unselected prompts"));
             retainUnselectedText.textContent = t("Retain Unselected");
+            refreshModeControlHints();
             fontSizeLabel.textContent = t("Font Size");
             fontSizeInput.setAttribute("aria-label", t("Prompt font size"));
             fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
@@ -4015,11 +4044,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
             tokenList.setAttribute(
                 "aria-label",
-                freeMode ? t("Free-mode prompt text") : t("Prompt tags"),
+                freeMode ? t("Text-mode prompt text") : t("Prompt tags"),
             );
             if (freeTextArea) {
                 freeTextArea.placeholder = t("Enter the full prompt");
-                freeTextArea.setAttribute("aria-label", t("Free-mode prompt text"));
+                freeTextArea.setAttribute("aria-label", t("Text-mode prompt text"));
             }
             if (addInput) {
                 addInput.placeholder = t("Enter a prompt; Chinese and English tag matching are supported");
@@ -4100,7 +4129,14 @@ function createPromptGridWidget(node, inputName, inputData) {
                 closePromptEditor();
                 return;
             }
-            if (event.key !== "Tab") return;
+            if (event.key !== "Tab" || event.isComposing) return;
+            if (!event.shiftKey) {
+                if (event.defaultPrevented) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setFreeModeEnabled(!freeMode);
+                return;
+            }
             const focusable = [...dialog.querySelectorAll(
                 "button:not([disabled]), input:not([disabled]), textarea:not([disabled])",
             )].filter((candidate) => candidate.tabIndex >= 0 && !candidate.hidden);
@@ -4110,9 +4146,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (event.shiftKey && document.activeElement === first) {
                 event.preventDefault();
                 last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
             }
         });
         for (const eventName of [
@@ -4264,7 +4297,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             grid.replaceChildren(element(
                 "div",
                 "cpw-prompt-grid__empty",
-                t("There are no prompts. Click \"Add Prompt\" to begin."),
+                t("There are no cards. Click \"Add Card\" to begin."),
             ));
         }
         reconcileArchiveSelection();

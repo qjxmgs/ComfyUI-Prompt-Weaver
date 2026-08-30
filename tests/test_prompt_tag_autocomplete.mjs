@@ -703,7 +703,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260830-archive-icons-v12/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260830-text-mode-tab-v14/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);
@@ -750,6 +750,7 @@ test("handled keys stay inside autocomplete and inserted text does not reopen re
         "utf8",
     );
     assert.match(source, /event\.stopImmediatePropagation\(\)/);
+    assert.match(source, /event\.key === "Tab" && !event\.shiftKey/);
     assert.match(source, /if \(!this\.applyingCompletion\) this\.schedule\(\)/);
     assert.match(source, /this\.applyingCompletion = true;[\s\S]*dispatchEvent[\s\S]*finally/);
 });

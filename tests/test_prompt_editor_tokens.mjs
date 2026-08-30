@@ -201,7 +201,7 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--toggling/);
 });
 
-test("prompt editor UI exposes non-persistent free mode with raw confirmation", async () => {
+test("prompt editor UI exposes non-persistent text mode with raw confirmation", async () => {
     const uiSource = await readFile(
         new URL("../web/prompt_toggle_grid.js", import.meta.url),
         "utf8",
@@ -211,7 +211,7 @@ test("prompt editor UI exposes non-persistent free mode with raw confirmation", 
         "utf8",
     );
     assert.match(uiSource, /freeModeInput\.checked = false/);
-    assert.match(uiSource, /cpw-prompt-editor__free-mode-text", t\("Free Mode"\)/);
+    assert.match(uiSource, /cpw-prompt-editor__free-mode-text", t\("Text Mode"\)/);
     assert.match(uiSource, /cpw-prompt-editor__free-text/);
     assert.match(uiSource, /enableAllButton\.disabled = freeMode/);
     assert.match(uiSource, /disableAllButton\.disabled = freeMode/);
@@ -228,6 +228,35 @@ test("prompt editor UI exposes non-persistent free mode with raw confirmation", 
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--free/);
     assert.match(styleSource, /\.cpw-prompt-editor__free-text/);
     assert.match(styleSource, /\.cpw-prompt-editor__action:disabled/);
+});
+
+test("text mode and retention expose stateful hints with Tab mode switching", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /const refreshModeControlHints = \(\) =>/);
+    assert.match(uiSource, /freeModeLabel\.title = textModeHint/);
+    assert.match(uiSource, /freeModeInput\.setAttribute\("aria-description", textModeHint\)/);
+    assert.match(uiSource, /retainUnselectedLabel\.title = retainUnselectedHint/);
+    assert.match(
+        uiSource,
+        /retainUnselectedInput\.setAttribute\("aria-description", retainUnselectedHint\)/,
+    );
+    assert.match(uiSource, /"Press Tab to switch to Tag Mode"/);
+    assert.match(uiSource, /"Press Tab to switch to Text Mode"/);
+    assert.match(uiSource, /"Unselected prompts will be retained"/);
+    assert.match(uiSource, /"Unselected prompts will be removed"/);
+    assert.match(
+        uiSource,
+        /if \(event\.key !== "Tab" \|\| event\.isComposing\) return;[\s\S]*if \(!event\.shiftKey\)[\s\S]*setFreeModeEnabled\(!freeMode\)/,
+    );
+    assert.match(uiSource, /renderTokens\(\{ focusFreeText: true \}\)/);
+    assert.match(uiSource, /renderTokens\(\{ focusTagMode: true \}\)/);
+    assert.match(
+        uiSource,
+        /tokenList\.querySelector\("\.cpw-prompt-editor__token"\)[\s\S]*\?\? addButton[\s\S]*\?\? confirmButton/,
+    );
 });
 
 test("removing a retained inactive token preserves the exact active prompt", () => {

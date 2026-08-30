@@ -32,7 +32,10 @@ test("locale normalization supports Simplified Chinese and falls back to English
 
 test("translations interpolate values, format quantities and dates, and preserve fallbacks", () => {
     setLocale("en");
-    assert.equal(t("Prompt {index}", { index: 3 }), "Prompt 3");
+    assert.equal(t("Card {index}", { index: "03" }), "Card 03");
+    assert.equal(t("Text Mode"), "Text Mode");
+    assert.equal(t("Press Tab to switch to Tag Mode"), "Press Tab to switch to Tag Mode");
+    assert.equal(t("Unselected prompts will be removed"), "Unselected prompts will be removed");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 1), "1 prompt active");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "2 prompts active");
     assert.equal(formatNumber(12345.6), "12,345.6");
@@ -41,7 +44,10 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.match(formatDateTime("2026-08-12T12:34:56Z"), /2026/);
 
     setLocale("zh-CN");
-    assert.equal(t("Prompt {index}", { index: 3 }), "提示词 3");
+    assert.equal(t("Card {index}", { index: "03" }), "卡片 03");
+    assert.equal(t("Text Mode"), "文本模式");
+    assert.equal(t("Press Tab to switch to Tag Mode"), "按 Tab 键切换到标签模式");
+    assert.equal(t("Unselected prompts will be removed"), "未点亮的提示词将被移除");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "当前激活 2 个提示词");
     assert.equal(formatNumber(12345.6), "12,345.6");
     assert.equal(formatList(["一", "二"]), "一和二");

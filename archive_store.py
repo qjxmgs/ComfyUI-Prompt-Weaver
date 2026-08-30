@@ -73,7 +73,7 @@ def default_snapshot():
             {
                 "id": f"prompt-{index}",
                 "enabled": True,
-                "title": f"Prompt {index}",
+                "title": f"Card {index:02d}",
                 "prompt": "",
             }
             for index in range(1, 5)

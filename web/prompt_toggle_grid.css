@@ -1221,7 +1221,8 @@
     text-align: right;
 }
 
-.cpw-prompt-editor__close {
+.cpw-prompt-editor__close,
+.cpw-archive-manager__close {
     position: relative;
     z-index: 2;
     flex: 0 0 24px;
@@ -1239,7 +1240,9 @@
 }
 
 .cpw-prompt-editor__close::before,
-.cpw-prompt-editor__close::after {
+.cpw-prompt-editor__close::after,
+.cpw-archive-manager__close::before,
+.cpw-archive-manager__close::after {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -1251,22 +1254,27 @@
     pointer-events: none;
 }
 
-.cpw-prompt-editor__close::before {
+.cpw-prompt-editor__close::before,
+.cpw-archive-manager__close::before {
     transform: translate(-50%, -50%) rotate(45deg);
 }
 
-.cpw-prompt-editor__close::after {
+.cpw-prompt-editor__close::after,
+.cpw-archive-manager__close::after {
     transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .cpw-prompt-editor__close:hover,
-.cpw-prompt-editor__close:focus-visible {
+.cpw-prompt-editor__close:focus-visible,
+.cpw-archive-manager__close:hover,
+.cpw-archive-manager__close:focus-visible {
     outline: 2px solid color-mix(in srgb, #ff8a80 76%, transparent);
     outline-offset: 1px;
     background: #ff4d4f;
 }
 
-.cpw-prompt-editor__close:active {
+.cpw-prompt-editor__close:active,
+.cpw-archive-manager__close:active {
     outline: 0;
     background: #c62828;
 }
@@ -1806,23 +1814,6 @@
 .cpw-archive-manager__title {
     margin: 0;
     font: 600 16px/1.4 Inter, system-ui, sans-serif;
-}
-
-.cpw-archive-manager__close {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    border-radius: 5px;
-    color: var(--descrip-text, #bbb);
-    background: transparent;
-    font: 20px/1 Inter, system-ui, sans-serif;
-    cursor: pointer;
-}
-
-.cpw-archive-manager__close:hover {
-    color: var(--input-text, #fff);
-    background: color-mix(in srgb, var(--border-color, #4b4d52) 45%, transparent);
 }
 
 .cpw-archive-manager__save-row {

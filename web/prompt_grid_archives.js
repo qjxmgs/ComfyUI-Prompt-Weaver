@@ -103,7 +103,12 @@ export function isPristineDefaultSnapshot(snapshot) {
                 && item.retain_unselected !== false
                 && !Array.isArray(item.prompt_tokens)
                 && !normalizePromptGridItemColor(item.color)
-                && (item.title === `Prompt ${number}` || item.title === `提示词 ${number}`);
+                && (
+                    item.title === `Card ${String(number).padStart(2, "0")}`
+                    || item.title === `\u5361\u7247 ${String(number).padStart(2, "0")}`
+                    || item.title === `Prompt ${number}`
+                    || item.title === `提示词 ${number}`
+                );
         });
 }
 

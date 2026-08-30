@@ -476,7 +476,7 @@ test("retained prompt token state survives archive round trips and participates 
     assert.equal(disabled.items[0].prompt_tokens, undefined);
 });
 
-test("pristine English and legacy Chinese default snapshots localize without becoming dirty", () => {
+test("new and legacy pristine default snapshots localize without becoming dirty", () => {
     const english = {
         version: 1,
         columns: 2,
@@ -488,13 +488,23 @@ test("pristine English and legacy Chinese default snapshots localize without bec
             prompt: "",
         })),
     };
-    const chinese = localizePristineDefaultSnapshot(english, (index) => `提示词 ${index}`);
+    const chinese = localizePristineDefaultSnapshot(
+        english,
+        (index) => `卡片 ${String(index).padStart(2, "0")}`,
+    );
     assert.equal(isPristineDefaultSnapshot(english), true);
     assert.equal(isPristineDefaultSnapshot(chinese), true);
     assert.equal(semanticFingerprint(english), semanticFingerprint(chinese));
     assert.equal(resolveArchiveStatus([
         { id: DEFAULT_ARCHIVE_ID, snapshot: english },
     ], chinese, DEFAULT_ARCHIVE_ID).dirty, false);
+
+    const newEnglish = localizePristineDefaultSnapshot(
+        english,
+        (index) => `Card ${String(index).padStart(2, "0")}`,
+    );
+    assert.equal(isPristineDefaultSnapshot(newEnglish), true);
+    assert.equal(semanticFingerprint(english), semanticFingerprint(newEnglish));
 
     const edited = structuredClone(chinese);
     edited.items[0].prompt = "masterpiece";

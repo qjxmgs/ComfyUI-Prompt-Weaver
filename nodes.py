@@ -11,7 +11,7 @@ DEFAULT_CONFIG = json.dumps(
         "items": [
             {
                 "id": f"prompt-{index}",
-                "title": f"Prompt {index}",
+                "title": f"Card {index:02d}",
                 "prompt": "",
                 "enabled": True,
             }

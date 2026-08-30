@@ -1553,7 +1553,8 @@ export class PromptAutocompleteController {
             }
             return;
         }
-        if ((event.key === "Enter" || event.key === "Tab") && this.activeIndex >= 0) {
+        if ((event.key === "Enter" || (event.key === "Tab" && !event.shiftKey))
+            && this.activeIndex >= 0) {
             event.preventDefault();
             event.stopImmediatePropagation();
             this.select(this.activeIndex);

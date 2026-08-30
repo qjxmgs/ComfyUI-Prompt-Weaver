@@ -45,7 +45,7 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["title"] for item in default["items"]],
-            ["Prompt 1", "Prompt 2", "Prompt 3", "Prompt 4"],
+            ["Card 01", "Card 02", "Card 03", "Card 04"],
         )
         self.assertTrue(all(item["enabled"] for item in default["items"]))
         self.assertTrue(all(item["prompt"] == "" for item in default["items"]))

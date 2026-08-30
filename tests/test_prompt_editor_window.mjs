@@ -94,9 +94,18 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-control\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__header-actions\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-label\s*\{/);
-    assert.match(styleSource, /\.cpw-prompt-editor__close\s*\{[\s\S]*background:\s*#e53935;/);
-    assert.match(styleSource, /\.cpw-prompt-editor__close::before,[\s\S]*\.cpw-prompt-editor__close::after/);
-    assert.match(styleSource, /\.cpw-prompt-editor__close:active\s*\{[\s\S]*background:\s*#c62828;/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__close,\s*\.cpw-archive-manager__close\s*\{[\s\S]*background:\s*#e53935;/,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__close::before,[\s\S]*\.cpw-archive-manager__close::after/,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__close:active,\s*\.cpw-archive-manager__close:active\s*\{[\s\S]*background:\s*#c62828;/,
+    );
     assert.match(styleSource, /font-size: var\(--cpw-prompt-editor-font-size, 15px\)/);
     assert.match(uiSource, /PROMPT_EDITOR_MIN_WIDTH = 600/);
     assert.match(styleSource, /min-width: min\(600px, calc\(100vw - 32px\)\)/);
