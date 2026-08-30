@@ -184,6 +184,8 @@ def validate_snapshot(value):
         prompt = item.get("prompt")
         has_color = "color" in item
         color = item.get("color")
+        has_favorite_id = "favorite_id" in item
+        favorite_id = item.get("favorite_id")
         has_retain_unselected = "retain_unselected" in item
         retain_unselected = item.get("retain_unselected", True)
         has_prompt_tokens = "prompt_tokens" in item
@@ -202,6 +204,13 @@ def validate_snapshot(value):
             raise ArchiveValidationError(
                 f"snapshot items[{index}].color must be a supported color"
             )
+        if has_favorite_id:
+            try:
+                favorite_id = str(uuid.UUID(favorite_id))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise ArchiveValidationError(
+                    f"snapshot items[{index}].favorite_id must be a UUID string"
+                ) from error
         if has_retain_unselected and not isinstance(retain_unselected, bool):
             raise ArchiveValidationError(
                 f"snapshot items[{index}].retain_unselected must be a boolean"
@@ -243,6 +252,8 @@ def validate_snapshot(value):
         }
         if has_color:
             normalized_item["color"] = color
+        if has_favorite_id:
+            normalized_item["favorite_id"] = favorite_id
         if retain_unselected is False:
             normalized_item["retain_unselected"] = False
         elif any(not token["selected"] for token in normalized_prompt_tokens):

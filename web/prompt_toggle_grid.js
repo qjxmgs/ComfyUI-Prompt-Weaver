@@ -16,12 +16,20 @@ import {
     localizePristineDefaultSnapshot,
     normalizeArchiveNodeSize,
     normalizeArchiveManagerSelection,
+    normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260823-prefix-prompt-v1";
+} from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
+import {
+    getPromptCardLibraryService,
+    openPromptCardFavoriteCascade,
+    openPromptCardLibraryMenu,
+    promptCardFavoriteSnapshot,
+    replacePromptGridItemWithFavorite,
+} from "./prompt_card_library.js?v=20260831-prompt-card-switch-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -320,6 +328,12 @@ function normalizeConfigValue(value) {
         if (Object.prototype.hasOwnProperty.call(item, "title") && typeof item.title !== "string") {
             throw configError(t("items[{index}].title must be a string", { index }));
         }
+        const hasFavoriteId = Object.prototype.hasOwnProperty.call(item, "favorite_id");
+        const favoriteId = normalizePromptCardFavoriteId(item.favorite_id);
+        if (hasFavoriteId && !favoriteId) {
+            throw configError(t("items[{index}].favorite_id must be a UUID string", { index }));
+        }
+        if (hasFavoriteId && favoriteId !== item.favorite_id) normalized = true;
 
         let id = typeof item.id === "string" && item.id.trim() ? item.id : createId();
         if (usedIds.has(id)) throw configError(t("items[{index}].id duplicates another card", { index }));
@@ -330,6 +344,7 @@ function normalizeConfigValue(value) {
         if (hasColor && !color) normalized = true;
         const {
             color: _discardedColor,
+            favorite_id: _discardedFavoriteId,
             retain_unselected: _discardedRetainUnselected,
             prompt_tokens: _discardedPromptTokens,
             ...itemWithoutEditorState
@@ -360,6 +375,7 @@ function normalizeConfigValue(value) {
                 : cardTitle(index + 1),
             prompt,
             ...(color ? { color } : {}),
+            ...(favoriteId ? { favorite_id: favoriteId } : {}),
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && normalizedTokenStates
                 ? { prompt_tokens: normalizedTokenStates }
@@ -659,7 +675,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260830-editor-history-v15", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260831-favorite-shine-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -701,6 +717,7 @@ function archiveErrorMessage(error) {
 function createPromptGridWidget(node, inputName, inputData) {
     syncLocale(app);
     ensureStylesheet();
+    const promptCardLibraryService = getPromptCardLibraryService(api);
 
     const root = element("div", "cpw-prompt-grid");
     const toolbar = element("div", "cpw-prompt-grid__toolbar");
@@ -793,6 +810,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let dragSession = null;
     let dragFrame = 0;
     let activePromptEditor = null;
+    let activePromptCardLibraryMenu = null;
     let activeItemContextMenu = null;
     let activeArchiveManager = null;
     let activeArchiveConfirmation = null;
@@ -815,6 +833,11 @@ function createPromptGridWidget(node, inputName, inputData) {
     const cardAutocompleteControllers = new Set();
     const reorderAnimations = new WeakMap();
     const archiveReorderAnimations = new WeakMap();
+    const pendingFavoriteRefreshItems = new Set();
+    const favoriteRefreshTimers = new Map();
+    promptCardLibraryService.refresh().catch((error) => {
+        console.warn("[Prompt Weaver] Could not load prompt card favorites", error);
+    });
 
     function refreshLocale() {
         if (disposed) return;
@@ -866,6 +889,11 @@ function createPromptGridWidget(node, inputName, inputData) {
                 editButton.title = t("Split and select prompts");
                 editButton.setAttribute("aria-label", t("Open the prompt tag editor"));
             }
+        }
+        for (const button of root.querySelectorAll(".cpw-prompt-grid__favorite-switch")) {
+            const label = t("Switch this card to a favorite");
+            button.title = label;
+            button.setAttribute("aria-label", label);
         }
         activePromptEditor?.refreshLocale?.();
         renderArchiveSelect();
@@ -2474,7 +2502,73 @@ function createPromptGridWidget(node, inputName, inputData) {
         commit(false, captureHistory);
     }
 
-    function updatePromptEditorItem(id, { prompt, retainUnselected, promptTokens }) {
+    function clearFavoriteRefreshTimers() {
+        for (const timer of favoriteRefreshTimers.values()) clearTimeout(timer);
+        favoriteRefreshTimers.clear();
+    }
+
+    function playFavoriteRefreshAnimation(itemId, card = cardElements.get(itemId)) {
+        if (!card?.isConnected) return;
+        const previousTimer = favoriteRefreshTimers.get(itemId);
+        if (previousTimer) clearTimeout(previousTimer);
+        card.classList.remove("cpw-prompt-grid__card--favorite-refreshed");
+        void card.offsetWidth;
+        card.classList.add("cpw-prompt-grid__card--favorite-refreshed");
+        favoriteRefreshTimers.set(itemId, setTimeout(() => {
+            favoriteRefreshTimers.delete(itemId);
+            card.classList.remove("cpw-prompt-grid__card--favorite-refreshed");
+        }, 900));
+    }
+
+    function closePromptCardLibraryMenu(restoreFocus = false) {
+        const menu = activePromptCardLibraryMenu;
+        activePromptCardLibraryMenu = null;
+        menu?.close?.({ restoreFocus });
+    }
+
+    function switchItemToFavorite(itemId, favorite) {
+        if (!state) return false;
+        const index = state.items.findIndex((item) => item.id === itemId);
+        if (index < 0) return false;
+        const current = state.items[index];
+        const next = replacePromptGridItemWithFavorite(current, favorite);
+        const sameFavorite = normalizePromptCardFavoriteId(current.favorite_id)
+            === normalizePromptCardFavoriteId(next.favorite_id);
+        const sameSnapshot = JSON.stringify(promptCardFavoriteSnapshot(current))
+            === JSON.stringify(promptCardFavoriteSnapshot(next));
+        if (sameFavorite && sameSnapshot) {
+            playFavoriteRefreshAnimation(itemId);
+            return false;
+        }
+        state.items[index] = next;
+        pendingFavoriteRefreshItems.add(itemId);
+        commit(true, true);
+        return true;
+    }
+
+    function openCardFavoriteSwitchMenu(itemId, button) {
+        closePromptCardLibraryMenu(false);
+        let controller = null;
+        controller = openPromptCardFavoriteCascade({
+            service: promptCardLibraryService,
+            anchor: button,
+            onChooseCard: (favorite) => switchItemToFavorite(itemId, favorite),
+            onClose: () => {
+                if (activePromptCardLibraryMenu === controller) activePromptCardLibraryMenu = null;
+                button.setAttribute("aria-expanded", "false");
+            },
+        });
+        controller.anchor = button;
+        activePromptCardLibraryMenu = controller;
+        button.setAttribute("aria-expanded", "true");
+    }
+
+    function updatePromptEditorItem(id, {
+        prompt,
+        retainUnselected,
+        promptTokens,
+        favoriteId,
+    }) {
         if (!state) return false;
         const index = state.items.findIndex((item) => item.id === id);
         if (index < 0) return false;
@@ -2483,14 +2577,18 @@ function createPromptGridWidget(node, inputName, inputData) {
         const currentPromptTokens = Array.isArray(currentItem.prompt_tokens)
             ? currentItem.prompt_tokens
             : null;
+        const currentFavoriteId = normalizePromptCardFavoriteId(currentItem.favorite_id);
+        const nextFavoriteId = normalizePromptCardFavoriteId(favoriteId);
         if (
             currentItem.prompt === prompt
             && currentRetainUnselected === retainUnselected
             && JSON.stringify(currentPromptTokens) === JSON.stringify(promptTokens)
+            && currentFavoriteId === nextFavoriteId
         ) return false;
         const {
             retain_unselected: _discardedRetainUnselected,
             prompt_tokens: _discardedPromptTokens,
+            favorite_id: _discardedFavoriteId,
             ...baseItem
         } = currentItem;
         const nextItem = {
@@ -2498,6 +2596,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             prompt,
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && promptTokens?.length ? { prompt_tokens: promptTokens } : {}),
+            ...(nextFavoriteId ? { favorite_id: nextFavoriteId } : {}),
         };
         state.items[index] = nextItem;
         commit(false, true);
@@ -3068,6 +3167,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     function closePromptEditor(restoreFocus = true) {
         const editor = activePromptEditor;
         if (!editor) return;
+        closePromptCardLibraryMenu(false);
         editor.cancelPendingAdd?.();
         activePromptEditor = null;
         editor.overlay.remove();
@@ -3114,6 +3214,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         let copyFeedbackState = "";
         let promptRequiresRebuild = false;
         let promptFontSize = readPromptEditorFontSize();
+        let editorFavoriteId = normalizePromptCardFavoriteId(currentItem?.favorite_id);
         const editorHistory = new PromptEditorHistory();
         let pendingTextHistory = null;
 
@@ -3253,9 +3354,23 @@ function createPromptGridWidget(node, inputName, inputData) {
         copyButton.setAttribute("aria-live", "polite");
         confirmButton.type = "button";
         selectionActions.append(enableAllButton, disableAllButton);
+        const favoriteActions = element("div", "cpw-prompt-editor__favorite-actions");
+        const favoriteCardsButton = element(
+            "button",
+            "cpw-prompt-editor__action cpw-prompt-editor__action--favorites",
+        );
+        favoriteCardsButton.type = "button";
+        favoriteCardsButton.setAttribute("aria-haspopup", "dialog");
+        favoriteCardsButton.setAttribute("aria-expanded", "false");
+        const favoriteCardsIcon = element("span", "cpw-prompt-editor__favorite-icon");
+        const favoriteCardsText = element("span", "", t("Favorites"));
+        favoriteCardsButton.append(favoriteCardsIcon, favoriteCardsText);
+        favoriteCardsButton.title = t("Save or manage this card's favorite");
+        favoriteCardsButton.setAttribute("aria-label", t("Save or manage this card's favorite"));
+        favoriteActions.append(favoriteCardsButton);
         const commitActions = element("div", "cpw-prompt-editor__commit-actions");
         commitActions.append(copyButton, confirmButton);
-        footer.append(selectionActions, commitActions);
+        footer.append(selectionActions, favoriteActions, commitActions);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
         resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
@@ -4123,6 +4238,44 @@ function createPromptGridWidget(node, inputName, inputData) {
             return restorePromptContentSnapshot(snapshot, { focusContent });
         };
 
+        const currentEditorFavoriteSnapshot = () => {
+            const storedDraft = currentStoredTokenDraft();
+            const promptTokens = retainUnselected
+                ? promptTokenStatesForStorage(storedDraft.tokens, storedDraft.selected)
+                : null;
+            return promptCardFavoriteSnapshot({
+                title: currentItem?.title ?? "",
+                prompt: currentPromptDraft(),
+                color: currentItem?.color,
+                retain_unselected: retainUnselected,
+                prompt_tokens: promptTokens,
+            });
+        };
+
+        const openEditorFavoriteMenu = () => {
+            closePromptCardLibraryMenu(false);
+            let controller = null;
+            controller = openPromptCardLibraryMenu({
+                service: promptCardLibraryService,
+                anchor: favoriteCardsButton,
+                mode: "assign",
+                favoriteId: editorFavoriteId,
+                getSnapshot: currentEditorFavoriteSnapshot,
+                onFavoriteLinked: (favoriteId) => {
+                    editorFavoriteId = normalizePromptCardFavoriteId(favoriteId);
+                },
+                onClose: () => {
+                    if (activePromptCardLibraryMenu === controller) {
+                        activePromptCardLibraryMenu = null;
+                    }
+                    favoriteCardsButton.setAttribute("aria-expanded", "false");
+                },
+            });
+            controller.anchor = favoriteCardsButton;
+            activePromptCardLibraryMenu = controller;
+            favoriteCardsButton.setAttribute("aria-expanded", "true");
+        };
+
         const setFreeModeEnabled = (enabled) => {
             if (enabled === freeMode) return;
             cleanupPromptTokenToggleGesture();
@@ -4216,6 +4369,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             disableAllButton.textContent = t("Disable All");
             enableAllButton.title = t("Enable all prompts");
             disableAllButton.title = t("Disable all prompts");
+            favoriteCardsText.textContent = t("Favorites");
+            favoriteCardsButton.title = t("Save or manage this card's favorite");
+            favoriteCardsButton.setAttribute("aria-label", t("Save or manage this card's favorite"));
             renderCopyButton();
             confirmButton.textContent = t("Confirm");
             resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
@@ -4278,6 +4434,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         retainUnselectedInput.addEventListener("change", () => (
             setRetainUnselectedEnabled(retainUnselectedInput.checked)
         ));
+        favoriteCardsButton.addEventListener("click", openEditorFavoriteMenu);
         copyButton.addEventListener("click", async () => {
             try {
                 await copyTextToClipboard(currentPromptDraft());
@@ -4300,6 +4457,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 prompt: nextPrompt,
                 retainUnselected,
                 promptTokens,
+                favoriteId: editorFavoriteId,
             });
         });
         dialog.addEventListener("keydown", (event) => {
@@ -4371,6 +4529,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         cardElements.set(item.id, card);
         card.classList.toggle("cpw-prompt-grid__card--disabled", !item.enabled);
         applyCardColor(card, item.color);
+        if (pendingFavoriteRefreshItems.delete(item.id)) {
+            queueMicrotask(() => playFavoriteRefreshAnimation(item.id, card));
+        }
 
         const header = element("div", "cpw-prompt-grid__card-header");
         const dragHandle = element("button", "cpw-prompt-grid__drag", "⠿");
@@ -4391,13 +4552,24 @@ function createPromptGridWidget(node, inputName, inputData) {
         title.placeholder = t("Prompt title");
         title.setAttribute("aria-label", t("Prompt title"));
 
+        const titleShell = element("div", "cpw-prompt-grid__title-shell");
+        const favoriteSwitchButton = element("button", "cpw-prompt-grid__favorite-switch");
+        favoriteSwitchButton.type = "button";
+        favoriteSwitchButton.setAttribute("aria-haspopup", "menu");
+        favoriteSwitchButton.setAttribute("aria-expanded", "false");
+        const favoriteSwitchLabel = t("Switch this card to a favorite");
+        favoriteSwitchButton.title = favoriteSwitchLabel;
+        favoriteSwitchButton.setAttribute("aria-label", favoriteSwitchLabel);
+        favoriteSwitchButton.append(element("span", "cpw-prompt-grid__favorite-switch-icon"));
+        titleShell.append(title, favoriteSwitchButton);
+
         const deleteButton = element("button", "cpw-prompt-grid__delete", "×");
         deleteButton.type = "button";
         deleteButton.title = t("Delete this prompt");
         deleteButton.setAttribute("aria-label", t("Delete this prompt"));
         const cardActions = element("div", "cpw-prompt-grid__card-actions");
         cardActions.append(deleteButton, dragHandle);
-        header.append(toggleLabel, title, cardActions);
+        header.append(toggleLabel, titleShell, cardActions);
 
         const prompt = element("input", "cpw-prompt-grid__prompt");
         prompt.type = "text";
@@ -4441,6 +4613,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             },
         ));
         promptEditButton.addEventListener("click", () => openPromptEditor(prompt, item.id, promptEditButton));
+        favoriteSwitchButton.addEventListener("click", () => (
+            openCardFavoriteSwitchMenu(item.id, favoriteSwitchButton)
+        ));
         deleteButton.addEventListener("click", () => {
             const liveItem = state?.items.find((candidate) => candidate.id === item.id) ?? item;
             const hasRetainedPrompts = Array.isArray(liveItem.prompt_tokens)
@@ -4472,7 +4647,9 @@ function createPromptGridWidget(node, inputName, inputData) {
     function render() {
         if (disposed) return;
         syncLocale(app);
+        closePromptCardLibraryMenu(false);
         closeItemContextMenu();
+        clearFavoriteRefreshTimers();
         if (activePromptEditor) closePromptEditor(false);
         if (dragSession) endPointerDrag(true);
         for (const controller of cardAutocompleteControllers) controller.destroy();
@@ -4605,12 +4782,15 @@ function createPromptGridWidget(node, inputName, inputData) {
     widget.inputSpec = inputData;
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
+        closePromptCardLibraryMenu(false);
         closeItemContextMenu();
         if (activePromptEditor) closePromptEditor(false);
         if (activeArchiveConfirmation) closeArchiveConfirmation(false);
         closeArchiveManager();
         if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
         if (sizeReconcileFrame) cancelAnimationFrame(sizeReconcileFrame);
+        clearFavoriteRefreshTimers();
+        pendingFavoriteRefreshItems.clear();
         sizeObserver?.disconnect();
         for (const controller of cardAutocompleteControllers) controller.destroy();
         cardAutocompleteControllers.clear();

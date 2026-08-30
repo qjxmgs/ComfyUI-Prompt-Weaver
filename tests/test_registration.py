@@ -90,6 +90,13 @@ class PluginRegistrationTests(unittest.TestCase):
                 ("PATCH", "/prompt-weaver/prompt-grid-archives/{archive_id}", "update_prompt_grid_archive"),
                 ("DELETE", "/prompt-weaver/prompt-grid-archives/{archive_id}", "delete_prompt_grid_archive"),
                 ("POST", "/prompt-weaver/prompt-grid-archives/import", "import_prompt_grid_archives"),
+                ("GET", "/prompt-weaver/prompt-card-library", "list_prompt_card_library"),
+                ("POST", "/prompt-weaver/prompt-card-library/categories", "create_prompt_card_library_category"),
+                ("PATCH", "/prompt-weaver/prompt-card-library/categories/{category_id}", "update_prompt_card_library_category"),
+                ("DELETE", "/prompt-weaver/prompt-card-library/categories/{category_id}", "delete_prompt_card_library_category"),
+                ("POST", "/prompt-weaver/prompt-card-library/cards", "create_prompt_card_library_card"),
+                ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}", "update_prompt_card_library_card"),
+                ("DELETE", "/prompt-weaver/prompt-card-library/cards/{card_id}", "delete_prompt_card_library_card"),
             ],
         )
 

@@ -72,6 +72,20 @@ class ArchiveStoreTests(unittest.TestCase):
         with self.assertRaises(ArchiveNotFoundError):
             self.store.delete(created["id"])
 
+    def test_favorite_links_survive_archive_validation_and_invalid_ids_are_rejected(self):
+        favorite_id = "33333333-3333-4333-8333-333333333333"
+        linked = snapshot("favorite")
+        linked["items"][0]["favorite_id"] = favorite_id.upper()
+        normalized = validate_snapshot(linked)
+        self.assertEqual(normalized["items"][0]["favorite_id"], favorite_id)
+        created = self.store.create("收藏关联", linked)
+        self.assertEqual(created["snapshot"]["items"][0]["favorite_id"], favorite_id)
+
+        invalid = snapshot("invalid-favorite")
+        invalid["items"][0]["favorite_id"] = "not-a-uuid"
+        with self.assertRaisesRegex(ArchiveValidationError, "favorite_id"):
+            validate_snapshot(invalid)
+
     def test_creation_order_is_stable_and_manual_order_is_persisted(self):
         first = self.store.create("最早", snapshot("first"))
         second = self.store.create("中间", snapshot("second"))

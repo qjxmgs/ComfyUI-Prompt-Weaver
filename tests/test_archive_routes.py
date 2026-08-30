@@ -597,6 +597,114 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.payload["supplement_origin"], "local")
         self.assertEqual(store.calls, ["rescan", ("status", "zh-CN")])
 
+    def test_prompt_card_library_routes_are_user_isolated_and_preserve_snapshots(self):
+        primary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        ))
+        self.assertEqual(primary.status, 201)
+        secondary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "角色", "parent_id": primary.payload["category"]["id"]})
+        ))
+        self.assertEqual(secondary.status, 201)
+        category_id = secondary.payload["category"]["id"]
+        snapshot = {
+            "title": "主角",
+            "prompt": "1girl, blue eyes",
+            "color": "purple",
+            "prompt_tokens": [
+                {"text": "1girl", "selected": True},
+                {"text": "blue eyes", "selected": False},
+            ],
+        }
+        created = self.run_async(self.module.create_prompt_card_library_card(
+            _Request({"category_id": category_id, "snapshot": snapshot})
+        ))
+        self.assertEqual(created.status, 201)
+        self.assertEqual(created.payload["card"]["prompt_tokens"], snapshot["prompt_tokens"])
+        self.assertEqual(len(created.payload["library"]["cards"]), 1)
+
+        alice = self.run_async(self.module.list_prompt_card_library(_Request()))
+        bob = self.run_async(self.module.list_prompt_card_library(_Request(user="bob")))
+        self.assertEqual(len(alice.payload["cards"]), 1)
+        self.assertEqual(bob.payload["categories"], [])
+        self.assertEqual(bob.payload["cards"], [])
+        self.assertTrue((
+            Path(self.temporary.name)
+            / "alice"
+            / "ComfyUI-Prompt-Weaver"
+            / "prompt-card-library.json"
+        ).is_file())
+
+    def test_prompt_card_library_routes_move_update_and_migrate_before_delete(self):
+        def create_branch(primary_name, secondary_name):
+            primary = self.run_async(self.module.create_prompt_card_library_category(
+                _Request({"name": primary_name, "parent_id": None})
+            )).payload["category"]
+            secondary = self.run_async(self.module.create_prompt_card_library_category(
+                _Request({"name": secondary_name, "parent_id": primary["id"]})
+            )).payload["category"]
+            return primary, secondary
+
+        _source_primary, source = create_branch("人物", "角色")
+        _target_primary, target = create_branch("场景", "室内")
+        snapshot = {"title": "主角", "prompt": "1girl"}
+        card = self.run_async(self.module.create_prompt_card_library_card(
+            _Request({"category_id": source["id"], "snapshot": snapshot})
+        )).payload["card"]
+
+        missing_target = self.run_async(self.module.delete_prompt_card_library_category(
+            _Request({}, match_info={"category_id": source["id"]})
+        ))
+        self.assertEqual(missing_target.status, 400)
+        migrated = self.run_async(self.module.delete_prompt_card_library_category(
+            _Request(
+                {"target_category_id": target["id"]},
+                match_info={"category_id": source["id"]},
+            )
+        ))
+        self.assertEqual(migrated.status, 200)
+        self.assertEqual(migrated.payload["moved_cards"], 1)
+
+        updated_snapshot = {"title": "更新后的主角", "prompt": "1girl, solo"}
+        updated = self.run_async(self.module.update_prompt_card_library_card(
+            _Request(
+                {"snapshot": updated_snapshot},
+                match_info={"card_id": card["id"]},
+            )
+        ))
+        self.assertEqual(updated.status, 200)
+        self.assertEqual(updated.payload["card"]["category_id"], target["id"])
+        self.assertEqual(updated.payload["card"]["prompt"], "1girl, solo")
+        removed = self.run_async(self.module.delete_prompt_card_library_card(
+            _Request(match_info={"card_id": card["id"]})
+        ))
+        self.assertEqual(removed.status, 200)
+
+    def test_prompt_card_library_routes_return_conflict_not_found_and_capacity_statuses(self):
+        primary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        )).payload["category"]
+        conflict = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": " 人物 ", "parent_id": None})
+        ))
+        self.assertEqual(conflict.status, 409)
+        invalid_depth = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "非法", "parent_id": primary["id"]})
+        )).payload["category"]
+        third_level = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "三级", "parent_id": invalid_depth["id"]})
+        ))
+        self.assertEqual(third_level.status, 400)
+        missing = self.run_async(self.module.delete_prompt_card_library_card(
+            _Request(match_info={"card_id": str(uuid.uuid4())})
+        ))
+        self.assertEqual(missing.status, 404)
+
+        request = _Request({"name": "oversized", "parent_id": None})
+        request.content_length = self.module.MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES + 1
+        capacity = self.run_async(self.module.create_prompt_card_library_category(request))
+        self.assertEqual(capacity.status, 413)
+
 
 if __name__ == "__main__":
     unittest.main()

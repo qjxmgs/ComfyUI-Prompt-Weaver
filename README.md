@@ -27,11 +27,11 @@ git pull --ff-only origin master
 
 The desktop application currently installs the plugin only when the target directory does not exist. It does not overwrite an older installation. Upgrade that installation manually and make sure the following files and directories are present if the node does not appear:
 
-- `nodes.py`, `archive_store.py`, `tag_autocomplete.py`, `data/tag_sources.json`, and `__init__.py`
+- `nodes.py`, `archive_store.py`, `prompt_card_library.py`, `tag_autocomplete.py`, `data/tag_sources.json`, and `__init__.py`
 - `locales/en` and `locales/zh`
 - `web/prompt_toggle_grid.js` and `web/prompt_toggle_grid.css`
 - `web/prompt_weaver_i18n.js`
-- `web/prompt_grid_archives.js` and `web/prompt_grid_reorder.js`
+- `web/prompt_grid_archives.js`, `web/prompt_grid_reorder.js`, and `web/prompt_card_library.js`
 - `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, `web/prompt_assistant_tags.js`, and `web/prompt_tag_autocomplete.js`
 
 ## Language support
@@ -77,9 +77,21 @@ A validated user-supplied file takes priority over the plugin-downloaded supplem
 
 Both local imports and plugin downloads query only base-dictionary tags still missing from the primary overlay. They never overwrite primary translations or import out-of-dictionary tags, categories, or counts. The upstream repository currently declares no data license, so the manifest retains `license_status: user-directed` rather than claiming MIT or redistribution rights. `/prompt-weaver/tag-autocomplete/status` remains local-only and reports the active supplement origin, file SHA-256, row count, modification time, filled count, coverage, and separate errors.
 
+## Prompt card favorites
+
+Prompt card favorites form a user-level library shared by every Prompt Toggle Grid node, workflow, archive, and browser tab for the same ComfyUI user. Every favorite belongs to a secondary category under exactly one primary category. Both category levels can be created and renamed at runtime. Empty categories can be deleted directly; deleting a branch that contains favorites first requires choosing another secondary category, and the backend migrates those cards and removes the branch in one atomic operation. Sibling category names are case-insensitively unique.
+
+Each grid card embeds a dropdown arrow at the right edge of its title field. It opens a read-only Primary Category → Secondary Category → Favorite Card cascade: pointing at a category opens its submenu, and choosing a favorite completely switches the current grid card to that saved snapshot. The title, prompt, color, retained-token policy, token states, and `favorite_id` are replaced together, while the grid card ID, enabled switch, and position stay unchanged. Selecting the same favorite reloads its latest saved snapshot. After every selection, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead. The cascade automatically flips and clamps to the viewport and supports arrow keys, Home, End, Enter/Space, `Esc`, and outside-click dismissal.
+
+The editor footer **Favorites** action saves and manages the card currently being edited; it no longer appends an existing favorite to the draft. An unlinked draft is saved by choosing a secondary category. A linked favorite can be moved without changing its snapshot, and **Update Favorite** is the only operation that overwrites it with the current editor draft. **Remove Favorite** deletes the global library record. Category creation, rename, delete, and favorite management remain in this editor popup. Empty prompts cannot be saved, and request failures expose an in-place retry action without blocking editing, copying, or confirmation.
+
+Favorite-library create, move, update, and remove operations take effect immediately. The current grid card content and favorite association are committed only by **Confirm**; cancelling the editor leaves the card configuration unchanged without rolling back global library operations. Favorites remain independent snapshots, so later card edits never overwrite them implicitly.
+
+The library is stored at `ComfyUI-Prompt-Weaver/prompt-card-library.json` in the current ComfyUI user's data directory. It uses the archive service's locked, validated, temporary-file plus atomic-replacement strategy; a corrupt or failed read never overwrites the original file. Limits are 100 primary categories, 500 secondary categories, 2,000 favorite cards, and a 20 MiB library file. Version 1 preserves creation order and intentionally has no category/card drag sorting, search, import, or export.
+
 ## Global archives
 
-The archive selector loads and switches complete grid states. The adjacent Save, Restore, and Archive Manager actions use compact icon buttons; hovering or focusing an icon immediately shows its localized name below it. **Archive Manager** creates, saves, renames, deletes, imports, and exports archives. A normal click selects one archive, `Ctrl` adds or removes individual selections, `Shift` selects a range from the latest anchor, and `Ctrl+Shift` adds a range. Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content. An archive contains node size, column count, card order, switches, titles, colors, active prompts, and per-card retained-token state, but not canvas position or links. Loading from the toolbar also restores the saved node size.
+The archive selector loads and switches complete grid states. The adjacent Save, Restore, and Archive Manager actions use compact icon buttons; hovering or focusing an icon immediately shows its localized name below it. **Archive Manager** creates, saves, renames, deletes, imports, and exports archives. A normal click selects one archive, `Ctrl` adds or removes individual selections, `Shift` selects a range from the latest anchor, and `Ctrl+Shift` adds a range. Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content. An archive contains node size, column count, card order, switches, titles, colors, active prompts, per-card retained-token state, and optional favorite associations, but not canvas position or links. Loading from the toolbar also restores the saved node size.
 
 The Save button next to the selector writes the current grid and node size back to the associated archive. It is enabled only while the state is dirty and does not ask for confirmation. Changes made while a save is in progress remain dirty if they were not part of the saved snapshot.
 
@@ -143,12 +155,13 @@ In an API-format prompt, `inputs.config` must be a JSON-encoded **string**, not 
 }
 ```
 
-A non-empty configuration with invalid JSON, an invalid root, invalid `version`/`items`/`enabled`/`prompt`/`retain_unselected`/`prompt_tokens` types, or an unsupported version prevents Python execution. The frontend additionally validates card IDs, titles, colors, and retained-token entries. A corrupt value is preserved and the node displays **Reset to Default**. An invalid column count affects layout only and is restored to two columns.
+A non-empty configuration with invalid JSON, an invalid root, invalid `version`/`items`/`enabled`/`prompt`/`retain_unselected`/`prompt_tokens` types, or an unsupported version prevents Python execution. The frontend additionally validates card IDs, titles, colors, optional `favorite_id` UUIDs, and retained-token entries. A corrupt value is preserved and the node displays **Reset to Default**. An invalid column count affects layout only and is restored to two columns.
 
 ## Persistence and compatibility
 
 - Grid state is saved with the workflow and supports reopening, copy, and paste on the normal canvas.
 - `prompt` always contains only the active text used for node output. Optional `retain_unselected` and `prompt_tokens` fields preserve editor state in workflows and archives; inactive tokens are validated but never appended to Python output.
+- Optional `favorite_id` links a workflow card to a user-library snapshot. It participates in workflow/archive persistence and dirty-state fingerprints but is ignored by Python execution; a missing library record never changes the saved prompt.
 - The desktop parser can recover the actual enabled prompts from either an API Prompt or UI-only Workflow embedded in image metadata.
 - Images already indexed with an empty parse result are not automatically rescanned. Use **Reparse this image** in the desktop application to bypass the old metadata cache.
 - Version 1 supports normal canvas nodes. Promoted subgraph parameters, App Mode, archive folders/tags/search, cloud sync, timed autosave, configurable separators, prefixes/suffixes, and card weights are outside the current compatibility contract.
@@ -168,7 +181,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 node --test tests/*.mjs
 ```
 
-Tests cover node configuration parsing, registration and routes, archive storage and ordering, prompt-grid interaction, the prompt editor, dual-source autocomplete, dictionary validation and fallback, language resources, locale switching, and legacy data compatibility.
+Tests cover node configuration parsing, registration and routes, archive storage and ordering, the two-level prompt-card library, prompt-grid interaction, favorite insertion and deduplication, the prompt editor, dual-source autocomplete, dictionary validation and fallback, language resources, locale switching, and legacy data compatibility.
 
 ## License
 

@@ -83,6 +83,19 @@ test("item colors survive archive round trips and participate in dirty state", (
     });
 });
 
+test("favorite links survive archive round trips and participate in dirty state", () => {
+    const favoriteId = "33333333-3333-4333-8333-333333333333";
+    const linkedState = structuredClone(state);
+    linkedState.items[0].favorite_id = favoriteId.toUpperCase();
+    const saved = snapshotFromState(linkedState);
+    assert.equal(saved.items[0].favorite_id, favoriteId);
+    assert.equal(configFromArchiveSnapshot(saved).items[0].favorite_id, favoriteId);
+    assert.notEqual(semanticFingerprint(saved), semanticFingerprint(snapshotFromState(state)));
+
+    linkedState.items[0].favorite_id = "not-a-uuid";
+    assert.equal(snapshotFromState(linkedState).items[0].favorite_id, undefined);
+});
+
 test("semantic fingerprints ignore internal ids but preserve visible order and state", () => {
     const left = snapshotFromState(state);
     const right = structuredClone(left);

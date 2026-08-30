@@ -20,6 +20,15 @@ from .archive_store import (
     ArchiveValidationError,
 )
 from .nodes import PromptWeaverPromptToggleGrid
+from .prompt_card_library import (
+    MAX_REQUEST_BYTES as MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
+    PromptCardLibraryCapacityError,
+    PromptCardLibraryConflictError,
+    PromptCardLibraryCorruptError,
+    PromptCardLibraryNotFoundError,
+    PromptCardLibraryStore,
+    PromptCardLibraryValidationError,
+)
 from .tag_autocomplete import (
     DEFAULT_RESULT_LIMIT,
     MAX_QUERY_LENGTH,
@@ -50,6 +59,7 @@ __all__ = [
 _pending_workflows = {}
 _frontend_heartbeats = {}
 _archive_stores = {}
+_prompt_card_library_stores = {}
 _tag_autocomplete_stores = {}
 _tag_source_manifest_path = Path(__file__).resolve().parent / "data" / "tag_sources.json"
 
@@ -65,6 +75,22 @@ def _archive_store(request):
     if store is None:
         store = ArchiveStore(path)
         _archive_stores[path] = store
+    return store
+
+
+def _prompt_card_library_store(request):
+    path = PromptServer.instance.user_manager.get_request_user_filepath(
+        request,
+        "ComfyUI-Prompt-Weaver/prompt-card-library.json",
+    )
+    if not path:
+        raise PromptCardLibraryValidationError(
+            "unable to resolve the ComfyUI user data directory"
+        )
+    store = _prompt_card_library_stores.get(path)
+    if store is None:
+        store = PromptCardLibraryStore(path)
+        _prompt_card_library_stores[path] = store
     return store
 
 
@@ -84,23 +110,28 @@ def _tag_autocomplete_store(request):
     return store
 
 
-async def _request_json(request, maximum_bytes):
+async def _request_json(
+    request,
+    maximum_bytes,
+    capacity_error=ArchiveCapacityError,
+    validation_error=ArchiveValidationError,
+):
     if request.content_length is not None and request.content_length > maximum_bytes:
-        raise ArchiveCapacityError("request body is too large")
+        raise capacity_error("request body is too large")
     raw = await request.read()
     if len(raw) > maximum_bytes:
-        raise ArchiveCapacityError("request body is too large")
+        raise capacity_error("request body is too large")
     try:
         payload = json.loads(
             raw.decode("utf-8"),
             parse_constant=lambda value: (_ for _ in ()).throw(
-                ArchiveValidationError(f"invalid JSON constant {value!r}")
+                validation_error(f"invalid JSON constant {value!r}")
             ),
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ArchiveValidationError(f"invalid JSON: {error}") from error
+        raise validation_error(f"invalid JSON: {error}") from error
     if not isinstance(payload, dict):
-        raise ArchiveValidationError("request JSON must be an object")
+        raise validation_error("request JSON must be an object")
     return payload
 
 
@@ -112,6 +143,20 @@ def _archive_error_response(error):
     elif isinstance(error, ArchiveCapacityError):
         status = 413
     elif isinstance(error, ArchiveCorruptError):
+        status = 500
+    else:
+        status = 400
+    return web.json_response({"error": str(error)}, status=status)
+
+
+def _prompt_card_library_error_response(error):
+    if isinstance(error, PromptCardLibraryNotFoundError):
+        status = 404
+    elif isinstance(error, PromptCardLibraryConflictError):
+        status = 409
+    elif isinstance(error, PromptCardLibraryCapacityError):
+        status = 413
+    elif isinstance(error, PromptCardLibraryCorruptError):
         status = 500
     else:
         status = 400
@@ -491,3 +536,166 @@ async def import_prompt_grid_archives(request):
         ArchiveCorruptError,
     ) as error:
         return _archive_error_response(error)
+
+
+@PromptServer.instance.routes.get("/prompt-weaver/prompt-card-library")
+async def list_prompt_card_library(request):
+    try:
+        return web.json_response(_prompt_card_library_store(request).list_library())
+    except (PromptCardLibraryValidationError, PromptCardLibraryCorruptError) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/prompt-card-library/categories")
+async def create_prompt_card_library_category(request):
+    try:
+        payload = await _request_json(
+            request,
+            16 * 1024,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        category, revision = store.create_category(
+            payload.get("name"),
+            payload.get("parent_id"),
+        )
+        return web.json_response(
+            {"category": category, "revision": revision, "library": store.list_library()},
+            status=201,
+        )
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/categories/{category_id}")
+async def update_prompt_card_library_category(request):
+    try:
+        payload = await _request_json(
+            request,
+            16 * 1024,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        category, revision = store.update_category(
+            request.match_info["category_id"],
+            payload.get("name"),
+        )
+        return web.json_response(
+            {"category": category, "revision": revision, "library": store.list_library()}
+        )
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.delete("/prompt-weaver/prompt-card-library/categories/{category_id}")
+async def delete_prompt_card_library_category(request):
+    try:
+        payload = await _request_json(
+            request,
+            16 * 1024,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        result = store.delete_category(
+            request.match_info["category_id"],
+            payload.get("target_category_id"),
+        )
+        result["library"] = store.list_library()
+        return web.json_response(result)
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/prompt-card-library/cards")
+async def create_prompt_card_library_card(request):
+    try:
+        payload = await _request_json(
+            request,
+            MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        card, revision = store.create_card(
+            payload.get("category_id"),
+            payload.get("snapshot"),
+        )
+        return web.json_response(
+            {"card": card, "revision": revision, "library": store.list_library()},
+            status=201,
+        )
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/{card_id}")
+async def update_prompt_card_library_card(request):
+    try:
+        payload = await _request_json(
+            request,
+            MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        card, revision = store.update_card(
+            request.match_info["card_id"],
+            category_id=payload.get("category_id"),
+            snapshot=payload.get("snapshot"),
+        )
+        return web.json_response(
+            {"card": card, "revision": revision, "library": store.list_library()}
+        )
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.delete("/prompt-weaver/prompt-card-library/cards/{card_id}")
+async def delete_prompt_card_library_card(request):
+    try:
+        store = _prompt_card_library_store(request)
+        card, revision = store.delete_card(
+            request.match_info["card_id"]
+        )
+        return web.json_response(
+            {"card": card, "revision": revision, "library": store.list_library()}
+        )
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
