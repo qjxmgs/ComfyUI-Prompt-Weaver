@@ -144,6 +144,7 @@ const CHINESE_MESSAGES = Object.freeze({
     "Remove {prompt}": "移除 {prompt}",
     "Removed {prompt}.": "已移除 {prompt}。",
     "Prompt font size": "提示词字号",
+    "Font Size": "字号",
     "{size} pixels": "{size} 像素",
     "Close without saving": "关闭且不保存",
     "Close the prompt editor without saving": "关闭提示词编辑窗口且不保存",

@@ -135,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260830-retained-delete-align-v10",
+        "./prompt_toggle_grid.css?v=20260830-editor-header-v11",
         import.meta.url,
     ).href;
     document.head.append(link);

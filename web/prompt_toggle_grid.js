@@ -653,7 +653,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260830-retained-delete-align-v10", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260830-editor-header-v11", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -3146,19 +3146,27 @@ function createPromptGridWidget(node, inputName, inputData) {
         fontSizeInput.id = `cpw-prompt-editor-font-size-${createId()}`;
         fontSizeInput.setAttribute("aria-label", t("Prompt font size"));
         fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
+        const fontSizeLabel = element(
+            "label",
+            "cpw-prompt-editor__font-size-label",
+            t("Font Size"),
+        );
+        fontSizeLabel.htmlFor = fontSizeInput.id;
         const fontSizeValue = element(
             "output",
             "cpw-prompt-editor__font-size-value",
             `${promptFontSize}px`,
         );
         fontSizeValue.setAttribute("for", fontSizeInput.id);
-        fontSizeControl.append(fontSizeInput, fontSizeValue);
-        headerMain.append(title, freeModeLabel, retainUnselectedLabel, fontSizeControl);
+        fontSizeControl.append(fontSizeLabel, fontSizeInput, fontSizeValue);
+        headerMain.append(title, freeModeLabel, retainUnselectedLabel);
+        const headerActions = element("div", "cpw-prompt-editor__header-actions");
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
         closeButton.title = t("Close without saving");
         closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
-        header.append(headerMain, closeButton);
+        headerActions.append(fontSizeControl, closeButton);
+        header.append(headerMain, headerActions);
 
         const content = element("div", "cpw-prompt-editor__content");
         const tokenList = element("div", "cpw-prompt-editor__tokens");
@@ -3973,6 +3981,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             freeModeText.textContent = t("Free Mode");
             retainUnselectedInput.setAttribute("aria-label", t("Retain unselected prompts"));
             retainUnselectedText.textContent = t("Retain Unselected");
+            fontSizeLabel.textContent = t("Font Size");
             fontSizeInput.setAttribute("aria-label", t("Prompt font size"));
             fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
             closeButton.title = t("Close without saving");
