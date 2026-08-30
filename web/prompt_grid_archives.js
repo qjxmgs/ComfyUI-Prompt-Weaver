@@ -31,12 +31,26 @@ export function normalizePromptGridItemColor(value) {
 
 function archiveItem(item) {
     const color = normalizePromptGridItemColor(item?.color);
+    const retainUnselected = item?.retain_unselected !== false;
+    const promptTokens = retainUnselected && Array.isArray(item?.prompt_tokens)
+        ? item.prompt_tokens
+            .filter((entry) => (
+                entry
+                && typeof entry.text === "string"
+                && entry.text.trim()
+                && typeof entry.selected === "boolean"
+            ))
+            .map((entry) => ({ text: entry.text.trim(), selected: entry.selected }))
+        : [];
+    const hasInactiveTokens = promptTokens.some((entry) => !entry.selected);
     return {
         id: item.id,
         enabled: item.enabled,
         title: item.title,
         prompt: item.prompt,
         ...(color ? { color } : {}),
+        ...(!retainUnselected ? { retain_unselected: false } : {}),
+        ...(hasInactiveTokens ? { prompt_tokens: promptTokens } : {}),
     };
 }
 
@@ -86,6 +100,8 @@ export function isPristineDefaultSnapshot(snapshot) {
             return item?.id === `prompt-${number}`
                 && item.enabled === true
                 && item.prompt === ""
+                && item.retain_unselected !== false
+                && !Array.isArray(item.prompt_tokens)
                 && !normalizePromptGridItemColor(item.color)
                 && (item.title === `Prompt ${number}` || item.title === `提示词 ${number}`);
         });
@@ -113,6 +129,15 @@ function gridSemantics(snapshot) {
                 title: pristineDefault ? `__prompt_weaver_default_${index + 1}__` : item.title,
                 prompt: item.prompt,
                 ...(color ? { color } : {}),
+                ...(item.retain_unselected === false ? { retain_unselected: false } : {}),
+                ...(Array.isArray(item.prompt_tokens) && item.prompt_tokens.some((entry) => !entry.selected)
+                    ? {
+                        prompt_tokens: item.prompt_tokens.map((entry) => ({
+                            text: entry.text,
+                            selected: entry.selected,
+                        })),
+                    }
+                    : {}),
             };
         }),
     };

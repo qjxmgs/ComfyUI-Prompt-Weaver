@@ -143,6 +143,29 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
             "best quality, blue eyes, red hair, masterpiece, ultra detailed",
         )
 
+    def test_retained_unselected_tokens_never_enter_node_output(self):
+        config = json.dumps(
+            {
+                "version": 1,
+                "items": [
+                    {
+                        "enabled": True,
+                        "prompt": "masterpiece",
+                        "prompt_tokens": [
+                            {"text": "masterpiece", "selected": True},
+                            {"text": "blue eyes", "selected": False},
+                        ],
+                    },
+                    {
+                        "enabled": True,
+                        "prompt": "red hair",
+                        "retain_unselected": False,
+                    },
+                ],
+            }
+        )
+        self.assertEqual(self.combine(config), "masterpiece, red hair")
+
     def test_missing_version_defaults_to_v1_and_columns_is_ignored(self):
         config = json.dumps(
             {
@@ -243,6 +266,38 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
             (
                 json.dumps({"items": [{"enabled": True, "prompt": None}]}),
                 "'items[0].prompt' must be a string",
+            ),
+            (
+                json.dumps({"items": [{
+                    "enabled": True,
+                    "prompt": "prompt",
+                    "retain_unselected": 1,
+                }]}),
+                "'items[0].retain_unselected' must be a boolean",
+            ),
+            (
+                json.dumps({"items": [{
+                    "enabled": True,
+                    "prompt": "prompt",
+                    "prompt_tokens": "not-an-array",
+                }]}),
+                "'items[0].prompt_tokens' must be an array",
+            ),
+            (
+                json.dumps({"items": [{
+                    "enabled": True,
+                    "prompt": "prompt",
+                    "prompt_tokens": None,
+                }]}),
+                "'items[0].prompt_tokens' must be an array",
+            ),
+            (
+                json.dumps({"items": [{
+                    "enabled": True,
+                    "prompt": "prompt",
+                    "prompt_tokens": [{"text": "", "selected": False}],
+                }]}),
+                "'items[0].prompt_tokens[0].text' must be a non-empty string",
             ),
         ]
 

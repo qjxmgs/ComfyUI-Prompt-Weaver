@@ -90,6 +90,98 @@ function promptTokenKey(value) {
     return (typeof value === "string" ? value.trim() : "").toLowerCase();
 }
 
+export function normalizePromptTokenStates(value) {
+    const result = [];
+    const indexByKey = new Map();
+    for (const entry of Array.isArray(value) ? value : []) {
+        const text = typeof entry?.text === "string" ? entry.text.trim() : "";
+        const key = promptTokenKey(text);
+        if (!key || typeof entry?.selected !== "boolean") continue;
+        const existingIndex = indexByKey.get(key);
+        if (existingIndex !== undefined) {
+            if (entry.selected && !result[existingIndex].selected) {
+                result[existingIndex] = { text, selected: true };
+            }
+            continue;
+        }
+        indexByKey.set(key, result.length);
+        result.push({ text, selected: entry.selected });
+    }
+    return result;
+}
+
+export function reconcilePromptTokenStates(activePrompt, storedStates) {
+    const activeTokens = dedupePromptTokens(splitPromptTokens(activePrompt));
+    const activeKeys = new Set(activeTokens.map(promptTokenKey));
+    const stored = normalizePromptTokenStates(storedStates);
+    const reconciled = [];
+    const seen = new Set();
+    let activeIndex = 0;
+
+    for (const entry of stored) {
+        if (entry.selected) {
+            if (activeIndex >= activeTokens.length) continue;
+            const text = activeTokens[activeIndex];
+            activeIndex += 1;
+            const key = promptTokenKey(text);
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            reconciled.push({ text, selected: true });
+            continue;
+        }
+
+        const key = promptTokenKey(entry.text);
+        if (!key || activeKeys.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        reconciled.push(entry);
+    }
+
+    while (activeIndex < activeTokens.length) {
+        const text = activeTokens[activeIndex];
+        activeIndex += 1;
+        const key = promptTokenKey(text);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        reconciled.push({ text, selected: true });
+    }
+
+    return {
+        tokens: reconciled.map((entry) => entry.text),
+        selected: reconciled.map((entry) => entry.selected),
+    };
+}
+
+export function promptTokenStatesForStorage(tokens, selected) {
+    const states = normalizePromptTokenStates(
+        (Array.isArray(tokens) ? tokens : []).map((text, index) => ({
+            text,
+            selected: Boolean(selected?.[index]),
+        })),
+    );
+    return states.some((entry) => !entry.selected) ? states : null;
+}
+
+export function removePromptToken(tokens, selected, index) {
+    if (
+        !Array.isArray(tokens)
+        || !Array.isArray(selected)
+        || !Number.isInteger(index)
+        || index < 0
+        || index >= tokens.length
+    ) {
+        return {
+            tokens: Array.isArray(tokens) ? [...tokens] : [],
+            selected: Array.isArray(selected) ? [...selected] : [],
+            removed: false,
+        };
+    }
+    return {
+        tokens: tokens.filter((_token, tokenIndex) => tokenIndex !== index),
+        selected: selected.filter((_value, tokenIndex) => tokenIndex !== index),
+        removed: true,
+    };
+}
+
 export function dedupePromptTokens(tokens) {
     const result = [];
     const seen = new Set();
@@ -171,14 +263,15 @@ export function buildPromptFromSelection(
     originalPrompt,
     tokens,
     selected,
-    initialSelected,
+    _initialSelected,
     { forceRebuild = false } = {},
 ) {
-    const selectionChanged = tokens.some(
-        (_token, index) => Boolean(selected[index]) !== Boolean(initialSelected[index]),
-    );
-    if (!selectionChanged && !forceRebuild) return originalPrompt;
-    return tokens.filter((_token, index) => Boolean(selected[index])).join(", ");
+    const selectedTokens = tokens.filter((_token, index) => Boolean(selected[index]));
+    const originalTokens = dedupePromptTokens(splitPromptTokens(originalPrompt));
+    const activePromptUnchanged = selectedTokens.length === originalTokens.length
+        && selectedTokens.every((token, index) => token === originalTokens[index]);
+    if (activePromptUnchanged && !forceRebuild) return originalPrompt;
+    return selectedTokens.join(", ");
 }
 
 export function confirmPromptEditorDraft(

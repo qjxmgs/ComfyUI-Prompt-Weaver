@@ -75,6 +75,35 @@ def _parse_config(config):
         if not isinstance(prompt, str):
             raise _config_error(f"'items[{index}].prompt' must be a string")
 
+        retain_unselected = item.get("retain_unselected", True)
+        if not isinstance(retain_unselected, bool):
+            raise _config_error(
+                f"'items[{index}].retain_unselected' must be a boolean"
+            )
+
+        if "prompt_tokens" in item:
+            prompt_tokens = item.get("prompt_tokens")
+            if not isinstance(prompt_tokens, list):
+                raise _config_error(
+                    f"'items[{index}].prompt_tokens' must be an array"
+                )
+            for token_index, token in enumerate(prompt_tokens):
+                if not isinstance(token, dict):
+                    raise _config_error(
+                        f"'items[{index}].prompt_tokens[{token_index}]' must be an object"
+                    )
+                text = token.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    raise _config_error(
+                        f"'items[{index}].prompt_tokens[{token_index}].text' "
+                        "must be a non-empty string"
+                    )
+                if not isinstance(token.get("selected"), bool):
+                    raise _config_error(
+                        f"'items[{index}].prompt_tokens[{token_index}].selected' "
+                        "must be a boolean"
+                    )
+
         parsed_items.append((enabled, prompt))
 
     return parsed_items

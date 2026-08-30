@@ -411,6 +411,27 @@ test("default names are deterministic and filesystem friendly", () => {
     assert.equal(defaultArchiveName(new Date(2026, 7, 10, 9, 8, 7)), "Archive 2026-08-10 09-08-07");
 });
 
+test("retained prompt token state survives archive round trips and participates in dirty state", () => {
+    const retainedState = structuredClone(state);
+    retainedState.items[0].prompt = "masterpiece";
+    retainedState.items[0].prompt_tokens = [
+        { text: "masterpiece", selected: true },
+        { text: "blue eyes", selected: false },
+    ];
+    const saved = snapshotFromState(retainedState);
+    assert.deepEqual(saved.items[0].prompt_tokens, retainedState.items[0].prompt_tokens);
+    assert.deepEqual(configFromArchiveSnapshot(saved).items[0].prompt_tokens, [
+        { text: "masterpiece", selected: true },
+        { text: "blue eyes", selected: false },
+    ]);
+    assert.notEqual(semanticFingerprint(saved), semanticFingerprint(snapshotFromState(state)));
+
+    retainedState.items[0].retain_unselected = false;
+    const disabled = snapshotFromState(retainedState);
+    assert.equal(disabled.items[0].retain_unselected, false);
+    assert.equal(disabled.items[0].prompt_tokens, undefined);
+});
+
 test("pristine English and legacy Chinese default snapshots localize without becoming dirty", () => {
     const english = {
         version: 1,
@@ -435,6 +456,10 @@ test("pristine English and legacy Chinese default snapshots localize without bec
     edited.items[0].prompt = "masterpiece";
     assert.equal(isPristineDefaultSnapshot(edited), false);
     assert.notEqual(semanticFingerprint(english), semanticFingerprint(edited));
+    const retentionDisabled = structuredClone(english);
+    retentionDisabled.items[0].retain_unselected = false;
+    assert.equal(isPristineDefaultSnapshot(retentionDisabled), false);
+    assert.notEqual(semanticFingerprint(english), semanticFingerprint(retentionDisabled));
 });
 
 test("API client preserves paths, methods, payloads, and server errors", async () => {

@@ -145,6 +145,20 @@ class ArchiveStoreTests(unittest.TestCase):
         colored_value = snapshot("colored")
         colored_value["items"][0]["color"] = "pink"
         self.assertEqual(validate_snapshot(colored_value), colored_value)
+        retained_value = snapshot("retained")
+        retained_value["items"][0]["prompt_tokens"] = [
+            {"text": "prompt retained", "selected": True},
+            {"text": "blue eyes", "selected": False},
+        ]
+        self.assertEqual(validate_snapshot(retained_value), retained_value)
+        disabled_retention = snapshot("disabled-retention")
+        disabled_retention["items"][0]["retain_unselected"] = False
+        disabled_retention["items"][0]["prompt_tokens"] = [
+            {"text": "ignored retained token", "selected": False},
+        ]
+        expected_disabled = snapshot("disabled-retention")
+        expected_disabled["items"][0]["retain_unselected"] = False
+        self.assertEqual(validate_snapshot(disabled_retention), expected_disabled)
         invalid_values = [
             {"version": 2, "columns": 2, "items": []},
             {"version": 1, "columns": 0, "items": []},
@@ -174,6 +188,32 @@ class ArchiveStoreTests(unittest.TestCase):
                 "columns": 2,
                 "items": [
                     {"id": "x", "enabled": True, "title": "", "prompt": "", "color": None},
+                ],
+            },
+            {
+                "version": 1,
+                "columns": 2,
+                "items": [
+                    {
+                        "id": "x",
+                        "enabled": True,
+                        "title": "",
+                        "prompt": "",
+                        "retain_unselected": "yes",
+                    },
+                ],
+            },
+            {
+                "version": 1,
+                "columns": 2,
+                "items": [
+                    {
+                        "id": "x",
+                        "enabled": True,
+                        "title": "",
+                        "prompt": "",
+                        "prompt_tokens": [{"text": "", "selected": False}],
+                    },
                 ],
             },
             {

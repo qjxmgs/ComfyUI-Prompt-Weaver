@@ -184,6 +184,10 @@ def validate_snapshot(value):
         prompt = item.get("prompt")
         has_color = "color" in item
         color = item.get("color")
+        has_retain_unselected = "retain_unselected" in item
+        retain_unselected = item.get("retain_unselected", True)
+        has_prompt_tokens = "prompt_tokens" in item
+        prompt_tokens = item.get("prompt_tokens")
         if not isinstance(enabled, bool):
             raise ArchiveValidationError(f"snapshot items[{index}].enabled must be a boolean")
         if not isinstance(title, str) or len(title) > MAX_TITLE_LENGTH:
@@ -198,6 +202,39 @@ def validate_snapshot(value):
             raise ArchiveValidationError(
                 f"snapshot items[{index}].color must be a supported color"
             )
+        if has_retain_unselected and not isinstance(retain_unselected, bool):
+            raise ArchiveValidationError(
+                f"snapshot items[{index}].retain_unselected must be a boolean"
+            )
+        normalized_prompt_tokens = []
+        if has_prompt_tokens:
+            if not isinstance(prompt_tokens, list):
+                raise ArchiveValidationError(
+                    f"snapshot items[{index}].prompt_tokens must be an array"
+                )
+            for token_index, token in enumerate(prompt_tokens):
+                if not isinstance(token, dict):
+                    raise ArchiveValidationError(
+                        f"snapshot items[{index}].prompt_tokens[{token_index}] must be an object"
+                    )
+                text = token.get("text")
+                selected = token.get("selected")
+                if (not isinstance(text, str)
+                        or not text.strip()
+                        or len(text) > MAX_PROMPT_LENGTH):
+                    raise ArchiveValidationError(
+                        f"snapshot items[{index}].prompt_tokens[{token_index}].text "
+                        f"must be a non-empty string up to {MAX_PROMPT_LENGTH} characters"
+                    )
+                if not isinstance(selected, bool):
+                    raise ArchiveValidationError(
+                        f"snapshot items[{index}].prompt_tokens[{token_index}].selected "
+                        "must be a boolean"
+                    )
+                normalized_prompt_tokens.append({
+                    "text": text.strip(),
+                    "selected": selected,
+                })
         normalized_item = {
             "id": item_id,
             "enabled": enabled,
@@ -206,6 +243,10 @@ def validate_snapshot(value):
         }
         if has_color:
             normalized_item["color"] = color
+        if retain_unselected is False:
+            normalized_item["retain_unselected"] = False
+        elif any(not token["selected"] for token in normalized_prompt_tokens):
+            normalized_item["prompt_tokens"] = normalized_prompt_tokens
         normalized_items.append(normalized_item)
 
     snapshot = {

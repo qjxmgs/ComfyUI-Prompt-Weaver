@@ -1212,6 +1212,19 @@
     overflow: hidden;
 }
 
+.cpw-prompt-editor__free-content {
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+}
+
 .cpw-prompt-editor__free-text {
     box-sizing: border-box;
     min-width: 0;
@@ -1236,6 +1249,58 @@
 .cpw-prompt-editor__free-text:focus-visible {
     border-color: var(--p-primary-color, #58a6ff);
     outline: 0;
+}
+
+.cpw-prompt-editor__retained-section {
+    min-width: 0;
+    max-height: 104px;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 5px;
+    padding: 7px 8px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border-color, #4b4d52) 65%, transparent);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--comfy-input-bg, #17181a) 72%, transparent);
+}
+
+.cpw-prompt-editor__retained-title {
+    flex: 0 0 auto;
+    color: color-mix(in srgb, var(--descrip-text, #aaa) 65%, transparent);
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.cpw-prompt-editor__retained-list {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    overflow: auto;
+}
+
+.cpw-prompt-editor__retained-token {
+    position: relative;
+    max-width: 190px;
+    min-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 22px 3px 8px;
+    overflow: visible;
+    border: 1px solid color-mix(in srgb, var(--border-color, #5b5d62) 55%, transparent);
+    border-radius: 6px;
+    color: color-mix(in srgb, var(--descrip-text, #999) 52%, transparent);
+    background: color-mix(in srgb, var(--border-color, #5b5d62) 10%, transparent);
+    font-size: max(11px, calc(var(--cpw-prompt-editor-font-size, 15px) * 0.78));
+    line-height: 1.2;
+}
+
+.cpw-prompt-editor__retained-token-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .cpw-prompt-editor__add {
@@ -1364,6 +1429,57 @@
     transition: opacity 100ms ease, border-color 100ms ease, background 100ms ease;
 }
 
+.cpw-prompt-editor__token-shell {
+    position: relative;
+    max-width: 190px;
+    min-height: 44px;
+    display: inline-flex;
+    overflow: visible;
+}
+
+.cpw-prompt-editor__token-remove {
+    position: absolute;
+    top: 0;
+    right: 2px;
+    z-index: 2;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: start end;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    color: #ff5a5f;
+    background: transparent;
+    box-shadow: none;
+    font: 700 14px/1 Inter, system-ui, sans-serif;
+    cursor: pointer;
+    touch-action: manipulation;
+    transform-origin: top right;
+}
+
+.cpw-prompt-editor__token-remove:hover {
+    color: #ff7378;
+    background: transparent;
+    transform: scale(1.08);
+}
+
+.cpw-prompt-editor__token-remove:active {
+    color: #d9363e;
+    background: transparent;
+    transform: scale(0.94);
+}
+
+.cpw-prompt-editor__token-remove[hidden] {
+    display: none;
+}
+
+.cpw-prompt-editor__retained-remove {
+    top: 0;
+    right: 2px;
+}
+
 .cpw-prompt-editor__token-prompt,
 .cpw-prompt-editor__token-translation {
     display: block;
@@ -1440,6 +1556,13 @@
     flex-wrap: wrap;
 }
 
+.cpw-prompt-editor__commit-actions {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .cpw-prompt-editor__action {
     min-width: 76px;
     min-height: 30px;
@@ -1468,9 +1591,22 @@
     background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 25%, var(--comfy-input-bg, #17181a));
 }
 
+.cpw-prompt-editor__action--copy-success {
+    border-color: #45b978;
+    color: #79dda3;
+    background: color-mix(in srgb, #45b978 18%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__action--copy-error {
+    border-color: #e25555;
+    color: #ff8d8d;
+    background: color-mix(in srgb, #e25555 18%, var(--comfy-input-bg, #17181a));
+}
+
 .cpw-prompt-editor__close:focus-visible,
 .cpw-prompt-editor__font-size-input:focus-visible,
 .cpw-prompt-editor__token:focus-visible,
+.cpw-prompt-editor__token-remove:focus-visible,
 .cpw-prompt-editor__add:focus-visible,
 .cpw-prompt-editor__action:focus-visible,
 .cpw-prompt-grid__prompt-edit:focus-visible,

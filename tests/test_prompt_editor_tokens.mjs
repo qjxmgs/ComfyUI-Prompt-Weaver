@@ -12,7 +12,11 @@ const {
     confirmPromptEditorDraft,
     dedupePromptTokens,
     mergePromptTokenInput,
+    normalizePromptTokenStates,
     promptSelectionFromFreeText,
+    promptTokenStatesForStorage,
+    reconcilePromptTokenStates,
+    removePromptToken,
     setAllPromptTokenSelection,
     splitPromptTokens,
     togglePromptTokenOnce,
@@ -212,7 +216,8 @@ test("prompt editor UI exposes non-persistent free mode with raw confirmation", 
     assert.match(uiSource, /enableAllButton\.disabled = freeMode/);
     assert.match(uiSource, /disableAllButton\.disabled = freeMode/);
     assert.match(uiSource, /freeModeInput\.addEventListener\("change"/);
-    assert.match(uiSource, /const nextPrompt = freeMode\s*\? \(freeTextArea\?\.value \?\? freePromptText\)/);
+    assert.match(uiSource, /const currentPromptDraft = \(\) => \(\s*freeMode\s*\? \(freeTextArea\?\.value \?\? freePromptText\)/);
+    assert.match(uiSource, /const nextPrompt = currentPromptDraft\(\)/);
     assert.match(uiSource, /promptRequiresRebuild = true/);
     assert.match(
         uiSource,
@@ -223,4 +228,125 @@ test("prompt editor UI exposes non-persistent free mode with raw confirmation", 
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--free/);
     assert.match(styleSource, /\.cpw-prompt-editor__free-text/);
     assert.match(styleSource, /\.cpw-prompt-editor__action:disabled/);
+});
+
+test("removing a retained inactive token preserves the exact active prompt", () => {
+    const original = " masterpiece,\n(best, quality:1.2) ";
+    assert.equal(
+        buildPromptFromSelection(
+            original,
+            ["masterpiece", "(best, quality:1.2)"],
+            [true, true],
+            [true, false, true],
+        ),
+        original,
+    );
+});
+
+test("normalizes persisted token states and lets an active duplicate win", () => {
+    assert.deepEqual(normalizePromptTokenStates([
+        { text: " blue eyes ", selected: false },
+        { text: "BLUE EYES", selected: true },
+        { text: "red hair", selected: false },
+        { text: "", selected: false },
+        { text: "ignored" },
+    ]), [
+        { text: "BLUE EYES", selected: true },
+        { text: "red hair", selected: false },
+    ]);
+});
+
+test("reconciles edited active text through selected slots while retaining inactive anchors", () => {
+    assert.deepEqual(reconcilePromptTokenStates("third, first, new", [
+        { text: "first", selected: true },
+        { text: "retained one", selected: false },
+        { text: "third", selected: true },
+        { text: "retained two", selected: false },
+    ]), {
+        tokens: ["third", "retained one", "first", "retained two", "new"],
+        selected: [true, false, true, false, true],
+    });
+    assert.deepEqual(reconcilePromptTokenStates("RETAINED ONE, active", [
+        { text: "old", selected: true },
+        { text: "retained one", selected: false },
+    ]), {
+        tokens: ["RETAINED ONE", "active"],
+        selected: [true, true],
+    });
+});
+
+test("serializes token states only when inactive entries exist and removes one draft token", () => {
+    assert.equal(promptTokenStatesForStorage(["one", "two"], [true, true]), null);
+    assert.deepEqual(promptTokenStatesForStorage(["one", "two"], [true, false]), [
+        { text: "one", selected: true },
+        { text: "two", selected: false },
+    ]);
+    assert.deepEqual(removePromptToken(["one", "two"], [true, false], 1), {
+        tokens: ["one"],
+        selected: [true],
+        removed: true,
+    });
+    assert.deepEqual(removePromptToken(["one"], [true], 5), {
+        tokens: ["one"],
+        selected: [true],
+        removed: false,
+    });
+});
+
+test("prompt editor copies the current draft without confirming or closing", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /cpw-prompt-editor__action cpw-prompt-editor__action--copy/);
+    assert.match(uiSource, /commitActions\.append\(copyButton, confirmButton\)/);
+    assert.match(uiSource, /await copyTextToClipboard\(currentPromptDraft\(\)\)/);
+    assert.match(uiSource, /globalThis\.navigator\?\.clipboard\?\.writeText/);
+    assert.match(uiSource, /document\.execCommand\?\.\("copy"\)/);
+    assert.match(uiSource, /showCopyFeedback\("Copied"\)/);
+    assert.match(uiSource, /showCopyFeedback\("Copy failed"\)/);
+    assert.doesNotMatch(
+        uiSource,
+        /copyButton\.addEventListener\("click"[\s\S]*?closePromptEditor\(\)[\s\S]*?\}\);\s*confirmButton/,
+    );
+    assert.match(styleSource, /\.cpw-prompt-editor__commit-actions/);
+    assert.match(styleSource, /\.cpw-prompt-editor__action--copy-success/);
+    assert.match(styleSource, /\.cpw-prompt-editor__action--copy-error/);
+});
+
+test("prompt editor retains inactive tokens with per-card controls and removable dim free-mode tags", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /currentItem\?\.retain_unselected !== false/);
+    assert.match(uiSource, /cpw-prompt-editor__retain-unselected/);
+    assert.match(uiSource, /t\("Retain Unselected"\)/);
+    assert.match(uiSource, /reconcilePromptTokenStates\(\s*freePromptText,\s*currentPromptTokenStates\(\)/);
+    assert.match(uiSource, /promptTokenStatesForStorage\(storedDraft\.tokens, storedDraft\.selected\)/);
+    assert.match(uiSource, /updatePromptEditorItem\(itemId/);
+    assert.match(uiSource, /cpw-prompt-editor__token-shell/);
+    assert.match(uiSource, /cpw-prompt-editor__token-remove/);
+    assert.match(uiSource, /removeButton\.addEventListener\("pointerdown"/);
+    assert.match(uiSource, /event\.stopPropagation\(\)/);
+    assert.match(uiSource, /cpw-prompt-editor__retained-section/);
+    assert.match(uiSource, /cpw-prompt-editor__retained-token/);
+    assert.match(uiSource, /currentPromptDraft\(\)/);
+    assert.match(styleSource, /\.cpw-prompt-editor__token-shell/);
+    assert.doesNotMatch(styleSource, /\.cpw-prompt-editor__token-shell:has\(> \.cpw-prompt-editor__token-remove/);
+    assert.match(styleSource, /\.cpw-prompt-editor__token-remove\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-editor__token-remove\s*\{[\s\S]*top:\s*0;[\s\S]*right:\s*2px;[\s\S]*width:\s*18px;[\s\S]*height:\s*18px;[\s\S]*place-items:\s*start end;[\s\S]*font:\s*700 14px\/1[\s\S]*transform-origin:\s*top right;/);
+    assert.match(styleSource, /\.cpw-prompt-editor__token-remove:hover\s*\{[\s\S]*background:\s*transparent;/);
+    assert.match(styleSource, /\.cpw-prompt-editor__token-remove:active\s*\{[\s\S]*background:\s*transparent;/);
+    assert.match(styleSource, /\.cpw-prompt-editor__retained-section/);
+    assert.match(styleSource, /\.cpw-prompt-editor__retained-token\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-editor__token-remove:focus-visible/);
 });
