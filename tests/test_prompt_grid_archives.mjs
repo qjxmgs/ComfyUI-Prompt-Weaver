@@ -341,7 +341,7 @@ test("quick archive restore is enabled only for an available dirty snapshot", ()
     assert.equal(canRestoreArchive(archive, { dirty: true, saving: true }), false);
 });
 
-test("archive toolbar places restore between save and manager and narrows the selector", async () => {
+test("archive toolbar keeps icon actions ordered and the archive group on one line", async () => {
     const toolbarSource = await readFile(
         new URL("../web/prompt_toggle_grid.js", import.meta.url),
         "utf8",
@@ -358,6 +358,50 @@ test("archive toolbar places restore between save and manager and narrows the se
         styleSource,
         /\.cpw-prompt-grid__archive-select\s*\{[^}]*max-width:\s*180px;/s,
     );
+    assert.match(
+        toolbarSource,
+        /cpw-prompt-grid__archive-action-icon--save[\s\S]*cpw-prompt-grid__archive-action-icon--restore[\s\S]*cpw-prompt-grid__archive-action-icon--manage/,
+    );
+    assert.match(toolbarSource, /button\.dataset\.tooltip = label/);
+    assert.match(toolbarSource, /button\.setAttribute\("aria-label", label\)/);
+    assert.match(toolbarSource, /setAttribute\("aria-description"/);
+    assert.doesNotMatch(toolbarSource, /quickSaveArchiveButton\.textContent/);
+    assert.doesNotMatch(toolbarSource, /restoreArchiveButton\.textContent/);
+    assert.doesNotMatch(toolbarSource, /manageArchivesButton\.textContent/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__archives\s*\{[^}]*flex-wrap:\s*nowrap;/s,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__button\.cpw-prompt-grid__archive-action\s*\{[^}]*width:\s*28px;[^}]*height:\s*28px;/s,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__archive-action-icon\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*mask:/s,
+    );
+    assert.match(styleSource, /url\("\.\/assets\/icons\/ic_save\.png"\)/);
+    assert.match(styleSource, /url\("\.\/assets\/icons\/ic_restore\.png"\)/);
+    assert.match(styleSource, /url\("\.\/assets\/icons\/ic_manage\.png"\)/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__archive-action::after\s*\{[^}]*top:\s*calc\(100% \+ 4px\);[^}]*content:\s*attr\(data-tooltip\);/s,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__archive-action:hover::after,[\s\S]*\.cpw-prompt-grid__archive-action:focus-visible::after/,
+    );
+});
+
+test("archive toolbar icon assets are valid 64px PNG files", async () => {
+    for (const fileName of ["ic_save.png", "ic_restore.png", "ic_manage.png"]) {
+        const png = await readFile(
+            new URL(`../web/assets/icons/${fileName}`, import.meta.url),
+        );
+        assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+        assert.equal(png.readUInt32BE(16), 64);
+        assert.equal(png.readUInt32BE(20), 64);
+    }
 });
 
 test("archive manager places load between save and rename and supports row double-click", async () => {

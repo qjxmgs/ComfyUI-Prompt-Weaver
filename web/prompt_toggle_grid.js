@@ -653,7 +653,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260830-editor-header-v11", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260830-archive-icons-v12", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -717,18 +717,38 @@ function createPromptGridWidget(node, inputName, inputData) {
     );
     const quickSaveArchiveButton = element(
         "button",
-        "cpw-prompt-grid__button cpw-prompt-grid__archive-save",
-        t("Save"),
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-action cpw-prompt-grid__archive-save",
     );
+    quickSaveArchiveButton.append(element(
+        "span",
+        "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--save",
+    ));
     const restoreArchiveButton = element(
         "button",
-        "cpw-prompt-grid__button cpw-prompt-grid__archive-restore",
-        t("Restore"),
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-action cpw-prompt-grid__archive-restore",
     );
-    const manageArchivesButton = element("button", "cpw-prompt-grid__button", t("Archive Manager"));
+    restoreArchiveButton.append(element(
+        "span",
+        "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--restore",
+    ));
+    const manageArchivesButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-action cpw-prompt-grid__archive-manage",
+    );
+    manageArchivesButton.append(element(
+        "span",
+        "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--manage",
+    ));
     quickSaveArchiveButton.type = "button";
     restoreArchiveButton.type = "button";
     manageArchivesButton.type = "button";
+    const setArchiveActionLabel = (button, label) => {
+        button.dataset.tooltip = label;
+        button.setAttribute("aria-label", label);
+    };
+    setArchiveActionLabel(quickSaveArchiveButton, t("Save"));
+    setArchiveActionLabel(restoreArchiveButton, t("Restore"));
+    setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
     archiveGroup.append(
         archiveSelect,
         quickSaveArchiveButton,
@@ -799,9 +819,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             "aria-label",
             t("Quickly switch prompt archives"),
         );
-        quickSaveArchiveButton.textContent = t("Save");
-        restoreArchiveButton.textContent = t("Restore");
-        manageArchivesButton.textContent = t("Archive Manager");
+        setArchiveActionLabel(quickSaveArchiveButton, t("Save"));
+        setArchiveActionLabel(restoreArchiveButton, t("Restore"));
+        setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
         addButton.textContent = t("+ Add Prompt");
         enableAllButton.textContent = t("Enable All");
         disableAllButton.textContent = t("Disable All");
@@ -983,13 +1003,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         quickSaveArchiveButton.classList.toggle("cpw-prompt-grid__archive-save--ready", enabled);
         quickSaveArchiveButton.setAttribute("aria-busy", String(archiveQuickSaveBusy));
         if (archiveQuickSaveBusy) {
-            quickSaveArchiveButton.title = t("Saving \"{name}\"…", { name: archiveName });
+            quickSaveArchiveButton.setAttribute("aria-description", t("Saving \"{name}\"…", { name: archiveName }));
         } else if (!archive) {
-            quickSaveArchiveButton.title = t("There is no associated archive to save");
+            quickSaveArchiveButton.setAttribute("aria-description", t("There is no associated archive to save"));
         } else if (!archiveDirty) {
-            quickSaveArchiveButton.title = t("\"{name}\" has no changes to save", { name: archiveName });
+            quickSaveArchiveButton.setAttribute("aria-description", t("\"{name}\" has no changes to save", { name: archiveName }));
         } else {
-            quickSaveArchiveButton.title = t("Save current changes to \"{name}\"", { name: archiveName });
+            quickSaveArchiveButton.setAttribute("aria-description", t("Save current changes to \"{name}\"", { name: archiveName }));
         }
     }
 
@@ -1004,15 +1024,15 @@ function createPromptGridWidget(node, inputName, inputData) {
         });
         restoreArchiveButton.disabled = !enabled;
         if (archiveQuickSaveBusy) {
-            restoreArchiveButton.title = t("Finish saving before restoring an archive");
+            restoreArchiveButton.setAttribute("aria-description", t("Finish saving before restoring an archive"));
         } else if (!archive) {
-            restoreArchiveButton.title = t("There is no associated archive to restore");
+            restoreArchiveButton.setAttribute("aria-description", t("There is no associated archive to restore"));
         } else if (!archiveDirty) {
-            restoreArchiveButton.title = t("\"{name}\" has no changes to restore", { name: archiveName });
+            restoreArchiveButton.setAttribute("aria-description", t("\"{name}\" has no changes to restore", { name: archiveName }));
         } else {
-            restoreArchiveButton.title = t("Discard current changes and restore \"{name}\"", {
+            restoreArchiveButton.setAttribute("aria-description", t("Discard current changes and restore \"{name}\"", {
                 name: archiveName,
-            });
+            }));
         }
     }
 
@@ -1075,7 +1095,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             const message = archiveErrorMessage(error);
             console.error(`[Prompt Weaver] ${t("Quick archive save failed")}`, error);
             showArchiveToast("error", t("Archive Save Failed"), message);
-            quickSaveArchiveButton.title = t("Save failed: {message}", { message });
+            quickSaveArchiveButton.setAttribute("aria-description", t("Save failed: {message}", { message }));
         } finally {
             archiveQuickSaveBusy = false;
             reconcileArchiveSelection();
