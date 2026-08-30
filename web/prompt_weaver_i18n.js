@@ -48,6 +48,8 @@ const CHINESE_MESSAGES = Object.freeze({
     "Copy current prompt": "复制当前提示词",
     "Copied": "已复制",
     "Copy failed": "复制失败",
+    "Undo": "撤销",
+    "Redo": "重做",
     "Cancel": "取消",
     "Archive Restored": "存档已还原",
     "Restored \"{name}\".": "已恢复到“{name}”。",

@@ -1123,7 +1123,10 @@
     min-width: 0;
     flex: 0 1 auto;
     margin: 0;
+    overflow: hidden;
     font: 600 15px/1.4 Inter, system-ui, sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .cpw-prompt-editor__free-mode {
@@ -1182,6 +1185,104 @@
 .cpw-prompt-editor__free-mode-input:focus-visible + .cpw-prompt-editor__free-mode-indicator {
     outline: 2px solid var(--p-primary-color, #58a6ff);
     outline-offset: 2px;
+}
+
+.cpw-prompt-editor__history-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+}
+
+.cpw-prompt-editor__history-action {
+    position: relative;
+    z-index: 2;
+    box-sizing: border-box;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    display: grid;
+    flex: 0 0 28px;
+    place-items: center;
+    padding: 0;
+    overflow: visible;
+    border: 1px solid var(--border-color, #4b4d52);
+    border-radius: 5px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-input-bg, #17181a);
+    cursor: pointer;
+    transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+
+.cpw-prompt-editor__history-icon {
+    width: 18px;
+    height: 18px;
+    display: block;
+    background: currentColor;
+    -webkit-mask: var(--cpw-prompt-editor-history-icon) center / contain no-repeat;
+    mask: var(--cpw-prompt-editor-history-icon) center / contain no-repeat;
+    pointer-events: none;
+}
+
+.cpw-prompt-editor__history-icon--undo {
+    --cpw-prompt-editor-history-icon: url("./assets/icons/ic_undo.png");
+}
+
+.cpw-prompt-editor__history-icon--redo {
+    --cpw-prompt-editor-history-icon: url("./assets/icons/ic_redo.png");
+}
+
+.cpw-prompt-editor__history-action::after {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    z-index: 30;
+    padding: 4px 7px;
+    visibility: hidden;
+    border: 1px solid color-mix(in srgb, var(--border-color, #4b4d52) 82%, var(--input-text, #ddd) 18%);
+    border-radius: 5px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-menu-bg, #202124);
+    box-shadow: 0 5px 14px rgb(0 0 0 / 34%);
+    content: attr(data-tooltip);
+    font: 12px/1.25 Inter, system-ui, sans-serif;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.cpw-prompt-editor__history-action:hover,
+.cpw-prompt-editor__history-action:focus-visible {
+    z-index: 31;
+}
+
+.cpw-prompt-editor__history-action:hover:not(:disabled),
+.cpw-prompt-editor__history-action:focus-visible:not(:disabled) {
+    outline: 2px solid color-mix(in srgb, var(--p-primary-color, #7c6df2) 68%, transparent);
+    outline-offset: 1px;
+    border-color: var(--p-primary-color, #7c6df2);
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 18%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__history-action:hover::after,
+.cpw-prompt-editor__history-action:focus-visible::after {
+    visibility: visible;
+    opacity: 1;
+}
+
+.cpw-prompt-editor__history-action:active:not(:disabled) {
+    outline: 0;
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 34%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__history-action:disabled {
+    cursor: default;
+}
+
+.cpw-prompt-editor__history-action:disabled .cpw-prompt-editor__history-icon {
+    opacity: 0.36;
 }
 
 .cpw-prompt-editor__font-size-control {

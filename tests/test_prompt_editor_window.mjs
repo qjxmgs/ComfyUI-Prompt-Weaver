@@ -82,7 +82,23 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /cpw-prompt-editor__font-size-label/);
     assert.match(uiSource, /t\("Font Size"\)/);
     assert.match(uiSource, /fontSizeLabel\.textContent = t\("Font Size"\)/);
-    assert.match(uiSource, /headerMain\.append\(title, freeModeLabel, retainUnselectedLabel\)/);
+    assert.match(
+        uiSource,
+        /headerMain\.append\(title, freeModeLabel, retainUnselectedLabel, historyActions\)/,
+    );
+    assert.match(uiSource, /historyActions\.append\(undoButton, redoButton\)/);
+    assert.match(uiSource, /cpw-prompt-editor__history-action--undo/);
+    assert.match(uiSource, /cpw-prompt-editor__history-action--redo/);
+    assert.match(
+        uiSource,
+        /undoButton\.disabled = !editorHistory\.canUndo && !hasPendingTextEdit/,
+    );
+    assert.match(
+        uiSource,
+        /redoButton\.disabled = !editorHistory\.canRedo \|\| hasPendingTextEdit/,
+    );
+    assert.match(uiSource, /undoButton\.dataset\.tooltip = undoLabel/);
+    assert.match(uiSource, /redoButton\.dataset\.tooltip = redoLabel/);
     assert.match(uiSource, /headerActions\.append\(fontSizeControl, closeButton\)/);
     assert.match(uiSource, /PROMPT_EDITOR_MIN_FONT_SIZE = 12/);
     assert.match(uiSource, /PROMPT_EDITOR_MAX_FONT_SIZE = 30/);
@@ -94,6 +110,21 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-control\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__header-actions\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-label\s*\{/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__history-action\s*\{[\s\S]*width:\s*28px;[\s\S]*height:\s*28px;/,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__history-icon\s*\{[\s\S]*width:\s*18px;[\s\S]*height:\s*18px;[\s\S]*mask:/,
+    );
+    assert.match(styleSource, /url\("\.\/assets\/icons\/ic_undo\.png"\)/);
+    assert.match(styleSource, /url\("\.\/assets\/icons\/ic_redo\.png"\)/);
+    assert.match(styleSource, /\.cpw-prompt-editor__history-action:disabled/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__history-action::after\s*\{[\s\S]*content:\s*attr\(data-tooltip\);/,
+    );
     assert.match(
         styleSource,
         /\.cpw-prompt-editor__close,\s*\.cpw-archive-manager__close\s*\{[\s\S]*background:\s*#e53935;/,
@@ -110,4 +141,15 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /PROMPT_EDITOR_MIN_WIDTH = 600/);
     assert.match(styleSource, /min-width: min\(600px, calc\(100vw - 32px\)\)/);
     assert.match(uiSource, /getAnchorRect: \(\) => textareaCaretClientRect\(freeTextArea\)/);
+});
+
+test("prompt editor history icons are valid 64px PNG files", async () => {
+    for (const fileName of ["ic_undo.png", "ic_redo.png"]) {
+        const png = await readFile(
+            new URL(`../web/assets/icons/${fileName}`, import.meta.url),
+        );
+        assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+        assert.equal(png.readUInt32BE(16), 64);
+        assert.equal(png.readUInt32BE(20), 64);
+    }
 });

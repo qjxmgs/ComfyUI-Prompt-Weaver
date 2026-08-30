@@ -50,6 +50,7 @@ import {
     normalizePromptEditorFontSize,
     normalizePromptEditorSize,
 } from "./prompt_editor_window.js?v=20260814-min-width-600";
+import { PromptEditorHistory } from "./prompt_editor_history.js?v=20260830-editor-history-v1";
 import {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
     AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
@@ -59,6 +60,7 @@ import {
     PROMPT_ASSISTANT_SETTING_ID,
     PromptAutocompleteController,
     PromptTagAutocompleteProvider,
+    applyPromptCompletion,
     autocompleteTranslationText,
     normalizeAutocompleteLimit,
     normalizeAutocompleteSourceOrder,
@@ -657,7 +659,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260830-text-mode-tab-v14", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260830-editor-history-v15", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -3112,6 +3114,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         let copyFeedbackState = "";
         let promptRequiresRebuild = false;
         let promptFontSize = readPromptEditorFontSize();
+        const editorHistory = new PromptEditorHistory();
+        let pendingTextHistory = null;
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
         const dialog = element("section", "cpw-prompt-editor");
@@ -3160,6 +3164,30 @@ function createPromptGridWidget(node, inputName, inputData) {
             retainUnselectedIndicator,
             retainUnselectedText,
         );
+        const historyActions = element("div", "cpw-prompt-editor__history-actions");
+        const undoButton = element(
+            "button",
+            "cpw-prompt-editor__history-action cpw-prompt-editor__history-action--undo",
+        );
+        const undoIcon = element(
+            "span",
+            "cpw-prompt-editor__history-icon cpw-prompt-editor__history-icon--undo",
+        );
+        undoButton.type = "button";
+        undoButton.disabled = true;
+        undoButton.append(undoIcon);
+        const redoButton = element(
+            "button",
+            "cpw-prompt-editor__history-action cpw-prompt-editor__history-action--redo",
+        );
+        const redoIcon = element(
+            "span",
+            "cpw-prompt-editor__history-icon cpw-prompt-editor__history-icon--redo",
+        );
+        redoButton.type = "button";
+        redoButton.disabled = true;
+        redoButton.append(redoIcon);
+        historyActions.append(undoButton, redoButton);
         const fontSizeControl = element("div", "cpw-prompt-editor__font-size-control");
         const fontSizeInput = element("input", "cpw-prompt-editor__font-size-input");
         fontSizeInput.type = "range";
@@ -3183,7 +3211,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         );
         fontSizeValue.setAttribute("for", fontSizeInput.id);
         fontSizeControl.append(fontSizeLabel, fontSizeInput, fontSizeValue);
-        headerMain.append(title, freeModeLabel, retainUnselectedLabel);
+        headerMain.append(title, freeModeLabel, retainUnselectedLabel, historyActions);
         const headerActions = element("div", "cpw-prompt-editor__header-actions");
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
@@ -3295,7 +3323,22 @@ function createPromptGridWidget(node, inputName, inputData) {
             retainUnselectedLabel.title = retainUnselectedHint;
             retainUnselectedInput.setAttribute("aria-description", retainUnselectedHint);
         };
+        const refreshHistoryActionLabels = () => {
+            const undoLabel = t("Undo");
+            undoButton.dataset.tooltip = undoLabel;
+            undoButton.setAttribute("aria-label", undoLabel);
+            const redoLabel = t("Redo");
+            redoButton.dataset.tooltip = redoLabel;
+            redoButton.setAttribute("aria-label", redoLabel);
+        };
+        const syncHistoryActions = () => {
+            const hasPendingTextEdit = pendingTextHistory?.dirty === true;
+            undoButton.disabled = !editorHistory.canUndo && !hasPendingTextEdit;
+            redoButton.disabled = !editorHistory.canRedo || hasPendingTextEdit;
+        };
         refreshModeControlHints();
+        refreshHistoryActionLabels();
+        syncHistoryActions();
         const handleSuggestionAnchorChange = () => editorAutocompleteController?.position();
         const applyPromptEditorSize = (size) => {
             dialog.style.width = `${size.width}px`;
@@ -3458,15 +3501,22 @@ function createPromptGridWidget(node, inputName, inputData) {
             );
             if (removeButton) removeButton.hidden = !retainUnselected || Boolean(selected[index]);
         };
-        const togglePromptTokenAt = (index, visitedIndexes = new Set()) => {
+        const togglePromptTokenAt = (
+            index,
+            visitedIndexes = new Set(),
+            { recordHistory = true } = {},
+        ) => {
+            const historySnapshot = recordHistory ? capturePromptContentSnapshot() : null;
             if (!togglePromptTokenOnce(selected, index, visitedIndexes)) return false;
             syncPromptTokenButton(index);
             renderActivePromptCount();
+            if (recordHistory) recordPromptContentChange(historySnapshot);
             return true;
         };
         const removeDraftPromptToken = (index, { render = true } = {}) => {
             const token = tokens[index];
             if (selected[index]) return false;
+            const historySnapshot = capturePromptContentSnapshot();
             const result = removePromptToken(tokens, selected, index);
             if (!result.removed) return false;
             tokens = result.tokens;
@@ -3474,6 +3524,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (render) renderTokens();
             else renderActivePromptCount();
             setAddStatus(t("Removed {prompt}.", { prompt: token }));
+            recordPromptContentChange(historySnapshot);
             return true;
         };
         const clearTokenClickSuppressionTimer = () => {
@@ -3496,10 +3547,14 @@ function createPromptGridWidget(node, inputName, inputData) {
             const steps = Math.max(1, Math.ceil(distance / PROMPT_TOKEN_GESTURE_SAMPLE_STEP));
             for (let step = 1; step <= steps; step += 1) {
                 const ratio = step / steps;
-                togglePromptTokenAt(tokenAtPoint(
-                    fromX + (toX - fromX) * ratio,
-                    fromY + (toY - fromY) * ratio,
-                ), visitedIndexes);
+                togglePromptTokenAt(
+                    tokenAtPoint(
+                        fromX + (toX - fromX) * ratio,
+                        fromY + (toY - fromY) * ratio,
+                    ),
+                    visitedIndexes,
+                    { recordHistory: false },
+                );
             }
         };
         const cleanupPromptTokenToggleGesture = () => {
@@ -3509,18 +3564,21 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (gesture && tokenList.hasPointerCapture(gesture.pointerId)) {
                 tokenList.releasePointerCapture(gesture.pointerId);
             }
+            return gesture;
         };
         const beginPromptTokenToggleGesture = (event) => {
             if (event.button !== 0 || event.isPrimary === false || tokenToggleGesture) return;
             const index = promptTokenIndexFromElement(event.target);
             if (index < 0) return;
             const visitedIndexes = new Set();
-            if (!togglePromptTokenAt(index, visitedIndexes)) return;
+            const historySnapshot = capturePromptContentSnapshot();
+            if (!togglePromptTokenAt(index, visitedIndexes, { recordHistory: false })) return;
             clearTokenClickSuppressionTimer();
             suppressTokenClick = true;
             tokenToggleGesture = {
                 pointerId: event.pointerId,
                 visitedIndexes,
+                historySnapshot,
                 lastX: event.clientX,
                 lastY: event.clientY,
             };
@@ -3530,7 +3588,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             try {
                 tokenList.setPointerCapture(event.pointerId);
             } catch {
-                cleanupPromptTokenToggleGesture();
+                const gesture = cleanupPromptTokenToggleGesture();
+                recordPromptContentChange(gesture?.historySnapshot);
                 scheduleTokenClickSuppressionEnd();
             }
         };
@@ -3554,7 +3613,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         };
         const endPromptTokenToggleGesture = (event) => {
             if (!tokenToggleGesture || event.pointerId !== tokenToggleGesture.pointerId) return;
-            cleanupPromptTokenToggleGesture();
+            const gesture = cleanupPromptTokenToggleGesture();
+            recordPromptContentChange(gesture?.historySnapshot);
             scheduleTokenClickSuppressionEnd();
             event.preventDefault();
         };
@@ -3651,10 +3711,14 @@ function createPromptGridWidget(node, inputName, inputData) {
                 freeTextArea.placeholder = t("Enter the full prompt");
                 freeTextArea.spellcheck = false;
                 freeTextArea.setAttribute("aria-label", t("Text-mode prompt text"));
+                freeTextArea.addEventListener("focus", (event) => beginTextHistory(event.currentTarget));
+                freeTextArea.addEventListener("beforeinput", (event) => beginTextHistory(event.currentTarget));
                 freeTextArea.addEventListener("input", (event) => {
+                    markTextHistoryDirty(event.currentTarget);
                     freePromptText = event.currentTarget.value;
                     renderActivePromptCount();
                 });
+                freeTextArea.addEventListener("blur", (event) => finishTextHistory(event.currentTarget));
                 freeModeContent.append(freeTextArea);
                 const inactiveIndexes = inactivePromptTokenIndexes();
                 if (retainUnselected && inactiveIndexes.length) {
@@ -3722,6 +3786,20 @@ function createPromptGridWidget(node, inputName, inputData) {
                         getExistingPrompt: () => freeTextArea?.value || "",
                         popupHorizontalInset: 10,
                         suppressInitialFocusSearch: true,
+                        onSelect(record, context) {
+                            const historySnapshot = takeTextHistorySnapshot(freeTextArea)
+                                ?? capturePromptContentSnapshot();
+                            const result = applyPromptCompletion(
+                                freeTextArea.value,
+                                context,
+                                record.insertText,
+                            );
+                            freeTextArea.value = result.value;
+                            freeTextArea.setSelectionRange?.(result.cursor, result.cursor);
+                            freePromptText = result.value;
+                            renderActivePromptCount();
+                            recordPromptContentChange(historySnapshot);
+                        },
                     },
                 );
                 if (focusFreeText) {
@@ -3808,7 +3886,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 addInput.setAttribute("aria-label", t("Add prompt"));
                 addComposer.append(addInput);
                 tokenList.append(addComposer);
+                addInput.addEventListener("focus", (event) => beginTextHistory(event.currentTarget));
+                addInput.addEventListener("beforeinput", (event) => beginTextHistory(event.currentTarget));
                 addInput.addEventListener("input", (event) => {
+                    markTextHistoryDirty(event.currentTarget);
                     addDraft = event.currentTarget.value;
                 });
                 editorAutocompleteController = new PromptAutocompleteController(
@@ -3821,6 +3902,8 @@ function createPromptGridWidget(node, inputName, inputData) {
                         onSelect(record) {
                             clearAddBlurTimer();
                             if (addInput) addInput.dataset.cpwSkipBlurCommit = "true";
+                            const historySnapshot = takeTextHistorySnapshot(addInput)
+                                ?? capturePromptContentSnapshot();
                             const result = mergePromptTokenInput(tokens, selected, record.insertText);
                             tokens = result.tokens;
                             selected = result.selected;
@@ -3828,6 +3911,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                             addDraft = "";
                             renderTokens({ focusInput: true });
                             setAddStatus(formatAddStatus(result, true));
+                            recordPromptContentChange(historySnapshot);
                         },
                     },
                 );
@@ -3891,6 +3975,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         function commitAddInput({ focusAddButton = false, render = true } = {}) {
             if (!adding || !addInput) return false;
             clearAddBlurTimer();
+            const historySnapshot = takeTextHistorySnapshot(addInput)
+                ?? capturePromptContentSnapshot();
             addDraft = addInput.value;
             const value = addDraft;
             const result = mergePromptTokenInput(tokens, selected, value);
@@ -3901,11 +3987,13 @@ function createPromptGridWidget(node, inputName, inputData) {
             const statusMessage = formatAddStatus(result, Boolean(value.trim()));
             if (render) renderTokens({ focusAddButton });
             setAddStatus(statusMessage);
+            recordPromptContentChange(historySnapshot);
             return Boolean(result.addedCount || result.mergedCount);
         }
         function cancelAddInput() {
             if (!adding) return;
             clearAddBlurTimer();
+            discardTextHistory(addInput);
             adding = false;
             addDraft = "";
             setAddStatus("");
@@ -3953,6 +4041,88 @@ function createPromptGridWidget(node, inputName, inputData) {
                 : currentNonFreeTokenDraft()
         );
 
+        const capturePromptContentSnapshot = () => {
+            const activePrompt = currentPromptDraft();
+            const tokenState = freeMode
+                ? reconcilePromptTokenStates(activePrompt, currentPromptTokenStates())
+                : currentNonFreeTokenDraft();
+            return {
+                tokens: [...tokenState.tokens],
+                selected: [...tokenState.selected],
+                activePrompt,
+                promptRequiresRebuild: Boolean(promptRequiresRebuild),
+            };
+        };
+        const recordPromptContentChange = (previousSnapshot) => {
+            if (!previousSnapshot) return false;
+            const recorded = editorHistory.record(
+                previousSnapshot,
+                capturePromptContentSnapshot(),
+            );
+            syncHistoryActions();
+            return recorded;
+        };
+        const beginTextHistory = (element) => {
+            if (!element || pendingTextHistory?.element === element) return;
+            pendingTextHistory = {
+                element,
+                snapshot: capturePromptContentSnapshot(),
+                dirty: false,
+            };
+        };
+        const markTextHistoryDirty = (element) => {
+            if (pendingTextHistory?.element !== element) return;
+            pendingTextHistory.dirty = true;
+            syncHistoryActions();
+        };
+        const takeTextHistorySnapshot = (element) => {
+            if (!pendingTextHistory || pendingTextHistory.element !== element) return null;
+            const snapshot = pendingTextHistory.snapshot;
+            pendingTextHistory = null;
+            return snapshot;
+        };
+        const finishTextHistory = (element) => (
+            recordPromptContentChange(takeTextHistorySnapshot(element))
+        );
+        const discardTextHistory = (element = null) => {
+            if (!element || pendingTextHistory?.element === element) {
+                pendingTextHistory = null;
+                syncHistoryActions();
+            }
+        };
+        const restorePromptContentSnapshot = (snapshot, { focusContent = false } = {}) => {
+            if (!snapshot) return false;
+            clearAddBlurTimer();
+            discardTextHistory();
+            cleanupPromptTokenToggleGesture();
+            clearTokenClickSuppressionTimer();
+            suppressTokenClick = false;
+            editorAutocompleteController?.destroy();
+            editorAutocompleteController = null;
+            tokens = [...snapshot.tokens];
+            selected = [...snapshot.selected];
+            freePromptText = snapshot.activePrompt;
+            promptRequiresRebuild = Boolean(snapshot.promptRequiresRebuild)
+                || snapshot.activePrompt !== originalPrompt;
+            adding = false;
+            addDraft = "";
+            setAddStatus("");
+            renderTokens(freeMode
+                ? { focusFreeText: focusContent }
+                : { focusTagMode: focusContent });
+            return true;
+        };
+        const undoPromptContent = ({ focusContent = false } = {}) => {
+            const snapshot = editorHistory.undo(capturePromptContentSnapshot());
+            syncHistoryActions();
+            return restorePromptContentSnapshot(snapshot, { focusContent });
+        };
+        const redoPromptContent = ({ focusContent = false } = {}) => {
+            const snapshot = editorHistory.redo(capturePromptContentSnapshot());
+            syncHistoryActions();
+            return restorePromptContentSnapshot(snapshot, { focusContent });
+        };
+
         const setFreeModeEnabled = (enabled) => {
             if (enabled === freeMode) return;
             cleanupPromptTokenToggleGesture();
@@ -3971,6 +4141,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 return;
             }
 
+            finishTextHistory(freeTextArea);
             freePromptText = freeTextArea?.value ?? freePromptText;
             const nextState = reconcilePromptTokenStates(
                 freePromptText,
@@ -3999,17 +4170,20 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (freeMode) return;
             clearAddBlurTimer();
             if (adding && addInput) commitAddInput({ render: false });
+            const historySnapshot = capturePromptContentSnapshot();
             selected = setAllPromptTokenSelection(selected, active);
             renderTokens();
             setAddStatus(tokens.length
                 ? (active ? t("All prompts enabled.") : t("All prompts disabled."))
                 : "");
+            recordPromptContentChange(historySnapshot);
         };
 
         const cleanupPromptEditor = () => {
             clearAddBlurTimer();
             clearCopyFeedbackTimer();
             clearTokenClickSuppressionTimer();
+            discardTextHistory();
             suppressTokenClick = false;
             cleanupPromptTokenToggleGesture();
             editorAutocompleteController?.destroy();
@@ -4020,6 +4194,8 @@ function createPromptGridWidget(node, inputName, inputData) {
                 handlePromptTokenTranslationSettings,
             );
             window.removeEventListener("resize", handlePromptEditorViewportResize);
+            editorHistory.clear();
+            syncHistoryActions();
         };
         const refreshPromptEditorLocale = () => {
             title.childNodes[0].textContent = t("Edit Prompts (");
@@ -4030,6 +4206,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             retainUnselectedInput.setAttribute("aria-label", t("Retain unselected prompts"));
             retainUnselectedText.textContent = t("Retain Unselected");
             refreshModeControlHints();
+            refreshHistoryActionLabels();
             fontSizeLabel.textContent = t("Font Size");
             fontSizeInput.setAttribute("aria-label", t("Prompt font size"));
             fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
@@ -4093,6 +4270,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             }));
         }
         closeButton.addEventListener("click", () => closePromptEditor());
+        undoButton.addEventListener("click", () => undoPromptContent());
+        redoButton.addEventListener("click", () => redoPromptContent());
         enableAllButton.addEventListener("click", () => setAllPromptTokensActive(true));
         disableAllButton.addEventListener("click", () => setAllPromptTokensActive(false));
         freeModeInput.addEventListener("change", () => setFreeModeEnabled(freeModeInput.checked));
@@ -4124,6 +4303,29 @@ function createPromptGridWidget(node, inputName, inputData) {
             });
         });
         dialog.addEventListener("keydown", (event) => {
+            const shortcutModifier = event.ctrlKey || event.metaKey;
+            const shortcutKey = event.key.toLowerCase();
+            const undoShortcut = shortcutModifier
+                && !event.altKey
+                && !event.shiftKey
+                && shortcutKey === "z";
+            const redoShortcut = shortcutModifier
+                && !event.altKey
+                && (
+                    (event.shiftKey && shortcutKey === "z")
+                    || (!event.metaKey && !event.shiftKey && shortcutKey === "y")
+                );
+            if ((undoShortcut || redoShortcut) && !event.isComposing) {
+                const nativeTextHistory = pendingTextHistory?.dirty === true
+                    && pendingTextHistory.element === event.target
+                    && (event.target === freeTextArea || event.target === addInput);
+                if (nativeTextHistory) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (redoShortcut) redoPromptContent({ focusContent: true });
+                else undoPromptContent({ focusContent: true });
+                return;
+            }
             if (event.key === "Escape") {
                 event.preventDefault();
                 closePromptEditor();

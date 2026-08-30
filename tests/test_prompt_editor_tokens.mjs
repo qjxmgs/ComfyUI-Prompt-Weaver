@@ -259,6 +259,51 @@ test("text mode and retention expose stateful hints with Tab mode switching", as
     );
 });
 
+test("prompt editor records content-only session history and standard shortcuts", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /new PromptEditorHistory\(\)/);
+    assert.match(
+        uiSource,
+        /const capturePromptContentSnapshot = \(\) => \{[\s\S]*tokens:[\s\S]*selected:[\s\S]*activePrompt,[\s\S]*promptRequiresRebuild:/,
+    );
+    assert.doesNotMatch(
+        uiSource,
+        /const capturePromptContentSnapshot = \(\) => \{[\s\S]*?return \{[\s\S]*?freeMode[\s\S]*?\};\s*\};/,
+    );
+    assert.match(uiSource, /freeTextArea\.addEventListener\("focus"[\s\S]*beginTextHistory/);
+    assert.match(uiSource, /freeTextArea\.addEventListener\("beforeinput"[\s\S]*beginTextHistory/);
+    assert.match(uiSource, /freeTextArea\.addEventListener\("blur"[\s\S]*finishTextHistory/);
+    assert.match(uiSource, /addInput\.addEventListener\("focus"[\s\S]*beginTextHistory/);
+    assert.match(uiSource, /addInput\.addEventListener\("beforeinput"[\s\S]*beginTextHistory/);
+    assert.match(uiSource, /markTextHistoryDirty\(event\.currentTarget\)/);
+    assert.match(
+        uiSource,
+        /pendingTextHistory\.dirty = true;\s*syncHistoryActions\(\)/,
+    );
+    assert.match(uiSource, /takeTextHistorySnapshot\(addInput\)/);
+    assert.match(uiSource, /applyPromptCompletion\([\s\S]*record\.insertText/);
+    assert.doesNotMatch(
+        uiSource,
+        /recordPromptContentChange\(historySnapshot\);\s*beginTextHistory\(freeTextArea\)/,
+    );
+    assert.match(
+        uiSource,
+        /const historySnapshot = capturePromptContentSnapshot\(\);[\s\S]*tokenToggleGesture = \{[\s\S]*historySnapshot/,
+    );
+    assert.match(uiSource, /recordPromptContentChange\(gesture\?\.historySnapshot\)/);
+    assert.match(uiSource, /editorHistory\.clear\(\);[\s\S]*syncHistoryActions\(\)/);
+    assert.match(uiSource, /shortcutModifier = event\.ctrlKey \|\| event\.metaKey/);
+    assert.match(uiSource, /event\.shiftKey && shortcutKey === "z"/);
+    assert.match(uiSource, /!event\.metaKey && !event\.shiftKey && shortcutKey === "y"/);
+    assert.match(uiSource, /pendingTextHistory\?\.dirty === true/);
+    assert.match(uiSource, /if \(nativeTextHistory\) return/);
+    assert.match(uiSource, /if \(redoShortcut\) redoPromptContent\(\{ focusContent: true \}\)/);
+    assert.match(uiSource, /else undoPromptContent\(\{ focusContent: true \}\)/);
+});
+
 test("removing a retained inactive token preserves the exact active prompt", () => {
     const original = " masterpiece,\n(best, quality:1.2) ";
     assert.equal(
