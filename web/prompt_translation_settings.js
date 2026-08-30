@@ -6,7 +6,7 @@ import {
     getLocale,
     subscribeLocale,
     t,
-} from "./prompt_weaver_i18n.js";
+} from "./prompt_weaver_i18n.js?v=20260831-card-terminology-v1";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,

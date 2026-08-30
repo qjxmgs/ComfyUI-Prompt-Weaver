@@ -11,14 +11,14 @@ const i18nUrl = asDataUrl(i18nSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260831-card-terminology-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
-    .replace("./prompt_weaver_i18n.js", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260831-card-terminology-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -260,6 +260,12 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /const appendFavoriteCard = \(favorite\) =>/);
     assert.match(favoriteSource, /new BroadcastChannel|PROMPT_CARD_LIBRARY_SYNC_EVENT/);
     assert.match(favoriteSource, /export function openPromptCardFavoriteCascade/);
+    assert.match(favoriteSource, /root\.setAttribute\("aria-label", t\("Favorite Cards"\)\)/);
+    assert.match(favoriteSource, /__heading", t\("Favorite Cards"\)\)/);
+    assert.match(favoriteSource, /t\("Close favorite cards"\)/);
+    assert.match(favoriteSource, /t\("Favorite card library data is invalid\."\)/);
+    assert.match(favoriteSource, /t\("Favorite card library request failed \(HTTP \{status\}\)"/);
+    assert.doesNotMatch(favoriteSource, /Prompt Card Favorites|prompt card favorites/);
     assert.match(favoriteSource, /const visible = Boolean\(message\) && Boolean\(error\);/);
     assert.match(favoriteSource, /panelHeader\(t\("Primary Categories"\), \{ createLevel: "primary" \}\)/);
     assert.match(favoriteSource, /panelHeader\(t\("Secondary Categories"\), \{/);

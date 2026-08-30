@@ -1,6 +1,6 @@
 {
   "PromptWeaverPromptToggleGrid": {
-    "display_name": "提示词开关网格",
+    "display_name": "提示词卡片网格",
     "description": "将可选前置提示词与已启用的提示词卡片合并，并自动去除重复项。",
     "inputs": {
       "prefix_prompt": {

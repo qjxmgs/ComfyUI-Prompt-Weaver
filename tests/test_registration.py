@@ -67,7 +67,7 @@ class PluginRegistrationTests(unittest.TestCase):
         self.assertEqual(node_class.__name__, "PromptWeaverPromptToggleGrid")
         self.assertEqual(
             module.NODE_DISPLAY_NAME_MAPPINGS["PromptWeaverPromptToggleGrid"],
-            "Prompt Toggle Grid",
+            "Prompt Card Grid",
         )
         self.assertEqual(module.WEB_DIRECTORY, "./web")
         self.assertEqual(

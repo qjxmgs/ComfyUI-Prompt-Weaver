@@ -1,4 +1,4 @@
-import { getLocale, t } from "./prompt_weaver_i18n.js";
+import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260831-card-terminology-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,

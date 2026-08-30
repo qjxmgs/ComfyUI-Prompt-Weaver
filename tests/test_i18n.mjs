@@ -36,6 +36,9 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Text Mode"), "Text Mode");
     assert.equal(t("Press Tab to switch to Tag Mode"), "Press Tab to switch to Tag Mode");
     assert.equal(t("Unselected prompts will be removed"), "Unselected prompts will be removed");
+    assert.equal(t("Edit Card ("), "Edit Card (");
+    assert.equal(t("Favorite Cards"), "Favorite Cards");
+    assert.equal(t("Close favorite cards"), "Close favorite cards");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 1), "1 prompt active");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "2 prompts active");
     assert.equal(formatNumber(12345.6), "12,345.6");
@@ -48,6 +51,9 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Text Mode"), "文本模式");
     assert.equal(t("Press Tab to switch to Tag Mode"), "按 Tab 键切换到标签模式");
     assert.equal(t("Unselected prompts will be removed"), "未点亮的提示词将被移除");
+    assert.equal(t("Edit Card ("), "编辑卡片（");
+    assert.equal(t("Favorite Cards"), "收藏卡片");
+    assert.equal(t("Close favorite cards"), "关闭收藏卡片");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "当前激活 2 个提示词");
     assert.equal(formatNumber(12345.6), "12,345.6");
     assert.equal(formatList(["一", "二"]), "一和二");

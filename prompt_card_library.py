@@ -179,7 +179,7 @@ class PromptCardLibraryStore:
 
     def _normalize_data(self, value):
         if not isinstance(value, dict) or value.get("format_version") != FORMAT_VERSION:
-            raise PromptCardLibraryValidationError("unsupported prompt card library format")
+            raise PromptCardLibraryValidationError("unsupported favorite card library format")
         revision = value.get("revision", 0)
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
             raise PromptCardLibraryValidationError("library revision must be a non-negative integer")
@@ -239,20 +239,20 @@ class PromptCardLibraryStore:
             self._write_unlocked(data)
             return data
         if os.path.getsize(self.path) > MAX_STORE_BYTES:
-            raise PromptCardLibraryCorruptError("prompt card library is too large")
+            raise PromptCardLibraryCorruptError("favorite card library is too large")
         try:
             with open(self.path, "r", encoding="utf-8") as handle:
                 raw = json.load(handle, parse_constant=_reject_json_constant)
             data = self._normalize_data(raw)
         except PromptCardLibraryCapacityError as error:
-            raise PromptCardLibraryCorruptError(f"prompt card library is invalid: {error}") from error
+            raise PromptCardLibraryCorruptError(f"favorite card library is invalid: {error}") from error
         except (
             OSError,
             json.JSONDecodeError,
             UnicodeDecodeError,
             PromptCardLibraryValidationError,
         ) as error:
-            raise PromptCardLibraryCorruptError(f"prompt card library cannot be read: {error}") from error
+            raise PromptCardLibraryCorruptError(f"favorite card library cannot be read: {error}") from error
         if data != raw:
             self._write_unlocked(data)
         return data
@@ -260,7 +260,7 @@ class PromptCardLibraryStore:
     def _write_unlocked(self, data):
         encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(encoded) > MAX_STORE_BYTES:
-            raise PromptCardLibraryCapacityError("prompt card library size limit exceeded")
+            raise PromptCardLibraryCapacityError("favorite card library size limit exceeded")
         directory = os.path.dirname(self.path)
         os.makedirs(directory, exist_ok=True)
         temporary_path = None

@@ -5,7 +5,7 @@
 ComfyUI Prompt Weaver provides two features:
 
 - A workflow-opening bridge between the Prompt Weaver desktop application and ComfyUI.
-- A **Prompt Toggle Grid** node for quickly enabling, disabling, arranging, and combining prompt cards.
+- A **Prompt Card Grid** node for quickly enabling, disabling, arranging, and combining prompt cards.
 
 The plugin has no additional Python or JavaScript dependencies.
 
@@ -42,9 +42,9 @@ Only plugin-provided interface text is translated. Prompt text, Prompt Assistant
 
 The built-in default archive is identified by its stable ID and is displayed as **Default Archive** or **默认存档**. Its historical stored name remains unchanged for compatibility. An untouched empty default snapshot can display localized generated titles without becoming dirty; after it is edited or saved, its titles are treated as user data.
 
-## Prompt Toggle Grid
+## Prompt Card Grid
 
-Add **Prompt Toggle Grid** from the `Prompt Weaver/Prompt` node category. The node outputs a standard `STRING`, which can connect directly to `CLIPTextEncode.text` or any other string input.
+Add **Prompt Card Grid** from the `Prompt Weaver/Prompt` node category. The node outputs a standard `STRING`, which can connect directly to `CLIPTextEncode.text` or any other string input.
 
 The optional `prefix_prompt` string input can receive trigger words or any other prompt text. When connected, its value is placed before the enabled grid cards with an automatic `, ` separator. The combined result is deduplicated case-insensitively at top-level English/Chinese commas and line breaks, preserving the first spelling and keeping separators inside brackets, quotes, and escaped content intact. Leaving the input disconnected or empty preserves the existing grid-only output.
 
@@ -77,9 +77,9 @@ A validated user-supplied file takes priority over the plugin-downloaded supplem
 
 Both local imports and plugin downloads query only base-dictionary tags still missing from the primary overlay. They never overwrite primary translations or import out-of-dictionary tags, categories, or counts. The upstream repository currently declares no data license, so the manifest retains `license_status: user-directed` rather than claiming MIT or redistribution rights. `/prompt-weaver/tag-autocomplete/status` remains local-only and reports the active supplement origin, file SHA-256, row count, modification time, filled count, coverage, and separate errors.
 
-## Prompt card favorites
+## Favorite Cards
 
-Prompt card favorites form a user-level library shared by every Prompt Toggle Grid node, workflow, archive, and browser tab for the same ComfyUI user. Every favorite belongs to a secondary category under exactly one primary category. Both category levels can be created and renamed at runtime. Empty categories can be deleted directly; deleting a branch that contains favorites first requires choosing another secondary category, and the backend migrates those cards and removes the branch in one atomic operation. Sibling category names are case-insensitively unique.
+Favorite cards form a user-level library shared by every Prompt Card Grid node, workflow, archive, and browser tab for the same ComfyUI user. Every favorite belongs to a secondary category under exactly one primary category. Both category levels can be created and renamed at runtime. Empty categories can be deleted directly; deleting a branch that contains favorites first requires choosing another secondary category, and the backend migrates those cards and removes the branch in one atomic operation. Sibling category names are case-insensitively unique.
 
 Each grid card embeds a dropdown arrow at the right edge of its title field. It opens a read-only Primary Category → Secondary Category → Favorite Card cascade: pointing at a category opens its submenu, and choosing a favorite completely switches the current grid card to that saved snapshot. The title, prompt, color, retained-token policy, token states, and `favorite_id` are replaced together, while the grid card ID, enabled switch, and position stay unchanged. Selecting the same favorite reloads its latest saved snapshot. After every selection, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead. The cascade automatically flips and clamps to the viewport and supports arrow keys, Home, End, Enter/Space, `Esc`, and outside-click dismissal.
 

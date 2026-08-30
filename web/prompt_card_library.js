@@ -2,7 +2,7 @@ import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
-import { t } from "./prompt_weaver_i18n.js";
+import { t } from "./prompt_weaver_i18n.js?v=20260831-card-terminology-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -101,32 +101,32 @@ function normalizeFavoriteCard(value) {
 
 export function normalizePromptCardLibrary(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new Error(t("Prompt card library data is invalid."));
+        throw new Error(t("Favorite card library data is invalid."));
     }
     const revision = Number.isInteger(value.revision) && value.revision >= 0 ? value.revision : null;
     if (value.format_version !== 1 || revision === null || !Array.isArray(value.categories) || !Array.isArray(value.cards)) {
-        throw new Error(t("Prompt card library data is invalid."));
+        throw new Error(t("Favorite card library data is invalid."));
     }
     const categories = value.categories.map(normalizeCategory);
     const cards = value.cards.map(normalizeFavoriteCard);
     if (categories.some((entry) => !entry) || cards.some((entry) => !entry)) {
-        throw new Error(t("Prompt card library data is invalid."));
+        throw new Error(t("Favorite card library data is invalid."));
     }
     const categoryIds = new Set(categories.map((category) => category.id));
     const categoryById = new Map(categories.map((category) => [category.id, category]));
     if (categoryIds.size !== categories.length || new Set(cards.map((card) => card.id)).size !== cards.length) {
-        throw new Error(t("Prompt card library data is invalid."));
+        throw new Error(t("Favorite card library data is invalid."));
     }
     const siblingNames = new Set();
     let primaryCount = 0;
     let secondaryCount = 0;
     for (const category of categories) {
         const siblingKey = `${category.parent_id ?? "root"}\u0000${category.name.toLowerCase()}`;
-        if (siblingNames.has(siblingKey)) throw new Error(t("Prompt card library data is invalid."));
+        if (siblingNames.has(siblingKey)) throw new Error(t("Favorite card library data is invalid."));
         siblingNames.add(siblingKey);
         if (category.parent_id === null) continue;
         const parent = categoryById.get(category.parent_id);
-        if (!parent || parent.parent_id !== null) throw new Error(t("Prompt card library data is invalid."));
+        if (!parent || parent.parent_id !== null) throw new Error(t("Favorite card library data is invalid."));
         secondaryCount += 1;
     }
     primaryCount = categories.length - secondaryCount;
@@ -135,11 +135,11 @@ export function normalizePromptCardLibrary(value) {
         || secondaryCount > MAX_SECONDARY_CATEGORIES
         || cards.length > MAX_FAVORITE_CARDS
     ) {
-        throw new Error(t("Prompt card library data is invalid."));
+        throw new Error(t("Favorite card library data is invalid."));
     }
     for (const card of cards) {
         const category = categoryById.get(card.category_id);
-        if (!category || category.parent_id === null) throw new Error(t("Prompt card library data is invalid."));
+        if (!category || category.parent_id === null) throw new Error(t("Favorite card library data is invalid."));
     }
     return { format_version: 1, revision, categories, cards };
 }
@@ -193,7 +193,7 @@ export class PromptCardLibraryClient {
         }
         if (!response.ok) {
             const error = new Error(
-                payload?.error || t("Prompt card library request failed (HTTP {status})", { status: response.status }),
+                payload?.error || t("Favorite card library request failed (HTTP {status})", { status: response.status }),
             );
             error.status = response.status;
             throw error;
@@ -762,14 +762,14 @@ export function openPromptCardLibraryMenu({
     const root = element("section", "cpw-prompt-card-library");
     root.classList.toggle("cpw-prompt-card-library--assign", mode === "assign");
     root.setAttribute("role", "dialog");
-    root.setAttribute("aria-label", t("Prompt Card Favorites"));
+    root.setAttribute("aria-label", t("Favorite Cards"));
     root.tabIndex = -1;
     const header = element("header", "cpw-prompt-card-library__header");
-    const heading = element("strong", "cpw-prompt-card-library__heading", t("Prompt Card Favorites"));
+    const heading = element("strong", "cpw-prompt-card-library__heading", t("Favorite Cards"));
     const closeButton = element("button", "cpw-prompt-card-library__close", "×");
     closeButton.type = "button";
     closeButton.title = t("Close");
-    closeButton.setAttribute("aria-label", t("Close prompt card favorites"));
+    closeButton.setAttribute("aria-label", t("Close favorite cards"));
     header.append(heading, closeButton);
     const status = element("div", "cpw-prompt-card-library__status");
     status.setAttribute("role", "status");

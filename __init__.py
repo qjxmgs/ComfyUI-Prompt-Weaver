@@ -47,7 +47,7 @@ NODE_CLASS_MAPPINGS = {
     "PromptWeaverPromptToggleGrid": PromptWeaverPromptToggleGrid,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "PromptWeaverPromptToggleGrid": "Prompt Toggle Grid",
+    "PromptWeaverPromptToggleGrid": "Prompt Card Grid",
 }
 
 __all__ = [

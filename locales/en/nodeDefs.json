@@ -1,6 +1,6 @@
 {
   "PromptWeaverPromptToggleGrid": {
-    "display_name": "Prompt Toggle Grid",
+    "display_name": "Prompt Card Grid",
     "description": "Prepend optional prompt text, then combine enabled prompt cards and remove duplicates.",
     "inputs": {
       "prefix_prompt": {

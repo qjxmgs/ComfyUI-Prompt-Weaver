@@ -39,7 +39,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js";
+} from "./prompt_weaver_i18n.js?v=20260831-card-terminology-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -836,7 +836,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     const pendingFavoriteRefreshItems = new Set();
     const favoriteRefreshTimers = new Map();
     promptCardLibraryService.refresh().catch((error) => {
-        console.warn("[Prompt Weaver] Could not load prompt card favorites", error);
+        console.warn("[Prompt Weaver] Could not load favorite cards", error);
     });
 
     function refreshLocale() {
@@ -3228,7 +3228,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const title = element("h2", "cpw-prompt-editor__title");
         const activeCount = element("span", "cpw-prompt-editor__active-count", "0");
         activeCount.setAttribute("aria-label", tp("{count} prompt active", "{count} prompts active", 0));
-        title.append(t("Edit Prompts ("), activeCount, t(")"));
+        title.append(t("Edit Card ("), activeCount, t(")"));
         title.id = `cpw-prompt-editor-${createId()}`;
         dialog.setAttribute("aria-labelledby", title.id);
         const headerMain = element("div", "cpw-prompt-editor__header-main");
@@ -4351,7 +4351,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             syncHistoryActions();
         };
         const refreshPromptEditorLocale = () => {
-            title.childNodes[0].textContent = t("Edit Prompts (");
+            title.childNodes[0].textContent = t("Edit Card (");
             title.childNodes[2].textContent = t(")");
             renderActivePromptCount();
             freeModeInput.setAttribute("aria-label", t("Text Mode"));

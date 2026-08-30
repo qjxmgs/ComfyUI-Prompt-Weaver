@@ -10,6 +10,10 @@ HAN_PATTERN = re.compile(r"[\u3400-\u9fff]")
 
 class LocaleResourceTests(unittest.TestCase):
     def test_comfyui_locale_resources_cover_the_node_contract(self):
+        expected_display_names = {
+            "en": "Prompt Card Grid",
+            "zh": "提示词卡片网格",
+        }
         for locale in ("en", "zh"):
             locale_root = PLUGIN_ROOT / "locales" / locale
             main = json.loads((locale_root / "main.json").read_text(encoding="utf-8"))
@@ -17,7 +21,7 @@ class LocaleResourceTests(unittest.TestCase):
             node = node_defs["PromptWeaverPromptToggleGrid"]
 
             self.assertIn("Prompt", main["nodeCategories"])
-            self.assertTrue(node["display_name"])
+            self.assertEqual(node["display_name"], expected_display_names[locale])
             self.assertTrue(node["description"])
             self.assertIn("prefix_prompt", node["inputs"])
             self.assertIn("config", node["inputs"])
