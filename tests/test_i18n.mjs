@@ -39,6 +39,7 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "Edit Card (");
     assert.equal(t("Favorite Cards"), "Favorite Cards");
     assert.equal(t("Close favorite cards"), "Close favorite cards");
+    assert.equal(t("Click again to remove {name}", { name: "Card 01" }), "Click again to remove Card 01");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 1), "1 prompt active");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "2 prompts active");
     assert.equal(formatNumber(12345.6), "12,345.6");
@@ -54,6 +55,7 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "编辑卡片（");
     assert.equal(t("Favorite Cards"), "收藏卡片");
     assert.equal(t("Close favorite cards"), "关闭收藏卡片");
+    assert.equal(t("Click again to remove {name}", { name: "卡片 01" }), "再次点击删除 卡片 01");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "当前激活 2 个提示词");
     assert.equal(formatNumber(12345.6), "12,345.6");
     assert.equal(formatList(["一", "二"]), "一和二");

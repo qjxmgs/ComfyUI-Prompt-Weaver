@@ -25,11 +25,12 @@ import {
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import {
     getPromptCardLibraryService,
+    favoriteCardBilingualPrompt,
     openPromptCardFavoriteCascade,
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260831-prompt-card-switch-v1";
+} from "./prompt_card_library.js?v=20260831-favorite-tooltip-refine-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -39,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260831-card-terminology-v1";
+} from "./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -216,6 +217,30 @@ function createId() {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     fallbackId += 1;
     return `prompt-${Date.now().toString(36)}-${fallbackId.toString(36)}`;
+}
+
+async function resolveFavoriteCardPromptTip(card, { signal } = {}) {
+    const tokens = splitPromptTokens(card?.prompt);
+    const translations = tokens.slice();
+    const pending = [];
+    for (let index = 0; index < tokens.length; index += 1) {
+        const token = tokens[index];
+        if (promptTokenHasHanText(token)) continue;
+        const lookupText = promptTokenLookupText(token);
+        if (lookupText) pending.push({ index, lookupText });
+    }
+    if (pending.length) {
+        const records = await promptTagAutocompleteProvider.resolveTagTranslations(
+            pending.map((entry) => entry.lookupText),
+            "zh-CN",
+            { signal },
+        );
+        for (let resultIndex = 0; resultIndex < pending.length; resultIndex += 1) {
+            const translation = autocompleteTranslationText(records[resultIndex]);
+            if (translation !== "—") translations[pending[resultIndex].index] = translation;
+        }
+    }
+    return favoriteCardBilingualPrompt(card, translations);
 }
 
 function cardTitle(index) {
@@ -675,7 +700,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260831-favorite-shine-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260831-favorite-tooltip-refine-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2552,6 +2577,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         controller = openPromptCardFavoriteCascade({
             service: promptCardLibraryService,
             anchor: button,
+            resolvePromptTip: resolveFavoriteCardPromptTip,
             onChooseCard: (favorite) => switchItemToFavorite(itemId, favorite),
             onClose: () => {
                 if (activePromptCardLibraryMenu === controller) activePromptCardLibraryMenu = null;

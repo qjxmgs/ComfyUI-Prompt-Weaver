@@ -8,23 +8,32 @@ const i18nSource = await readFile(
     "utf8",
 );
 const i18nUrl = asDataUrl(i18nSource);
+const tokenSource = await readFile(
+    new URL("../web/prompt_editor_tokens.js", import.meta.url),
+    "utf8",
+);
+const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260831-card-terminology-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260831-card-terminology-v1", i18nUrl);
+    .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
+    .replace("./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
     clampPromptCardContextMenuPosition,
+    favoriteCardBilingualPrompt,
+    favoriteCardPromptCount,
     normalizePromptCardLibrary,
     promptCardCascadePanelPosition,
+    promptCardCascadeTooltipPosition,
     promptCardFavoriteFingerprint,
     promptCardFavoritePath,
     promptCardFavoriteSnapshot,
@@ -93,6 +102,33 @@ test("library normalization enforces two levels and secondary card ownership", (
     const primaryOwned = structuredClone(libraryPayload());
     primaryOwned.cards[0].category_id = PRIMARY_ID;
     assert.throws(() => normalizePromptCardLibrary(primaryOwned));
+});
+
+test("favorite prompt counts use top-level output tokens and ignore retained inactive metadata", () => {
+    assert.equal(favoriteCardPromptCount({
+        prompt: '1girl, (blue eyes, detailed:1.2), "red, blue", artist\\,name, [solo, portrait]',
+        prompt_tokens: [
+            { text: "1girl", selected: true },
+            { text: "inactive extra", selected: false },
+        ],
+    }), 5);
+    assert.equal(favoriteCardPromptCount({ prompt: "  \n， " }), 0);
+});
+
+test("favorite bilingual prompt tips preserve output order and fall back to English", () => {
+    assert.deepEqual(favoriteCardBilingualPrompt({
+        prompt: '1girl, ((blue_eyes:1.25)), "red, blue", artist\\,name, 中文标签',
+        prompt_tokens: [
+            { text: "inactive extra", selected: false },
+        ],
+    }, ["一个女孩", "蓝眼睛", "—", "", "中文标签"]), {
+        english: '1girl, ((blue_eyes:1.25)), "red, blue", artist\\,name, 中文标签',
+        chinese: '一个女孩，蓝眼睛，"red, blue"，artist\\,name，中文标签',
+    });
+    assert.deepEqual(favoriteCardBilingualPrompt({ prompt: "  \n， " }), {
+        english: "",
+        chinese: "",
+    });
 });
 
 test("favorite snapshots are independent from ids and timestamps", () => {
@@ -239,6 +275,25 @@ test("cascade panels open below the title and flip submenus at the viewport edge
     }), { x: 100, y: 40 });
 });
 
+test("cascade prompt tips prefer available space and stay inside the viewport", () => {
+    assert.deepEqual(promptCardCascadeTooltipPosition({
+        anchorRect: { left: 300, right: 490, top: 40, bottom: 88 },
+        panelRect: { left: 294, right: 490, top: 20, bottom: 220 },
+        width: 180,
+        height: 100,
+        viewportWidth: 800,
+        viewportHeight: 400,
+    }), { x: 496, y: 40 });
+    assert.deepEqual(promptCardCascadeTooltipPosition({
+        anchorRect: { left: 300, right: 490, top: 360, bottom: 408 },
+        panelRect: { left: 294, right: 490, top: 220, bottom: 400 },
+        width: 260,
+        height: 120,
+        viewportWidth: 520,
+        viewportHeight: 400,
+    }), { x: 28, y: 272 });
+});
+
 test("frontend integrates compact card and editor actions with responsive cascade styling", async () => {
     const gridSource = await readFile(
         new URL("../web/prompt_toggle_grid.js", import.meta.url),
@@ -251,6 +306,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /titleShell\.append\(title, favoriteSwitchButton\)/);
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell, cardActions\)/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-favorite-tooltip-refine-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-favorite-tooltip-refine-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -260,6 +317,19 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /const appendFavoriteCard = \(favorite\) =>/);
     assert.match(favoriteSource, /new BroadcastChannel|PROMPT_CARD_LIBRARY_SYNC_EVENT/);
     assert.match(favoriteSource, /export function openPromptCardFavoriteCascade/);
+    assert.match(favoriteSource, /splitPromptTokens\(value\?\.prompt\)\.length/);
+    assert.match(favoriteSource, /cpw-prompt-card-cascade__item--selected/);
+    assert.match(favoriteSource, /button\.setAttribute\("aria-expanded", String\(expanded\)\)/);
+    assert.match(favoriteSource, /cpw-prompt-card-cascade__favorite-count/);
+    assert.match(favoriteSource, /FAVORITE_DELETE_CONFIRM_MS = 3_000/);
+    assert.match(favoriteSource, /cpw-prompt-card-cascade__favorite-delete/);
+    assert.match(favoriteSource, /resolvePromptTip\(card, \{ signal: controller\.signal \}\)/);
+    assert.match(favoriteSource, /aria-describedby/);
+    assert.match(favoriteSource, /hideFavoriteTooltip\(\)/);
+    assert.match(favoriteSource, /armedDeleteCardId !== card\.id/);
+    assert.match(favoriteSource, /service\.mutate\(\(client\) => client\.deleteCard\(card\.id\)\)/);
+    assert.match(favoriteSource, /event\.stopPropagation\(\)/);
+    assert.match(favoriteSource, /renderOpenBranch\(\)/);
     assert.match(favoriteSource, /root\.setAttribute\("aria-label", t\("Favorite Cards"\)\)/);
     assert.match(favoriteSource, /__heading", t\("Favorite Cards"\)\)/);
     assert.match(favoriteSource, /t\("Close favorite cards"\)/);
@@ -280,6 +350,14 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-grid__title-shell\s*\{[^}]*position:\s*relative;[^}]*flex:\s*1 1 auto;/s);
     assert.match(cssSource, /\.cpw-prompt-grid__favorite-switch\s*\{[^}]*position:\s*absolute;[^}]*right:\s*1px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__panel\s*\{[^}]*position:\s*fixed;[^}]*width:\s*min\(196px,/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__item--selected/);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-row\s*\{[^}]*position:\s*relative;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*color:\s*var\(--error-text,/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-delete--armed/);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip\s*\{[^}]*position:\s*fixed;[^}]*max-width:\s*min\(420px,[^}]*pointer-events:\s*none;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip\s*\{[^}]*border:[^}]*48%[^}]*background:[^}]*82%[^}]*box-shadow:[^}]*24%[^}]*font-size:\s*11px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip-line\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip-line--zh\s*\{[^}]*border-top:[^}]*36%[^}]*color:[^}]*84%/s);
     assert.match(cssSource, /@keyframes cpw-prompt-grid-favorite-shine/);
     assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed \.cpw-prompt-grid__title-shell::after/);
     assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed \.cpw-prompt-grid__prompt-row::after/);
