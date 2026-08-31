@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -14,6 +14,15 @@ const MAX_PRIMARY_CATEGORIES = 100;
 const MAX_SECONDARY_CATEGORIES = 500;
 const MAX_FAVORITE_CARDS = 2_000;
 const FAVORITE_DELETE_CONFIRM_MS = 3_000;
+const FAVORITE_GEOMETRY_STORAGE_KEY = "prompt-weaver-prompt-card-library-geometry-v1";
+const FAVORITE_WINDOW_MARGIN = 8;
+const FAVORITE_WINDOW_MIN_WIDTH = 340;
+const FAVORITE_WINDOW_MIN_HEIGHT = 240;
+const FAVORITE_WINDOW_DEFAULT_WIDTH = 660;
+const FAVORITE_WINDOW_DEFAULT_HEIGHT = 320;
+const FAVORITE_WINDOW_NARROW_WIDTH = 620;
+const FAVORITE_DRAG_SCROLL_EDGE = 32;
+const FAVORITE_DRAG_SCROLL_MAX_SPEED = 12;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let favoriteTooltipSequence = 0;
 
@@ -327,6 +336,46 @@ export function promptCardFavoriteMoveTarget(library, favoriteId, categoryId) {
     };
 }
 
+export function promptCardFavoriteReorder(cardIds, movedId, insertionIndex) {
+    const ids = Array.isArray(cardIds) ? cardIds.slice() : [];
+    const sourceIndex = ids.indexOf(movedId);
+    if (sourceIndex < 0) return { ids, changed: false };
+    const boundary = Math.min(ids.length, Math.max(0, Math.trunc(Number(insertionIndex) || 0)));
+    const reordered = ids.slice();
+    reordered.splice(sourceIndex, 1);
+    const targetIndex = boundary > sourceIndex ? boundary - 1 : boundary;
+    reordered.splice(Math.min(reordered.length, Math.max(0, targetIndex)), 0, movedId);
+    return {
+        ids: reordered,
+        changed: reordered.some((id, index) => id !== ids[index]),
+    };
+}
+
+export function normalizePromptCardLibraryGeometry(value, {
+    viewportWidth,
+    viewportHeight,
+    margin = FAVORITE_WINDOW_MARGIN,
+    minWidth = FAVORITE_WINDOW_MIN_WIDTH,
+    minHeight = FAVORITE_WINDOW_MIN_HEIGHT,
+} = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const numbers = [value.left, value.top, value.width, value.height].map(Number);
+    if (!numbers.every(Number.isFinite)) return null;
+    const availableWidth = Math.max(1, Number(viewportWidth) - margin * 2);
+    const availableHeight = Math.max(1, Number(viewportHeight) - margin * 2);
+    const width = Math.min(availableWidth, Math.max(Math.min(minWidth, availableWidth), numbers[2]));
+    const height = Math.min(availableHeight, Math.max(Math.min(minHeight, availableHeight), numbers[3]));
+    const left = Math.min(
+        Math.max(margin, numbers[0]),
+        Math.max(margin, Number(viewportWidth) - width - margin),
+    );
+    const top = Math.min(
+        Math.max(margin, numbers[1]),
+        Math.max(margin, Number(viewportHeight) - height - margin),
+    );
+    return { left, top, width, height };
+}
+
 export class PromptCardLibraryClient {
     constructor(api) {
         this.api = api;
@@ -397,6 +446,22 @@ export class PromptCardLibraryClient {
 
     deleteCard(id) {
         return this.request(`/cards/${encodeURIComponent(id)}`, { method: "DELETE" });
+    }
+
+    reorderCards(categoryId, cardIds) {
+        return this.request("/cards/order", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category_id: categoryId, card_ids: cardIds }),
+        });
+    }
+
+    positionCard(id, categoryId, index) {
+        return this.request(`/cards/${encodeURIComponent(id)}/position`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category_id: categoryId, index }),
+        });
     }
 }
 
@@ -664,7 +729,7 @@ export function openPromptCardFavoriteCascade({
         favoriteTooltip = tooltip;
         favoriteTooltipAnchor = button;
         button.setAttribute("aria-describedby", tooltip.id);
-        root.append(tooltip);
+        document.body.append(tooltip);
         positionFavoriteTooltip();
         if (typeof resolvePromptTip !== "function") return;
         const generation = favoriteTooltipGeneration;
@@ -1150,7 +1215,13 @@ export function openPromptCardLibraryMenu({
     status.setAttribute("aria-live", "polite");
     status.hidden = true;
     const panels = element("div", "cpw-prompt-card-library__panels");
-    root.append(header, status, panels);
+    const resizeHandle = element("div", "cpw-prompt-card-library__resize-handle");
+    resizeHandle.tabIndex = 0;
+    resizeHandle.setAttribute("role", "separator");
+    resizeHandle.setAttribute("aria-orientation", "horizontal");
+    resizeHandle.title = t("Resize Favorite Cards");
+    resizeHandle.setAttribute("aria-label", t("Resize Favorite Cards"));
+    root.append(header, status, panels, resizeHandle);
     document.body.append(root);
 
     let library = service.library;
@@ -1158,6 +1229,7 @@ export function openPromptCardLibraryMenu({
     let selectedSecondaryId = null;
     let mobileLevel = 0;
     let editingCategoryId = null;
+    let editingFavoriteId = null;
     let creatingParentId = undefined;
     let movingCardId = null;
     let busy = false;
@@ -1169,7 +1241,17 @@ export function openPromptCardLibraryMenu({
     let favoriteTooltipAbortController = null;
     let favoriteTooltipGeneration = 0;
     let draggingCardId = null;
+    let draggingSourceCategoryId = null;
+    let favoriteInsertionIndex = null;
+    let favoriteDragScrollFrame = 0;
+    let favoriteDragScrollSpeed = 0;
+    let favoriteDragScrollList = null;
+    let favoriteDragClientY = null;
+    let geometryInitialized = false;
+    let windowMoveSession = null;
+    let windowResizeSession = null;
     let renderPrimaryDragPreview = null;
+    let renderSecondaryDragPreview = null;
     const deleteController = createFavoriteDeleteController({ root, isBusy: () => busy });
 
     const hideFavoriteTooltip = () => {
@@ -1215,7 +1297,10 @@ export function openPromptCardLibraryMenu({
         if (closed || !button?.isConnected) return;
         hideFavoriteTooltip();
         const fallback = favoriteCardBilingualPrompt(card);
-        const tooltip = element("div", "cpw-prompt-card-cascade__tooltip");
+        const tooltip = element(
+            "div",
+            "cpw-prompt-card-cascade__tooltip cpw-prompt-card-library__tooltip",
+        );
         tooltip.id = `cpw-prompt-card-library-tooltip-${++favoriteTooltipSequence}`;
         tooltip.setAttribute("role", "tooltip");
         tooltip.append(
@@ -1254,18 +1339,36 @@ export function openPromptCardLibraryMenu({
 
     const clearDragState = ({ renderAfter = false } = {}) => {
         const hadDrag = Boolean(draggingCardId);
+        const sourceCategoryId = draggingSourceCategoryId;
         draggingCardId = null;
+        draggingSourceCategoryId = null;
+        favoriteInsertionIndex = null;
+        favoriteDragScrollSpeed = 0;
+        favoriteDragScrollList = null;
+        favoriteDragClientY = null;
+        if (favoriteDragScrollFrame) cancelAnimationFrame(favoriteDragScrollFrame);
+        favoriteDragScrollFrame = 0;
         root.classList.remove("cpw-prompt-card-library--dragging");
         for (const row of root.querySelectorAll(".cpw-prompt-card-library__favorite-row--dragging")) {
             row.classList.remove("cpw-prompt-card-library__favorite-row--dragging");
         }
         for (const target of root.querySelectorAll(
-            ".cpw-prompt-card-library__row-main--drag-expand, .cpw-prompt-card-library__row-main--drop-target",
+            ".cpw-prompt-card-library__row-main--drag-expand, .cpw-prompt-card-library__row-main--drop-target, .cpw-prompt-card-library__favorite-wrap--insert-before, .cpw-prompt-card-library__favorite-wrap--insert-after",
         )) {
             target.classList.remove(
                 "cpw-prompt-card-library__row-main--drag-expand",
                 "cpw-prompt-card-library__row-main--drop-target",
+                "cpw-prompt-card-library__favorite-wrap--insert-before",
+                "cpw-prompt-card-library__favorite-wrap--insert-after",
             );
+        }
+        if (hadDrag && renderAfter && sourceCategoryId) {
+            const sourceCategory = library.categories.find((category) => category.id === sourceCategoryId);
+            if (sourceCategory?.parent_id) {
+                selectedPrimaryId = sourceCategory.parent_id;
+                selectedSecondaryId = sourceCategory.id;
+                mobileLevel = 2;
+            }
         }
         if (hadDrag && renderAfter && !closed) render();
     };
@@ -1292,7 +1395,9 @@ export function openPromptCardLibraryMenu({
             );
             button.type = "button";
             button.setAttribute("role", "menuitem");
+            button.disabled = Boolean(item.disabled);
             button.addEventListener("click", () => {
+                if (button.disabled) return;
                 closeContextMenu();
                 item.onSelect?.();
             });
@@ -1372,8 +1477,56 @@ export function openPromptCardLibraryMenu({
         return id ? library.cards.find((card) => card.id === id) ?? null : null;
     };
 
+    const readStoredGeometry = () => {
+        try {
+            const raw = localStorage.getItem(FAVORITE_GEOMETRY_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch {
+            return null;
+        }
+    };
+
+    const currentGeometry = () => {
+        const rect = root.getBoundingClientRect();
+        return normalizePromptCardLibraryGeometry({
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+        }, {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        });
+    };
+
+    const persistGeometry = () => {
+        if (!geometryInitialized || closed) return;
+        const geometry = currentGeometry();
+        if (!geometry) return;
+        try {
+            localStorage.setItem(FAVORITE_GEOMETRY_STORAGE_KEY, JSON.stringify(geometry));
+        } catch {
+            // Geometry persistence is optional and must never block favorites.
+        }
+    };
+
+    const applyGeometry = (geometry) => {
+        if (!geometry) return;
+        root.style.left = `${Math.round(geometry.left)}px`;
+        root.style.top = `${Math.round(geometry.top)}px`;
+        root.style.width = `${Math.round(geometry.width)}px`;
+        root.style.height = `${Math.round(geometry.height)}px`;
+        root.style.maxHeight = "none";
+        root.classList.toggle(
+            "cpw-prompt-card-library--narrow",
+            geometry.width < FAVORITE_WINDOW_NARROW_WIDTH,
+        );
+        root.dataset.mobileLevel = String(mobileLevel);
+    };
+
     const close = ({ restoreFocus = true } = {}) => {
         if (closed) return;
+        persistGeometry();
         closed = true;
         deleteController.destroy();
         hideFavoriteTooltip();
@@ -1383,38 +1536,108 @@ export function openPromptCardLibraryMenu({
         document.removeEventListener("pointerdown", onDocumentPointerDown, true);
         document.removeEventListener("keydown", onDocumentKeyDown, true);
         document.removeEventListener("dragend", onDocumentDragEnd, true);
-        window.removeEventListener("resize", onViewportChange);
-        window.removeEventListener("scroll", onViewportChange, true);
+        window.removeEventListener("resize", onViewportResize);
+        window.removeEventListener("scroll", onViewportScroll, true);
+        document.removeEventListener("pointermove", onWindowPointerMove, true);
+        document.removeEventListener("pointerup", onWindowPointerUp, true);
+        document.removeEventListener("pointercancel", onWindowPointerUp, true);
         root.remove();
         onClose?.();
         if (restoreFocus && anchor?.isConnected) anchor.focus?.();
     };
 
     const position = () => {
-        if (closed || !anchor?.isConnected) return;
-        const viewportMargin = 8;
+        if (closed) return;
+        if (geometryInitialized) {
+            applyGeometry(currentGeometry());
+            return;
+        }
+        const stored = normalizePromptCardLibraryGeometry(readStoredGeometry(), {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        });
+        if (stored) {
+            geometryInitialized = true;
+            applyGeometry(stored);
+            return;
+        }
+        if (!anchor?.isConnected) return;
         const anchorRect = anchor.getBoundingClientRect();
-        const narrow = window.innerWidth < 680;
-        root.classList.toggle("cpw-prompt-card-library--narrow", narrow);
-        root.dataset.mobileLevel = String(mobileLevel);
-        root.style.maxHeight = `${Math.max(220, window.innerHeight - viewportMargin * 2)}px`;
-        const rect = root.getBoundingClientRect();
-        const left = Math.min(
-            Math.max(viewportMargin, anchorRect.left + anchorRect.width / 2 - rect.width / 2),
-            Math.max(viewportMargin, window.innerWidth - rect.width - viewportMargin),
+        const width = Math.min(
+            FAVORITE_WINDOW_DEFAULT_WIDTH,
+            Math.max(1, window.innerWidth - FAVORITE_WINDOW_MARGIN * 2),
         );
-        const spaceBelow = window.innerHeight - anchorRect.bottom - viewportMargin;
-        const top = spaceBelow >= rect.height || anchorRect.top < spaceBelow
+        const height = Math.min(
+            FAVORITE_WINDOW_DEFAULT_HEIGHT,
+            Math.max(1, window.innerHeight - FAVORITE_WINDOW_MARGIN * 2),
+        );
+        const preferredLeft = anchorRect.left + anchorRect.width / 2 - width / 2;
+        const spaceBelow = window.innerHeight - anchorRect.bottom - FAVORITE_WINDOW_MARGIN;
+        const preferredTop = spaceBelow >= height || anchorRect.top < spaceBelow
             ? anchorRect.bottom + 4
-            : Math.max(viewportMargin, anchorRect.top - rect.height - 4);
-        root.style.left = `${Math.round(left)}px`;
-        root.style.top = `${Math.round(top)}px`;
+            : anchorRect.top - height - 4;
+        const fallback = normalizePromptCardLibraryGeometry({
+            left: preferredLeft,
+            top: preferredTop,
+            width,
+            height,
+        }, {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        });
+        geometryInitialized = true;
+        applyGeometry(fallback);
     };
 
-    const onViewportChange = () => {
+    const onViewportResize = () => {
         closeContextMenu();
         position();
         positionFavoriteTooltip();
+    };
+
+    const onViewportScroll = () => {
+        positionFavoriteTooltip();
+    };
+
+    const onWindowPointerMove = (event) => {
+        if (windowMoveSession?.pointerId === event.pointerId) {
+            event.preventDefault();
+            applyGeometry(normalizePromptCardLibraryGeometry({
+                left: windowMoveSession.left + event.clientX - windowMoveSession.x,
+                top: windowMoveSession.top + event.clientY - windowMoveSession.y,
+                width: windowMoveSession.width,
+                height: windowMoveSession.height,
+            }, {
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+            }));
+            positionFavoriteTooltip();
+        } else if (windowResizeSession?.pointerId === event.pointerId) {
+            event.preventDefault();
+            applyGeometry(normalizePromptCardLibraryGeometry({
+                left: windowResizeSession.left,
+                top: windowResizeSession.top,
+                width: windowResizeSession.width + event.clientX - windowResizeSession.x,
+                height: windowResizeSession.height + event.clientY - windowResizeSession.y,
+            }, {
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+            }));
+            positionFavoriteTooltip();
+        }
+    };
+
+    const onWindowPointerUp = (event) => {
+        const handled = windowMoveSession?.pointerId === event.pointerId
+            || windowResizeSession?.pointerId === event.pointerId;
+        if (!handled) return;
+        windowMoveSession = null;
+        windowResizeSession = null;
+        root.classList.remove(
+            "cpw-prompt-card-library--moving",
+            "cpw-prompt-card-library--resizing",
+        );
+        persistGeometry();
     };
 
     const categoryPath = (categoryId) => {
@@ -1484,6 +1707,7 @@ export function openPromptCardLibraryMenu({
     };
 
     const startCategoryEditor = (category = null, parentId = null) => {
+        editingFavoriteId = null;
         editingCategoryId = category?.id ?? null;
         creatingParentId = category ? undefined : parentId;
         closeContextMenu();
@@ -1585,6 +1809,52 @@ export function openPromptCardLibraryMenu({
         render();
     };
 
+    const saveFavoriteName = async (card, input) => {
+        const name = input.value.trim();
+        if (!name) {
+            setStatus(t("Favorite card title cannot be empty."), true);
+            input.focus();
+            return;
+        }
+        if (name.length > MAX_CARD_TITLE_LENGTH) {
+            setStatus(t("Favorite card title is too long."), true);
+            input.focus();
+            return;
+        }
+        if (name === card.title) {
+            editingFavoriteId = null;
+            setStatus();
+            render();
+            return;
+        }
+        const snapshot = promptCardFavoriteSnapshot({ ...card, title: name });
+        const result = await runMutation(
+            (client) => client.updateCard(card.id, { snapshot }),
+            t("Favorite renamed."),
+        );
+        if (!result) return;
+        editingFavoriteId = null;
+        render();
+    };
+
+    const startFavoriteEditor = (card) => {
+        if (busy) return;
+        editingCategoryId = null;
+        creatingParentId = undefined;
+        editingFavoriteId = card.id;
+        deleteController.disarm();
+        hideFavoriteTooltip();
+        closeContextMenu();
+        render();
+        queueMicrotask(() => {
+            const input = root.querySelector(
+                `.cpw-prompt-card-library__favorite-rename-input[data-favorite-card-id="${card.id}"]`,
+            );
+            input?.focus();
+            input?.select();
+        });
+    };
+
     const deleteFavorite = async (card) => {
         const siblings = library.cards.filter((candidate) => candidate.category_id === card.category_id);
         const deletedIndex = Math.max(0, siblings.findIndex((candidate) => candidate.id === card.id));
@@ -1629,6 +1899,185 @@ export function openPromptCardLibraryMenu({
             (client) => client.updateCard(card.id, target.changes),
             t("Favorite moved to {path}.", { path: categoryPath(category.id) }),
         );
+    };
+
+    const reorderFavoriteCards = async (cardId, insertionIndex) => {
+        const categoryId = selectedSecondaryId;
+        const cards = categoryId
+            ? library.cards.filter((candidate) => candidate.category_id === categoryId)
+            : [];
+        const reordered = promptCardFavoriteReorder(
+            cards.map((candidate) => candidate.id),
+            cardId,
+            insertionIndex,
+        );
+        clearDragState();
+        if (!categoryId || !reordered.changed) {
+            render();
+            queueMicrotask(() => root.querySelector(
+                `[data-favorite-card-id="${cardId}"] .cpw-prompt-card-library__favorite-main`,
+            )?.focus?.());
+            return;
+        }
+        const result = await runMutation(
+            (client) => client.reorderCards(categoryId, reordered.ids),
+            t("Favorite order updated."),
+        );
+        if (!result) return;
+        queueMicrotask(() => root.querySelector(
+            `[data-favorite-card-id="${cardId}"] .cpw-prompt-card-library__favorite-main`,
+        )?.focus?.());
+    };
+
+    const reorderFavoriteByCommand = (card, command) => {
+        const cards = library.cards.filter((candidate) => candidate.category_id === card.category_id);
+        const index = cards.findIndex((candidate) => candidate.id === card.id);
+        if (index < 0) return;
+        const insertionIndex = command === "top"
+            ? 0
+            : command === "up"
+                ? Math.max(0, index - 1)
+                : command === "down"
+                    ? Math.min(cards.length, index + 2)
+                    : cards.length;
+        reorderFavoriteCards(card.id, insertionIndex);
+    };
+
+    const moveFavoriteToPosition = async (cardId, category, insertionIndex) => {
+        const card = library.cards.find((candidate) => candidate.id === cardId);
+        if (!card || !category?.id || card.category_id === category.id) {
+            clearDragState({ renderAfter: true });
+            return;
+        }
+        clearDragState();
+        selectedPrimaryId = category.parent_id;
+        selectedSecondaryId = category.id;
+        mobileLevel = 2;
+        const result = await runMutation(
+            (client) => client.positionCard(card.id, category.id, insertionIndex),
+            t("Favorite moved to {path}.", { path: categoryPath(category.id) }),
+        );
+        if (!result) return;
+        queueMicrotask(() => root.querySelector(
+            `[data-favorite-card-id="${card.id}"] .cpw-prompt-card-library__favorite-main`,
+        )?.focus?.());
+    };
+
+    const runFavoriteDragScroll = () => {
+        favoriteDragScrollFrame = 0;
+        if (!draggingCardId || !favoriteDragScrollList?.isConnected || !favoriteDragScrollSpeed) return;
+        const previousScrollTop = favoriteDragScrollList.scrollTop;
+        favoriteDragScrollList.scrollTop += favoriteDragScrollSpeed;
+        if (favoriteDragScrollList.scrollTop === previousScrollTop) {
+            favoriteDragScrollSpeed = 0;
+            return;
+        }
+        if (favoriteDragClientY !== null) {
+            updateFavoriteInsertion(favoriteDragScrollList, favoriteDragClientY);
+        }
+        positionFavoriteTooltip();
+        favoriteDragScrollFrame = requestAnimationFrame(runFavoriteDragScroll);
+    };
+
+    const updateFavoriteDragScroll = (list, clientY) => {
+        const rect = list.getBoundingClientRect();
+        let speed = 0;
+        if (clientY < rect.top + FAVORITE_DRAG_SCROLL_EDGE) {
+            const ratio = Math.min(1, (rect.top + FAVORITE_DRAG_SCROLL_EDGE - clientY) / FAVORITE_DRAG_SCROLL_EDGE);
+            speed = -Math.max(2, Math.round(FAVORITE_DRAG_SCROLL_MAX_SPEED * ratio));
+        } else if (clientY > rect.bottom - FAVORITE_DRAG_SCROLL_EDGE) {
+            const ratio = Math.min(1, (clientY - (rect.bottom - FAVORITE_DRAG_SCROLL_EDGE)) / FAVORITE_DRAG_SCROLL_EDGE);
+            speed = Math.max(2, Math.round(FAVORITE_DRAG_SCROLL_MAX_SPEED * ratio));
+        }
+        favoriteDragScrollList = list;
+        favoriteDragScrollSpeed = speed;
+        favoriteDragClientY = clientY;
+        if (speed && !favoriteDragScrollFrame) {
+            favoriteDragScrollFrame = requestAnimationFrame(runFavoriteDragScroll);
+        } else if (!speed && favoriteDragScrollFrame) {
+            cancelAnimationFrame(favoriteDragScrollFrame);
+            favoriteDragScrollFrame = 0;
+        }
+    };
+
+    const updateFavoriteInsertion = (list, clientY) => {
+        const wrappers = [...list.querySelectorAll(":scope > .cpw-prompt-card-library__favorite-wrap")];
+        for (const wrapper of wrappers) {
+            wrapper.classList.remove(
+                "cpw-prompt-card-library__favorite-wrap--insert-before",
+                "cpw-prompt-card-library__favorite-wrap--insert-after",
+            );
+        }
+        let boundary = wrappers.length;
+        for (let index = 0; index < wrappers.length; index += 1) {
+            const rect = wrappers[index].getBoundingClientRect();
+            if (clientY < rect.top + rect.height / 2) {
+                boundary = index;
+                break;
+            }
+        }
+        favoriteInsertionIndex = boundary;
+        if (!wrappers.length) return;
+        if (boundary < wrappers.length) {
+            wrappers[boundary].classList.add("cpw-prompt-card-library__favorite-wrap--insert-before");
+        } else {
+            wrappers.at(-1).classList.add("cpw-prompt-card-library__favorite-wrap--insert-after");
+        }
+    };
+
+    const configureFavoriteDropList = (list, secondary, cards, { allowCrossCategory = false } = {}) => {
+        list.addEventListener("dragover", (event) => {
+            if (!draggingCardId || !secondary) return;
+            const dragged = library.cards.find((candidate) => candidate.id === draggingCardId);
+            if (!dragged || (!allowCrossCategory && dragged.category_id !== secondary.id)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            updateFavoriteInsertion(list, event.clientY);
+            updateFavoriteDragScroll(list, event.clientY);
+        });
+        list.addEventListener("drop", (event) => {
+            if (!draggingCardId || !secondary) return;
+            const dragged = library.cards.find((candidate) => candidate.id === draggingCardId);
+            if (!dragged || (!allowCrossCategory && dragged.category_id !== secondary.id)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const insertionIndex = favoriteInsertionIndex ?? cards.length;
+            if (dragged.category_id === secondary.id) {
+                reorderFavoriteCards(draggingCardId, insertionIndex);
+            } else {
+                moveFavoriteToPosition(draggingCardId, secondary, insertionIndex);
+            }
+        });
+        list.addEventListener("dragleave", (event) => {
+            if (list.contains(event.relatedTarget)) return;
+            favoriteDragScrollSpeed = 0;
+            favoriteDragScrollList = null;
+            favoriteDragClientY = null;
+            if (favoriteDragScrollFrame) cancelAnimationFrame(favoriteDragScrollFrame);
+            favoriteDragScrollFrame = 0;
+        });
+        list.addEventListener("scroll", positionFavoriteTooltip, { passive: true });
+    };
+
+    const previewFavoriteCardRow = (card) => {
+        const cardName = card.title.trim() || t("Untitled Card");
+        const wrapper = element("div", "cpw-prompt-card-library__favorite-wrap");
+        wrapper.dataset.favoriteCardId = card.id;
+        const row = element("div", "cpw-prompt-card-library__favorite-row");
+        const content = element("div", "cpw-prompt-card-library__favorite-main");
+        const titleLine = element("span", "cpw-prompt-card-library__favorite-title-line");
+        titleLine.append(
+            element("strong", "cpw-prompt-card-library__favorite-title", cardName),
+            element("span", "cpw-prompt-card-library__favorite-count", `(${favoriteCardPromptCount(card)})`),
+        );
+        content.append(
+            titleLine,
+            element("span", "cpw-prompt-card-library__favorite-preview", card.prompt),
+        );
+        row.append(content);
+        wrapper.append(row);
+        return wrapper;
     };
 
     const categoryEditor = (category, parentId) => {
@@ -1724,6 +2173,7 @@ export function openPromptCardLibraryMenu({
                 renderPrimaryDragPreview?.(category);
                 return;
             }
+            renderSecondaryDragPreview?.(category);
             event.preventDefault();
             for (const target of root.querySelectorAll(".cpw-prompt-card-library__row-main--drop-target")) {
                 target.classList.remove("cpw-prompt-card-library__row-main--drop-target");
@@ -1833,6 +2283,9 @@ export function openPromptCardLibraryMenu({
             render();
             return;
         }
+        panels.querySelector(".cpw-prompt-card-library__list--drag-preview")?.remove();
+        panels.querySelector(".cpw-prompt-card-library__list--drag-source")
+            ?.classList.remove("cpw-prompt-card-library__list--drag-source");
         for (const primaryButton of panels.querySelectorAll(
             '.cpw-prompt-card-library__row-main[data-library-level="0"]',
         )) {
@@ -1863,7 +2316,85 @@ export function openPromptCardLibraryMenu({
         position();
     };
 
+    renderSecondaryDragPreview = (secondary) => {
+        if (!draggingCardId || !secondary?.parent_id) return;
+        selectedPrimaryId = secondary.parent_id;
+        selectedSecondaryId = secondary.id;
+        mobileLevel = 2;
+        for (const secondaryButton of panels.querySelectorAll(
+            '.cpw-prompt-card-library__row-main[data-library-level="1"]',
+        )) {
+            const selected = secondaryButton.dataset.categoryId === secondary.id;
+            secondaryButton.classList.toggle("cpw-prompt-card-library__row-main--selected", selected);
+            secondaryButton.classList.toggle("cpw-prompt-card-library__row-main--drop-target", selected);
+        }
+        const cardPanel = panels.querySelector(
+            '.cpw-prompt-card-library__panel[data-level="2"]',
+        );
+        const sourceList = cardPanel?.querySelector(
+            ':scope > .cpw-prompt-card-library__list:not(.cpw-prompt-card-library__list--drag-preview)',
+        );
+        if (!cardPanel || !sourceList) return;
+        cardPanel.querySelector(".cpw-prompt-card-library__list--drag-preview")?.remove();
+        sourceList.classList.add("cpw-prompt-card-library__list--drag-source");
+        const previewList = element(
+            "div",
+            "cpw-prompt-card-library__list cpw-prompt-card-library__list--drag-preview",
+        );
+        const cards = library.cards.filter((card) => card.category_id === secondary.id);
+        if (cards.length) {
+            for (const card of cards) previewList.append(previewFavoriteCardRow(card));
+        } else {
+            previewList.append(element(
+                "div",
+                "cpw-prompt-card-library__empty",
+                t("Drop here to place the favorite first."),
+            ));
+        }
+        configureFavoriteDropList(previewList, secondary, cards, { allowCrossCategory: true });
+        cardPanel.append(previewList);
+        root.dataset.mobileLevel = "2";
+        position();
+    };
+
+    const favoriteCardEditor = (card) => {
+        const wrapper = element("div", "cpw-prompt-card-library__favorite-wrap");
+        wrapper.dataset.favoriteCardId = card.id;
+        const editor = element("form", "cpw-prompt-card-library__favorite-rename-editor");
+        const input = element("input", "cpw-prompt-card-library__favorite-rename-input");
+        input.dataset.favoriteCardId = card.id;
+        input.type = "text";
+        input.maxLength = MAX_CARD_TITLE_LENGTH;
+        input.value = card.title;
+        input.setAttribute("aria-label", t("Favorite card title"));
+        const cancel = element("button", "cpw-prompt-card-library__favorite-rename-cancel", t("Cancel"));
+        cancel.type = "button";
+        const confirm = element("button", "cpw-prompt-card-library__favorite-rename-confirm", t("Confirm"));
+        confirm.type = "submit";
+        editor.append(input, cancel, confirm);
+        editor.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveFavoriteName(card, input);
+        });
+        cancel.addEventListener("click", () => {
+            editingFavoriteId = null;
+            setStatus();
+            render();
+        });
+        input.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            editingFavoriteId = null;
+            setStatus();
+            render();
+        });
+        wrapper.append(editor);
+        return wrapper;
+    };
+
     const favoriteCardRow = (card) => {
+        if (editingFavoriteId === card.id) return favoriteCardEditor(card);
         const cardName = card.title.trim() || t("Untitled Card");
         const wrapper = element("div", "cpw-prompt-card-library__favorite-wrap");
         wrapper.dataset.favoriteCardId = card.id;
@@ -1903,6 +2434,8 @@ export function openPromptCardLibraryMenu({
         }
         const openActions = ({ x, y, focus = false }) => {
             if (busy) return;
+            const siblings = library.cards.filter((candidate) => candidate.category_id === card.category_id);
+            const cardIndex = siblings.findIndex((candidate) => candidate.id === card.id);
             openContextMenu({
                 anchor: choose,
                 x,
@@ -1910,7 +2443,31 @@ export function openPromptCardLibraryMenu({
                 focus,
                 items: [
                     {
-                        label: t("Move"),
+                        label: t("Rename"),
+                        onSelect: () => startFavoriteEditor(card),
+                    },
+                    {
+                        label: t("Move to Top"),
+                        disabled: cardIndex <= 0,
+                        onSelect: () => reorderFavoriteByCommand(card, "top"),
+                    },
+                    {
+                        label: t("Move Up"),
+                        disabled: cardIndex <= 0,
+                        onSelect: () => reorderFavoriteByCommand(card, "up"),
+                    },
+                    {
+                        label: t("Move Down"),
+                        disabled: cardIndex < 0 || cardIndex >= siblings.length - 1,
+                        onSelect: () => reorderFavoriteByCommand(card, "down"),
+                    },
+                    {
+                        label: t("Move to Bottom"),
+                        disabled: cardIndex < 0 || cardIndex >= siblings.length - 1,
+                        onSelect: () => reorderFavoriteByCommand(card, "bottom"),
+                    },
+                    {
+                        label: t("Move to Category"),
                         onSelect: () => {
                             movingCardId = card.id;
                             selectedPrimaryId = null;
@@ -1949,6 +2506,7 @@ export function openPromptCardLibraryMenu({
                 return;
             }
             draggingCardId = card.id;
+            draggingSourceCategoryId = card.category_id;
             deleteController.disarm();
             hideFavoriteTooltip();
             closeContextMenu();
@@ -1993,6 +2551,12 @@ export function openPromptCardLibraryMenu({
         if (closed) return;
         hideFavoriteTooltip();
         closeContextMenu();
+        const editingFavorite = editingFavoriteId
+            ? library.cards.find((card) => card.id === editingFavoriteId)
+            : null;
+        if (!editingFavorite || editingFavorite.category_id !== selectedSecondaryId) {
+            editingFavoriteId = null;
+        }
         if (mode === "assign" && !favoriteSelectionInitialized) {
             const favorite = currentFavorite();
             const secondary = favorite
@@ -2066,6 +2630,7 @@ export function openPromptCardLibraryMenu({
             } : null,
         }));
         const cardList = element("div", "cpw-prompt-card-library__list");
+        cardList.dataset.favoriteOrderList = "true";
         const cards = secondary ? library.cards.filter((card) => card.category_id === secondary.id) : [];
         if (cards.length) {
             for (const card of cards) cardList.append(favoriteCardRow(card));
@@ -2079,6 +2644,7 @@ export function openPromptCardLibraryMenu({
             empty.tabIndex = -1;
             cardList.append(empty);
         }
+        configureFavoriteDropList(cardList, secondary, cards);
         cardPanel.append(cardList);
         panels.replaceChildren(primaryPanel, secondaryPanel, cardPanel);
         root.dataset.mobileLevel = String(mobileLevel);
@@ -2117,6 +2683,10 @@ export function openPromptCardLibraryMenu({
 
     const onDocumentKeyDown = (event) => {
         if (closed || !root.contains(document.activeElement)) return;
+        if (
+            event.target === resizeHandle
+            && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+        ) return;
         if (event.key === "Escape") {
             event.preventDefault();
             if (deleteController.disarm()) {
@@ -2156,6 +2726,59 @@ export function openPromptCardLibraryMenu({
         render();
     });
     closeButton.addEventListener("click", () => close());
+    header.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || event.target.closest("button, input, select, a, [role='button']")) return;
+        position();
+        const geometry = currentGeometry();
+        if (!geometry) return;
+        event.preventDefault();
+        windowMoveSession = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            ...geometry,
+        };
+        windowResizeSession = null;
+        root.classList.add("cpw-prompt-card-library--moving");
+        hideFavoriteTooltip();
+        closeContextMenu();
+    });
+    resizeHandle.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        position();
+        const geometry = currentGeometry();
+        if (!geometry) return;
+        event.preventDefault();
+        event.stopPropagation();
+        windowResizeSession = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            ...geometry,
+        };
+        windowMoveSession = null;
+        root.classList.add("cpw-prompt-card-library--resizing");
+        hideFavoriteTooltip();
+        closeContextMenu();
+    });
+    resizeHandle.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        position();
+        const geometry = currentGeometry();
+        if (!geometry) return;
+        const step = event.shiftKey ? 24 : 8;
+        if (event.key === "ArrowLeft") geometry.width -= step;
+        else if (event.key === "ArrowRight") geometry.width += step;
+        else if (event.key === "ArrowUp") geometry.height -= step;
+        else geometry.height += step;
+        applyGeometry(normalizePromptCardLibraryGeometry(geometry, {
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        }));
+        persistGeometry();
+    });
     for (const eventName of ["pointerdown", "pointerup", "click", "keydown", "keyup", "input", "change"]) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
@@ -2163,8 +2786,11 @@ export function openPromptCardLibraryMenu({
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     document.addEventListener("keydown", onDocumentKeyDown, true);
     document.addEventListener("dragend", onDocumentDragEnd, true);
-    window.addEventListener("resize", onViewportChange);
-    window.addEventListener("scroll", onViewportChange, true);
+    document.addEventListener("pointermove", onWindowPointerMove, true);
+    document.addEventListener("pointerup", onWindowPointerUp, true);
+    document.addEventListener("pointercancel", onWindowPointerUp, true);
+    window.addEventListener("resize", onViewportResize);
+    window.addEventListener("scroll", onViewportScroll, true);
     render();
     setStatus(t("Loading favorites…"));
     service.refresh()

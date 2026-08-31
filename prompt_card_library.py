@@ -383,6 +383,11 @@ class PromptCardLibraryStore:
                 for card in affected_cards:
                     card["category_id"] = normalized_target
                     card["updated_at"] = timestamp
+                affected_ids = {card["id"] for card in affected_cards}
+                data["cards"] = [
+                    card for card in data["cards"] if card["id"] not in affected_ids
+                ]
+                data["cards"].extend(affected_cards)
             data["categories"] = [
                 item for item in data["categories"] if item["id"] not in removed_ids
             ]
@@ -426,9 +431,17 @@ class PromptCardLibraryStore:
             card = self._card(data, card_id)
             if card is None:
                 raise PromptCardLibraryNotFoundError("favorite card not found")
-            if normalized_category is not None:
+            if normalized_category is not None and normalized_category != card["category_id"]:
                 self._secondary_category(data, normalized_category)
+                data["cards"].remove(card)
                 card["category_id"] = normalized_category
+                target_indexes = [
+                    index
+                    for index, candidate in enumerate(data["cards"])
+                    if candidate["category_id"] == normalized_category
+                ]
+                insert_at = target_indexes[-1] + 1 if target_indexes else len(data["cards"])
+                data["cards"].insert(insert_at, card)
             if normalized_snapshot is not None:
                 for field in ("title", "prompt", "color", "retain_unselected", "prompt_tokens"):
                     card.pop(field, None)
@@ -437,6 +450,87 @@ class PromptCardLibraryStore:
             self._increment_revision(data)
             self._write_unlocked(data)
             return card, data["revision"]
+
+    def reorder_cards(self, category_id, card_ids):
+        category_id = _normalize_uuid(category_id, "category_id")
+        if not isinstance(card_ids, list):
+            raise PromptCardLibraryValidationError("card_ids must be an array")
+        normalized_ids = [
+            _normalize_uuid(card_id, f"card_ids[{index}]")
+            for index, card_id in enumerate(card_ids)
+        ]
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise PromptCardLibraryValidationError("card_ids must not contain duplicates")
+        with self._lock:
+            data = self._read_unlocked()
+            self._secondary_category(data, category_id)
+            current_ids = [
+                card["id"] for card in data["cards"] if card["category_id"] == category_id
+            ]
+            if len(normalized_ids) != len(current_ids) or set(normalized_ids) != set(current_ids):
+                raise PromptCardLibraryValidationError(
+                    "card_ids must contain every favorite card in the category exactly once"
+                )
+            if normalized_ids == current_ids:
+                return False, data["revision"]
+            card_by_id = {
+                card["id"]: card for card in data["cards"] if card["category_id"] == category_id
+            }
+            ordered = iter(normalized_ids)
+            data["cards"] = [
+                card_by_id[next(ordered)] if card["category_id"] == category_id else card
+                for card in data["cards"]
+            ]
+            self._increment_revision(data)
+            self._write_unlocked(data)
+            return True, data["revision"]
+
+    def position_card(self, card_id, category_id, index):
+        card_id = _normalize_uuid(card_id, "favorite card id")
+        category_id = _normalize_uuid(category_id, "category_id")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise PromptCardLibraryValidationError("index must be an integer")
+        with self._lock:
+            data = self._read_unlocked()
+            card = self._card(data, card_id)
+            if card is None:
+                raise PromptCardLibraryNotFoundError("favorite card not found")
+            self._secondary_category(data, category_id)
+            target_cards = [
+                candidate
+                for candidate in data["cards"]
+                if candidate["category_id"] == category_id and candidate["id"] != card_id
+            ]
+            if index < 0 or index > len(target_cards):
+                raise PromptCardLibraryValidationError("index is outside the target category")
+            current_cards = [
+                candidate for candidate in data["cards"] if candidate["category_id"] == card["category_id"]
+            ]
+            current_index = next(
+                position for position, candidate in enumerate(current_cards) if candidate["id"] == card_id
+            )
+            if card["category_id"] == category_id and current_index == index:
+                return False, card, data["revision"]
+
+            remaining = [candidate for candidate in data["cards"] if candidate["id"] != card_id]
+            card["category_id"] = category_id
+            card["updated_at"] = _now()
+            target_cards.insert(index, card)
+            target_indexes = [
+                position
+                for position, candidate in enumerate(remaining)
+                if candidate["category_id"] == category_id
+            ]
+            insert_at = target_indexes[-1] + 1 if target_indexes else len(remaining)
+            remaining.insert(insert_at, card)
+            ordered = iter(target_cards)
+            data["cards"] = [
+                next(ordered) if candidate["category_id"] == category_id else candidate
+                for candidate in remaining
+            ]
+            self._increment_revision(data)
+            self._write_unlocked(data)
+            return True, card, data["revision"]
 
     def delete_card(self, card_id):
         card_id = _normalize_uuid(card_id, "favorite card id")

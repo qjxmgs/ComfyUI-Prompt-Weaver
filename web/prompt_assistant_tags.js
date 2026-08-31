@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2";
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_RESULT_LIMIT = 30;

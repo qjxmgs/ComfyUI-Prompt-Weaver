@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260831-unified-favorite-delete-v1";
+} from "./prompt_card_library.js?v=20260831-favorite-rename-v2";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1";
+} from "./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -700,7 +700,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260831-unified-favorite-delete-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260831-favorite-rename-v2", import.meta.url).href;
     document.head.append(link);
 }
 

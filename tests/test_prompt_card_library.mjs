@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -32,10 +32,12 @@ const {
     favoriteCardBilingualPrompt,
     favoriteCardPromptCount,
     normalizePromptCardLibrary,
+    normalizePromptCardLibraryGeometry,
     promptCardCascadePanelPosition,
     promptCardCascadeTooltipPosition,
     promptCardFavoriteFingerprint,
     promptCardFavoriteMoveTarget,
+    promptCardFavoriteReorder,
     promptCardFavoritePath,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
@@ -214,6 +216,50 @@ test("favorite moves accept only changed secondary-category targets", () => {
     });
 });
 
+test("favorite reorder uses insertion boundaries and filters no-op moves", () => {
+    assert.deepEqual(promptCardFavoriteReorder(["a", "b", "c", "d"], "c", 0), {
+        ids: ["c", "a", "b", "d"],
+        changed: true,
+    });
+    assert.deepEqual(promptCardFavoriteReorder(["a", "b", "c", "d"], "b", 4), {
+        ids: ["a", "c", "d", "b"],
+        changed: true,
+    });
+    assert.deepEqual(promptCardFavoriteReorder(["a", "b", "c"], "b", 2), {
+        ids: ["a", "b", "c"],
+        changed: false,
+    });
+    assert.deepEqual(promptCardFavoriteReorder(["a", "b"], "missing", 0), {
+        ids: ["a", "b"],
+        changed: false,
+    });
+});
+
+test("favorite window geometry validates, clamps, and preserves visible bounds", () => {
+    assert.equal(normalizePromptCardLibraryGeometry(null, {
+        viewportWidth: 1000,
+        viewportHeight: 700,
+    }), null);
+    assert.equal(normalizePromptCardLibraryGeometry({ left: 0, top: 0, width: "bad", height: 300 }, {
+        viewportWidth: 1000,
+        viewportHeight: 700,
+    }), null);
+    assert.deepEqual(normalizePromptCardLibraryGeometry({
+        left: -50,
+        top: 900,
+        width: 1200,
+        height: 100,
+    }, {
+        viewportWidth: 1000,
+        viewportHeight: 700,
+    }), {
+        left: 8,
+        top: 452,
+        width: 984,
+        height: 240,
+    });
+});
+
 test("API client preserves collection paths, methods, and request bodies", async () => {
     const requests = [];
     const api = {
@@ -230,6 +276,8 @@ test("API client preserves collection paths, methods, and request bodies", async
     await client.createCard(SECONDARY_ID, { title: "主角", prompt: "1girl" });
     await client.updateCard("id with space", { category_id: SECONDARY_ID });
     await client.deleteCard("id with space");
+    await client.reorderCards(SECONDARY_ID, [CARD_ID]);
+    await client.positionCard("id with space", SECONDARY_ID, 2);
 
     assert.equal(requests[0].path, "/prompt-weaver/prompt-card-library");
     assert.equal(requests[1].options.method, "POST");
@@ -239,6 +287,21 @@ test("API client preserves collection paths, methods, and request bodies", async
     assert.equal(requests[4].path, "/prompt-weaver/prompt-card-library/cards");
     assert.equal(requests[5].options.method, "PATCH");
     assert.equal(requests[6].options.method, "DELETE");
+    assert.equal(requests[7].path, "/prompt-weaver/prompt-card-library/cards/order");
+    assert.equal(requests[7].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[7].options.body), {
+        category_id: SECONDARY_ID,
+        card_ids: [CARD_ID],
+    });
+    assert.equal(
+        requests[8].path,
+        "/prompt-weaver/prompt-card-library/cards/id%20with%20space/position",
+    );
+    assert.equal(requests[8].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[8].options.body), {
+        category_id: SECONDARY_ID,
+        index: 2,
+    });
 });
 
 test("nested busy renders preserve each control's original disabled state", () => {
@@ -334,8 +397,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /titleShell\.append\(title, favoriteSwitchButton\)/);
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell, cardActions\)/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-unified-favorite-delete-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-unified-favorite-delete-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-favorite-rename-v2/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-favorite-rename-v2/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -358,6 +421,12 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /resolvePromptTip\(card, \{ signal: controller\.signal \}\)/);
     assert.match(favoriteSource, /aria-describedby/);
     assert.match(favoriteSource, /hideFavoriteTooltip\(\)/);
+    assert.equal(
+        (favoriteSource.match(/cpw-prompt-card-cascade__tooltip cpw-prompt-card-library__tooltip/g) ?? []).length,
+        2,
+    );
+    assert.equal((favoriteSource.match(/document\.body\.append\(tooltip\)/g) ?? []).length, 2);
+    assert.doesNotMatch(favoriteSource, /root\.append\(tooltip\)/);
     assert.doesNotMatch(favoriteSource, /branchCloseTimer|scheduleBranchClose/);
     assert.match(favoriteSource, /chooseButton\.addEventListener\("pointerleave"[\s\S]*document\.activeElement !== chooseButton[\s\S]*hideFavoriteTooltip\(\)/);
     assert.match(favoriteSource, /chooseButton\.addEventListener\("blur"[\s\S]*!chooseButton\.matches\(":hover"\)[\s\S]*hideFavoriteTooltip\(\)/);
@@ -393,6 +462,27 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-count/);
     assert.match(favoriteSource, /deleteController\.createButton\(\{[\s\S]*className: "cpw-prompt-card-library__favorite-delete"/);
     assert.match(favoriteSource, /row\.draggable = mode === "assign"/);
+    assert.match(favoriteSource, /client\.reorderCards\(categoryId, reordered\.ids\)/);
+    assert.match(favoriteSource, /client\.positionCard\(card\.id, category\.id, insertionIndex\)/);
+    assert.match(favoriteSource, /renderSecondaryDragPreview\?\.\(category\)/);
+    assert.match(favoriteSource, /configureFavoriteDropList\(previewList, secondary, cards, \{ allowCrossCategory: true \}\)/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__list--drag-source/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__list--drag-preview/);
+    assert.match(favoriteSource, /updateFavoriteInsertion\(list, event\.clientY\)/);
+    assert.match(favoriteSource, /requestAnimationFrame\(runFavoriteDragScroll\)/);
+    assert.match(favoriteSource, /label: t\("Move to Top"\)/);
+    assert.match(favoriteSource, /label: t\("Move Up"\)/);
+    assert.match(favoriteSource, /label: t\("Move Down"\)/);
+    assert.match(favoriteSource, /label: t\("Move to Bottom"\)/);
+    assert.match(favoriteSource, /label: t\("Rename"\),\s*onSelect: \(\) => startFavoriteEditor\(card\)/s);
+    assert.match(favoriteSource, /const favoriteCardEditor = \(card\) => \{/);
+    assert.doesNotMatch(favoriteSource, /cpw-prompt-card-library__favorite-rename-label/);
+    assert.match(favoriteSource, /editor\.append\(input, cancel, confirm\)/);
+    assert.match(favoriteSource, /client\.updateCard\(card\.id, \{ snapshot \}\)[\s\S]*t\("Favorite renamed\."\)/);
+    assert.match(favoriteSource, /FAVORITE_GEOMETRY_STORAGE_KEY/);
+    assert.match(favoriteSource, /localStorage\.setItem\(FAVORITE_GEOMETRY_STORAGE_KEY/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__resize-handle/);
+    assert.match(favoriteSource, /header\.addEventListener\("pointerdown"/);
     assert.match(favoriteSource, /application\/x-prompt-weaver-favorite-id/);
     assert.match(favoriteSource, /level === 0[\s\S]*selectedPrimaryId = category\.id[\s\S]*selectedSecondaryId = null/);
     assert.match(favoriteSource, /renderPrimaryDragPreview\?\.\(category\)/);
@@ -423,12 +513,20 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-header\s*\{[^}]*height:\s*32px;[^}]*min-height:\s*32px;[^}]*flex:\s*0 0 32px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-add\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
-    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*4px;[^}]*right:\s*3px;/s);
-    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*border-radius:\s*5px;/s);
-    assert.match(cssSource, /\.cpw-prompt-card-library__tooltip\s*\{[^}]*z-index:\s*2147483630;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*right:\s*3px;[^}]*transform:\s*translateY\(-50%\);/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);[^}]*border-radius:\s*5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-title-line,\s*\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-preview\s*\{[^}]*padding-right:\s*68\.5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-rename-editor\s*\{[^}]*grid-template-columns:\s*minmax\(42px, 1fr\) auto auto;[^}]*align-items:\s*center;/s);
+    assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library__favorite-rename-label/);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-rename-cancel,\s*\.cpw-prompt-card-library__favorite-rename-confirm\s*\{[^}]*border-radius:\s*5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__tooltip\s*\{[^}]*z-index:\s*2147483646;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__row-main--drop-target/);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-wrap--insert-before::before/);
+    assert.match(cssSource, /\.cpw-prompt-card-library__list--drag-preview\s*\{[^}]*position:\s*absolute;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__resize-handle\s*\{[^}]*cursor:\s*nwse-resize;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__list::-webkit-scrollbar\s*\{[^}]*width:\s*5px;[^}]*height:\s*5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library--narrow\[data-mobile-level="2"\]/);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library__more/);
     assert.match(cssSource, /\.cpw-prompt-card-library__context-menu\s*\{[^}]*position:\s*fixed;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
-    assert.match(cssSource, /@media \(max-width:\s*679px\)[\s\S]*\.cpw-prompt-card-library\[data-mobile-level=/s);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-grid__favorite--dirty::after/);
 });

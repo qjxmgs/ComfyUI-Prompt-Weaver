@@ -118,11 +118,115 @@ class PromptCardLibraryStoreTests(unittest.TestCase):
     def test_card_move_does_not_update_independent_snapshot(self):
         _first, source = self.create_branch("人物", "角色")
         _second, target = self.create_branch("场景", "室内")
+        existing, _revision = self.store.create_card(target["id"], snapshot("existing"))
         card, _revision = self.store.create_card(source["id"], snapshot())
         moved, _revision = self.store.update_card(card["id"], category_id=target["id"])
         self.assertEqual(moved["category_id"], target["id"])
         self.assertEqual(moved["prompt"], card["prompt"])
         self.assertEqual(moved["title"], card["title"])
+        self.assertEqual(
+            [entry["id"] for entry in self.store.list_library()["cards"] if entry["category_id"] == target["id"]],
+            [existing["id"], card["id"]],
+        )
+
+    def test_card_reorder_is_persistent_atomic_and_keeps_other_categories_stable(self):
+        _primary, category = self.create_branch("人物", "角色")
+        _other_primary, other_category = self.create_branch("场景", "室内")
+        first, _revision = self.store.create_card(category["id"], snapshot("one"))
+        other, _revision = self.store.create_card(other_category["id"], snapshot("other"))
+        second, _revision = self.store.create_card(category["id"], snapshot("two"))
+        third, before_revision = self.store.create_card(category["id"], snapshot("three"))
+
+        changed, revision = self.store.reorder_cards(
+            category["id"],
+            [third["id"], first["id"], second["id"]],
+        )
+        self.assertTrue(changed)
+        self.assertEqual(revision, before_revision + 1)
+        library = self.store.list_library()
+        self.assertEqual(
+            [entry["id"] for entry in library["cards"] if entry["category_id"] == category["id"]],
+            [third["id"], first["id"], second["id"]],
+        )
+        self.assertEqual(
+            [entry["id"] for entry in library["cards"] if entry["category_id"] == other_category["id"]],
+            [other["id"]],
+        )
+        unchanged, same_revision = self.store.reorder_cards(
+            category["id"],
+            [third["id"], first["id"], second["id"]],
+        )
+        self.assertFalse(unchanged)
+        self.assertEqual(same_revision, revision)
+
+    def test_card_reorder_rejects_incomplete_duplicate_and_cross_category_ids(self):
+        _primary, category = self.create_branch("人物", "角色")
+        _other_primary, other_category = self.create_branch("场景", "室内")
+        first, _revision = self.store.create_card(category["id"], snapshot("one"))
+        second, _revision = self.store.create_card(category["id"], snapshot("two"))
+        other, _revision = self.store.create_card(other_category["id"], snapshot("other"))
+        before = Path(self.path).read_bytes()
+
+        for invalid in (
+            [first["id"]],
+            [first["id"], first["id"]],
+            [first["id"], other["id"]],
+            "not-an-array",
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(PromptCardLibraryValidationError):
+                    self.store.reorder_cards(category["id"], invalid)
+                self.assertEqual(Path(self.path).read_bytes(), before)
+
+    def test_card_position_moves_between_categories_at_exact_target_index(self):
+        _primary, source = self.create_branch("人物", "角色")
+        _other_primary, target = self.create_branch("服装", "上衣")
+        moving, _revision = self.store.create_card(source["id"], snapshot("moving"))
+        first, _revision = self.store.create_card(target["id"], snapshot("first"))
+        second, before_revision = self.store.create_card(target["id"], snapshot("second"))
+
+        changed, positioned, revision = self.store.position_card(
+            moving["id"], target["id"], 1
+        )
+        self.assertTrue(changed)
+        self.assertEqual(revision, before_revision + 1)
+        self.assertEqual(positioned["category_id"], target["id"])
+        self.assertEqual(
+            [
+                entry["id"]
+                for entry in self.store.list_library()["cards"]
+                if entry["category_id"] == target["id"]
+            ],
+            [first["id"], moving["id"], second["id"]],
+        )
+        self.assertEqual(
+            [
+                entry["id"]
+                for entry in self.store.list_library()["cards"]
+                if entry["category_id"] == source["id"]
+            ],
+            [],
+        )
+
+    def test_card_position_supports_same_category_noop_and_validates_index(self):
+        _primary, category = self.create_branch("人物", "角色")
+        first, _revision = self.store.create_card(category["id"], snapshot("first"))
+        second, revision = self.store.create_card(category["id"], snapshot("second"))
+        before = Path(self.path).read_bytes()
+
+        changed, positioned, same_revision = self.store.position_card(
+            second["id"], category["id"], 1
+        )
+        self.assertFalse(changed)
+        self.assertEqual(positioned["id"], second["id"])
+        self.assertEqual(same_revision, revision)
+        self.assertEqual(Path(self.path).read_bytes(), before)
+
+        for invalid in (-1, 3, 1.5, True):
+            with self.subTest(index=invalid):
+                with self.assertRaises(PromptCardLibraryValidationError):
+                    self.store.position_card(first["id"], category["id"], invalid)
+                self.assertEqual(Path(self.path).read_bytes(), before)
 
     def test_corrupt_store_is_not_replaced(self):
         Path(self.path).parent.mkdir(parents=True)

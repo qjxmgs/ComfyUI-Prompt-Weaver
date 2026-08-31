@@ -655,6 +655,34 @@ async def create_prompt_card_library_card(request):
         return _prompt_card_library_error_response(error)
 
 
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/order")
+async def reorder_prompt_card_library_cards(request):
+    try:
+        payload = await _request_json(
+            request,
+            MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        changed, revision = store.reorder_cards(
+            payload.get("category_id"),
+            payload.get("card_ids"),
+        )
+        return web.json_response({
+            "changed": changed,
+            "revision": revision,
+            "library": store.list_library(),
+        })
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/{card_id}")
 async def update_prompt_card_library_card(request):
     try:
@@ -676,6 +704,36 @@ async def update_prompt_card_library_card(request):
     except (
         PromptCardLibraryValidationError,
         PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/{card_id}/position")
+async def position_prompt_card_library_card(request):
+    try:
+        payload = await _request_json(
+            request,
+            MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        changed, card, revision = store.position_card(
+            request.match_info["card_id"],
+            payload.get("category_id"),
+            payload.get("index"),
+        )
+        return web.json_response({
+            "changed": changed,
+            "card": card,
+            "revision": revision,
+            "library": store.list_library(),
+        })
+    except (
+        PromptCardLibraryValidationError,
         PromptCardLibraryNotFoundError,
         PromptCardLibraryCapacityError,
         PromptCardLibraryCorruptError,

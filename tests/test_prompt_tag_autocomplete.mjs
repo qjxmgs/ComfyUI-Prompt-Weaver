@@ -10,13 +10,13 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const assistantSource = (await readFile(
     new URL("../web/prompt_assistant_tags.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2", i18nUrl);
 const assistantUrl = `data:text/javascript;base64,${Buffer.from(assistantSource).toString("base64")}`;
 const moduleSource = (await readFile(
     new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1", i18nUrl)
+    .replace("./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2", i18nUrl)
     .replace("./prompt_assistant_tags.js?v=20260825-matched-alias-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
@@ -703,7 +703,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260831-unified-favorite-delete-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260831-favorite-rename-v2/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);

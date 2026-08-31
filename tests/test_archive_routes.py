@@ -680,6 +680,75 @@ class ArchiveRouteTests(unittest.TestCase):
         ))
         self.assertEqual(removed.status, 200)
 
+    def test_prompt_card_library_reorder_route_persists_exact_category_order(self):
+        primary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        )).payload["category"]
+        secondary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "角色", "parent_id": primary["id"]})
+        )).payload["category"]
+        cards = [
+            self.run_async(self.module.create_prompt_card_library_card(_Request({
+                "category_id": secondary["id"],
+                "snapshot": {"title": label, "prompt": f"prompt {label}"},
+            }))).payload["card"]
+            for label in ("one", "two", "three")
+        ]
+        requested_ids = [cards[2]["id"], cards[0]["id"], cards[1]["id"]]
+        reordered = self.run_async(self.module.reorder_prompt_card_library_cards(
+            _Request({"category_id": secondary["id"], "card_ids": requested_ids})
+        ))
+        self.assertEqual(reordered.status, 200)
+        self.assertTrue(reordered.payload["changed"])
+        self.assertEqual(
+            [card["id"] for card in reordered.payload["library"]["cards"]],
+            requested_ids,
+        )
+
+        invalid = self.run_async(self.module.reorder_prompt_card_library_cards(
+            _Request({"category_id": secondary["id"], "card_ids": requested_ids[:2]})
+        ))
+        self.assertEqual(invalid.status, 400)
+
+    def test_prompt_card_library_position_route_moves_card_into_target_order(self):
+        primary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        )).payload["category"]
+        source = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "角色", "parent_id": primary["id"]})
+        )).payload["category"]
+        target = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "服装", "parent_id": primary["id"]})
+        )).payload["category"]
+        moving = self.run_async(self.module.create_prompt_card_library_card(_Request({
+            "category_id": source["id"],
+            "snapshot": {"title": "moving", "prompt": "moving"},
+        }))).payload["card"]
+        target_cards = [
+            self.run_async(self.module.create_prompt_card_library_card(_Request({
+                "category_id": target["id"],
+                "snapshot": {"title": label, "prompt": label},
+            }))).payload["card"]
+            for label in ("one", "two")
+        ]
+
+        positioned = self.run_async(self.module.position_prompt_card_library_card(
+            _Request(
+                {"category_id": target["id"], "index": 1},
+                match_info={"card_id": moving["id"]},
+            )
+        ))
+        self.assertEqual(positioned.status, 200)
+        self.assertTrue(positioned.payload["changed"])
+        self.assertEqual(
+            [
+                card["id"]
+                for card in positioned.payload["library"]["cards"]
+                if card["category_id"] == target["id"]
+            ],
+            [target_cards[0]["id"], moving["id"], target_cards[1]["id"]],
+        )
+
     def test_prompt_card_library_routes_return_conflict_not_found_and_capacity_statuses(self):
         primary = self.run_async(self.module.create_prompt_card_library_category(
             _Request({"name": "人物", "parent_id": None})

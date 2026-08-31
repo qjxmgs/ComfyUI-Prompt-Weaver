@@ -55,6 +55,11 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "编辑卡片（");
     assert.equal(t("Favorite Cards"), "收藏卡片");
     assert.equal(t("Close favorite cards"), "关闭收藏卡片");
+    assert.equal(t("Move to Category"), "移动到分类");
+    assert.equal(t("Move Up"), "上移");
+    assert.equal(t("Move Down"), "下移");
+    assert.equal(t("Resize Favorite Cards"), "调整收藏卡片窗口大小");
+    assert.equal(t("Drop here to place the favorite first."), "拖到此处可将收藏放在第一位。");
     assert.equal(t("Click again to remove {name}", { name: "卡片 01" }), "再次点击删除 卡片 01");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "当前激活 2 个提示词");
     assert.equal(formatNumber(12345.6), "12,345.6");
