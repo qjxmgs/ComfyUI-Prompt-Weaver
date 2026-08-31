@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -196,6 +196,19 @@ export function promptCardFavoritePath(library, favoriteId) {
         ? library.categories.find((category) => category.id === secondary.parent_id)
         : null;
     return primary && secondary ? `${primary.name} / ${secondary.name}` : null;
+}
+
+export function promptCardFavoriteMoveTarget(library, favoriteId, categoryId) {
+    const cardId = normalizePromptCardFavoriteId(favoriteId);
+    const targetId = normalizePromptCardFavoriteId(categoryId);
+    const card = library?.cards?.find((candidate) => candidate.id === cardId) ?? null;
+    const category = library?.categories?.find((candidate) => candidate.id === targetId) ?? null;
+    const allowed = Boolean(card && category && category.parent_id !== null);
+    return {
+        allowed,
+        changed: allowed && card.category_id !== category.id,
+        changes: allowed && card.category_id !== category.id ? { category_id: category.id } : null,
+    };
 }
 
 export class PromptCardLibraryClient {
@@ -472,7 +485,6 @@ export function openPromptCardFavoriteCascade({
     let selectedPrimaryId = null;
     let selectedSecondaryId = null;
     let panels = [];
-    let branchCloseTimer = 0;
     let armedDeleteCardId = null;
     let armedDeleteTimer = 0;
     let deletingCardId = null;
@@ -483,12 +495,6 @@ export function openPromptCardFavoriteCascade({
     let favoriteTooltipGeneration = 0;
     let closed = false;
     let unsubscribe = () => {};
-
-    const clearBranchCloseTimer = () => {
-        if (!branchCloseTimer) return;
-        clearTimeout(branchCloseTimer);
-        branchCloseTimer = 0;
-    };
 
     const clearDeleteConfirmTimer = () => {
         if (!armedDeleteTimer) return;
@@ -564,7 +570,10 @@ export function openPromptCardFavoriteCascade({
         if (closed || !button?.isConnected) return;
         hideFavoriteTooltip();
         const fallback = favoriteCardBilingualPrompt(card);
-        const tooltip = element("div", "cpw-prompt-card-cascade__tooltip");
+        const tooltip = element(
+            "div",
+            "cpw-prompt-card-cascade__tooltip cpw-prompt-card-library__tooltip",
+        );
         tooltip.id = `cpw-prompt-card-cascade-tooltip-${++favoriteTooltipSequence}`;
         tooltip.setAttribute("role", "tooltip");
         tooltip.append(
@@ -614,7 +623,6 @@ export function openPromptCardFavoriteCascade({
     };
 
     const removePanelsFrom = (level) => {
-        clearBranchCloseTimer();
         if (level <= 2) hideFavoriteTooltip();
         if (level <= 2) disarmFavoriteDelete();
         for (let index = panels.length - 1; index >= level; index -= 1) {
@@ -629,7 +637,6 @@ export function openPromptCardFavoriteCascade({
     const close = ({ restoreFocus = true } = {}) => {
         if (closed) return;
         closed = true;
-        clearBranchCloseTimer();
         clearDeleteConfirmTimer();
         hideFavoriteTooltip();
         unsubscribe();
@@ -674,14 +681,6 @@ export function openPromptCardFavoriteCascade({
         positionFavoriteTooltip();
     };
 
-    const scheduleBranchClose = (level) => {
-        clearBranchCloseTimer();
-        branchCloseTimer = setTimeout(() => {
-            branchCloseTimer = 0;
-            removePanelsFrom(level);
-        }, 160);
-    };
-
     const createPanel = (level, panelAnchor) => {
         removePanelsFrom(level);
         const panel = element("div", "cpw-prompt-card-cascade__panel");
@@ -691,9 +690,8 @@ export function openPromptCardFavoriteCascade({
             ? "Primary Categories"
             : (level === 1 ? "Secondary Categories" : "My Favorites")));
         panel._promptCardCascadeAnchor = panelAnchor;
-        panel.addEventListener("pointerenter", clearBranchCloseTimer);
-        panel.addEventListener("pointerleave", () => {
-            if (level > 0) scheduleBranchClose(level);
+        panel.addEventListener("pointerenter", () => {
+            if (level < 2) hideFavoriteTooltip();
         });
         panel.addEventListener("keydown", (event) => {
             const items = [...panel.querySelectorAll(
@@ -765,11 +763,7 @@ export function openPromptCardFavoriteCascade({
             element("span", "cpw-prompt-card-cascade__chevron", "›"),
         );
         button._promptCardOpenSubmenu = openSubmenu;
-        button.addEventListener("pointerenter", () => {
-            clearBranchCloseTimer();
-            openSubmenu();
-        });
-        button.addEventListener("pointerleave", () => scheduleBranchClose(level + 1));
+        button.addEventListener("pointerenter", openSubmenu);
         button.addEventListener("click", openSubmenu);
         return button;
     };
@@ -1066,6 +1060,7 @@ export function openPromptCardLibraryMenu({
     favoriteId = null,
     getSnapshot = null,
     onChooseCard = null,
+    resolvePromptTip = null,
     onFavoriteLinked = null,
     onClose = null,
 }) {
@@ -1100,6 +1095,146 @@ export function openPromptCardLibraryMenu({
     let closed = false;
     let favoriteSelectionInitialized = false;
     let activeContextMenu = null;
+    let armedDeleteCardId = null;
+    let armedDeleteTimer = 0;
+    let deletingCardId = null;
+    let favoriteTooltip = null;
+    let favoriteTooltipAnchor = null;
+    let favoriteTooltipAbortController = null;
+    let favoriteTooltipGeneration = 0;
+    let draggingCardId = null;
+    let renderPrimaryDragPreview = null;
+
+    const clearDeleteConfirmTimer = () => {
+        if (!armedDeleteTimer) return;
+        clearTimeout(armedDeleteTimer);
+        armedDeleteTimer = 0;
+    };
+
+    const syncDeleteButtons = () => {
+        for (const button of root.querySelectorAll(".cpw-prompt-card-library__favorite-delete")) {
+            const cardId = button.dataset.favoriteDeleteId;
+            const cardName = button.dataset.favoriteDeleteName || t("Untitled Card");
+            const deleting = deletingCardId === cardId;
+            const armed = !deleting && armedDeleteCardId === cardId;
+            const label = deleting
+                ? t("Removing {name}…", { name: cardName })
+                : (armed
+                    ? t("Click again to remove {name}", { name: cardName })
+                    : t("Remove {name} from favorites", { name: cardName }));
+            button.textContent = deleting ? "…" : (armed ? "!" : "×");
+            button.title = label;
+            button.setAttribute("aria-label", label);
+            button.disabled = busy || deleting;
+            button.classList.toggle("cpw-prompt-card-library__favorite-delete--armed", armed);
+        }
+    };
+
+    const disarmFavoriteDelete = () => {
+        clearDeleteConfirmTimer();
+        if (!armedDeleteCardId) return false;
+        armedDeleteCardId = null;
+        syncDeleteButtons();
+        return true;
+    };
+
+    const hideFavoriteTooltip = () => {
+        favoriteTooltipGeneration += 1;
+        favoriteTooltipAbortController?.abort();
+        favoriteTooltipAbortController = null;
+        favoriteTooltipAnchor?.removeAttribute("aria-describedby");
+        favoriteTooltipAnchor = null;
+        favoriteTooltip?.remove();
+        favoriteTooltip = null;
+    };
+
+    const positionFavoriteTooltip = () => {
+        if (!favoriteTooltip?.isConnected || !favoriteTooltipAnchor?.isConnected) return;
+        const anchorRect = favoriteTooltipAnchor.getBoundingClientRect();
+        const panelRect = favoriteTooltipAnchor
+            .closest(".cpw-prompt-card-library__panel")
+            ?.getBoundingClientRect?.() ?? anchorRect;
+        const rect = favoriteTooltip.getBoundingClientRect();
+        const tooltipPosition = promptCardCascadeTooltipPosition({
+            anchorRect,
+            panelRect,
+            width: rect.width,
+            height: rect.height,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        });
+        favoriteTooltip.style.left = `${Math.round(tooltipPosition.x)}px`;
+        favoriteTooltip.style.top = `${Math.round(tooltipPosition.y)}px`;
+    };
+
+    const setFavoriteTooltipContent = (content) => {
+        if (!favoriteTooltip) return;
+        const fallback = favoriteCardBilingualPrompt({ prompt: "" });
+        const english = typeof content?.english === "string" ? content.english : fallback.english;
+        const chinese = typeof content?.chinese === "string" ? content.chinese : english;
+        favoriteTooltip.querySelector(".cpw-prompt-card-cascade__tooltip-line--en").textContent = english;
+        favoriteTooltip.querySelector(".cpw-prompt-card-cascade__tooltip-line--zh").textContent = chinese;
+        queueMicrotask(positionFavoriteTooltip);
+    };
+
+    const showFavoriteTooltip = (card, button) => {
+        if (closed || !button?.isConnected) return;
+        hideFavoriteTooltip();
+        const fallback = favoriteCardBilingualPrompt(card);
+        const tooltip = element("div", "cpw-prompt-card-cascade__tooltip");
+        tooltip.id = `cpw-prompt-card-library-tooltip-${++favoriteTooltipSequence}`;
+        tooltip.setAttribute("role", "tooltip");
+        tooltip.append(
+            element("div", "cpw-prompt-card-cascade__tooltip-line cpw-prompt-card-cascade__tooltip-line--en", fallback.english),
+            element("div", "cpw-prompt-card-cascade__tooltip-line cpw-prompt-card-cascade__tooltip-line--zh", fallback.chinese),
+        );
+        favoriteTooltip = tooltip;
+        favoriteTooltipAnchor = button;
+        button.setAttribute("aria-describedby", tooltip.id);
+        document.body.append(tooltip);
+        positionFavoriteTooltip();
+        if (typeof resolvePromptTip !== "function") return;
+        const generation = favoriteTooltipGeneration;
+        const controller = new AbortController();
+        favoriteTooltipAbortController = controller;
+        Promise.resolve(resolvePromptTip(card, { signal: controller.signal }))
+            .then((content) => {
+                if (
+                    controller.signal.aborted
+                    || generation !== favoriteTooltipGeneration
+                    || favoriteTooltipAnchor !== button
+                ) return;
+                setFavoriteTooltipContent(content);
+            })
+            .catch((error) => {
+                if (error?.name !== "AbortError") {
+                    console.warn("[Prompt Weaver] Could not resolve favorite card translations", error);
+                }
+            })
+            .finally(() => {
+                if (favoriteTooltipAbortController === controller) {
+                    favoriteTooltipAbortController = null;
+                }
+            });
+    };
+
+    const clearDragState = ({ renderAfter = false } = {}) => {
+        const hadDrag = Boolean(draggingCardId);
+        draggingCardId = null;
+        root.classList.remove("cpw-prompt-card-library--dragging");
+        for (const row of root.querySelectorAll(".cpw-prompt-card-library__favorite-row--dragging")) {
+            row.classList.remove("cpw-prompt-card-library__favorite-row--dragging");
+        }
+        for (const target of root.querySelectorAll(
+            ".cpw-prompt-card-library__row-main--drag-expand, .cpw-prompt-card-library__row-main--drop-target",
+        )) {
+            target.classList.remove(
+                "cpw-prompt-card-library__row-main--drag-expand",
+                "cpw-prompt-card-library__row-main--drop-target",
+            );
+        }
+        if (hadDrag && renderAfter && !closed) render();
+    };
 
     const closeContextMenu = ({ restoreFocus = false } = {}) => {
         const menu = activeContextMenu;
@@ -1206,10 +1341,14 @@ export function openPromptCardLibraryMenu({
     const close = ({ restoreFocus = true } = {}) => {
         if (closed) return;
         closed = true;
+        clearDeleteConfirmTimer();
+        hideFavoriteTooltip();
+        clearDragState();
         closeContextMenu();
         unsubscribe();
         document.removeEventListener("pointerdown", onDocumentPointerDown, true);
         document.removeEventListener("keydown", onDocumentKeyDown, true);
+        document.removeEventListener("dragend", onDocumentDragEnd, true);
         window.removeEventListener("resize", onViewportChange);
         window.removeEventListener("scroll", onViewportChange, true);
         root.remove();
@@ -1241,6 +1380,7 @@ export function openPromptCardLibraryMenu({
     const onViewportChange = () => {
         closeContextMenu();
         position();
+        positionFavoriteTooltip();
     };
 
     const categoryPath = (categoryId) => {
@@ -1350,6 +1490,8 @@ export function openPromptCardLibraryMenu({
     };
 
     const chooseSecondary = async (category) => {
+        disarmFavoriteDelete();
+        hideFavoriteTooltip();
         selectedSecondaryId = category.id;
         if (movingCardId) {
             const moving = movingCardId;
@@ -1362,83 +1504,89 @@ export function openPromptCardLibraryMenu({
             render();
             return;
         }
-        if (mode !== "assign") {
-            mobileLevel = 2;
-            render();
-            return;
-        }
+        mobileLevel = 2;
+        render();
+    };
+
+    const createFavoriteFromDraft = async () => {
         const snapshot = promptCardFavoriteSnapshot(getSnapshot?.() ?? {});
-        if (!snapshot.prompt.trim()) {
+        if (!selectedSecondaryId || !snapshot.prompt.trim()) {
             setStatus(t("Enter a prompt before adding it to favorites."), true);
             return;
         }
-        const favorite = currentFavorite();
-        const result = favorite
-            ? await runMutation(
-                (client) => client.updateCard(favorite.id, { category_id: category.id }),
-                t("Favorite moved to {path}.", { path: categoryPath(category.id) }),
-            )
-            : await runMutation(
-                (client) => client.createCard(category.id, snapshot),
-                t("Card added to favorites."),
-            );
-        const saved = result?.card;
-        if (saved) {
-            favoriteId = saved.id;
-            onFavoriteLinked?.(saved.id);
-            library = service.library;
-            render();
-        }
-    };
-
-    const updateCurrentFavorite = async () => {
-        const favorite = currentFavorite();
-        const snapshot = promptCardFavoriteSnapshot(getSnapshot?.() ?? {});
-        if (!favorite || !snapshot.prompt.trim()) return;
         const result = await runMutation(
-            (client) => client.updateCard(favorite.id, { snapshot }),
-            t("Favorite updated."),
+            (client) => client.createCard(selectedSecondaryId, snapshot),
+            t("Card added to favorites."),
         );
-        if (result) render();
+        const saved = result?.card;
+        if (!saved) return;
+        favoriteId = saved.id;
+        onFavoriteLinked?.(saved.id);
+        render();
     };
 
-    const removeCurrentFavorite = async () => {
-        const favorite = currentFavorite();
-        if (!favorite) return;
+    const overwriteFavoriteFromDraft = async (card) => {
+        disarmFavoriteDelete();
+        hideFavoriteTooltip();
+        const snapshot = promptCardFavoriteSnapshot(getSnapshot?.() ?? {});
+        if (!snapshot.prompt.trim()) {
+            setStatus(t("Enter a prompt before overwriting a favorite."), true);
+            return;
+        }
+        const cardName = card.title.trim() || t("Untitled Card");
         const confirmed = await openConfirmDialog({
-            title: t("Remove favorite?"),
-            message: t("This favorite card will be permanently removed from the library."),
-            confirmText: t("Remove"),
-            danger: true,
+            title: t("Overwrite favorite card?"),
+            message: t('Replace "{name}" with the current editor draft?', { name: cardName }),
+            confirmText: t("Overwrite"),
         });
         if (!confirmed) return;
         const result = await runMutation(
-            (client) => client.deleteCard(favorite.id),
-            t("Favorite removed."),
+            (client) => client.updateCard(card.id, { snapshot }),
+            t("Favorite updated."),
         );
-        if (result) {
-            favoriteId = null;
-            onFavoriteLinked?.(null);
-            render();
-        }
+        const saved = result?.card;
+        if (!saved) return;
+        favoriteId = saved.id;
+        onFavoriteLinked?.(saved.id);
+        render();
     };
 
     const deleteFavorite = async (card) => {
-        const confirmed = await openConfirmDialog({
-            title: t("Remove favorite?"),
-            message: t("This favorite card will be permanently removed from the library."),
-            confirmText: t("Remove"),
-            danger: true,
-        });
-        if (!confirmed) return;
+        clearDeleteConfirmTimer();
+        armedDeleteCardId = null;
+        deletingCardId = card.id;
+        syncDeleteButtons();
         const result = await runMutation(
             (client) => client.deleteCard(card.id),
             t("Favorite removed."),
         );
-        if (result && card.id === normalizePromptCardFavoriteId(favoriteId)) {
+        deletingCardId = null;
+        if (!result) {
+            syncDeleteButtons();
+            return;
+        }
+        if (card.id === normalizePromptCardFavoriteId(favoriteId)) {
             favoriteId = null;
             onFavoriteLinked?.(null);
         }
+        render();
+    };
+
+    const moveFavoriteToCategory = async (cardId, category) => {
+        const card = library.cards.find((candidate) => candidate.id === cardId);
+        const target = promptCardFavoriteMoveTarget(library, cardId, category.id);
+        if (!card || !target.allowed || !target.changed) {
+            clearDragState({ renderAfter: true });
+            return;
+        }
+        clearDragState();
+        selectedPrimaryId = category.parent_id;
+        selectedSecondaryId = category.id;
+        mobileLevel = 2;
+        await runMutation(
+            (client) => client.updateCard(card.id, target.changes),
+            t("Favorite moved to {path}.", { path: categoryPath(category.id) }),
+        );
     };
 
     const categoryEditor = (category, parentId) => {
@@ -1481,28 +1629,39 @@ export function openPromptCardLibraryMenu({
         const button = element("button", "cpw-prompt-card-library__row-main", category.name);
         button.type = "button";
         button.dataset.libraryLevel = String(level);
+        button.dataset.categoryId = category.id;
         button.title = t("Right-click for category actions");
         button.setAttribute("aria-haspopup", "menu");
         button.classList.toggle(
             "cpw-prompt-card-library__row-main--selected",
             level === 0 ? selectedPrimaryId === category.id : selectedSecondaryId === category.id,
         );
+        button.classList.toggle(
+            "cpw-prompt-card-library__row-main--drag-expand",
+            Boolean(draggingCardId) && level === 0 && selectedPrimaryId === category.id,
+        );
         const chevron = element("span", "cpw-prompt-card-library__chevron", "›");
         chevron.setAttribute("aria-hidden", "true");
         button.append(chevron);
         button.addEventListener("pointerenter", () => {
             if (busy) return;
+            disarmFavoriteDelete();
+            hideFavoriteTooltip();
             if (level === 0) {
                 if (selectedPrimaryId === category.id) return;
                 selectedPrimaryId = category.id;
                 selectedSecondaryId = null;
-            } else if (mode !== "assign" && !movingCardId) {
+                mobileLevel = 1;
+            } else {
                 if (selectedSecondaryId === category.id) return;
                 selectedSecondaryId = category.id;
-            } else return;
+                mobileLevel = 2;
+            }
             render();
         });
         button.addEventListener("click", () => {
+            disarmFavoriteDelete();
+            hideFavoriteTooltip();
             closeContextMenu();
             if (level === 0) {
                 selectedPrimaryId = category.id;
@@ -1511,7 +1670,46 @@ export function openPromptCardLibraryMenu({
                 render();
             } else chooseSecondary(category);
         });
+        button.addEventListener("dragenter", (event) => {
+            if (!draggingCardId) return;
+            disarmFavoriteDelete();
+            hideFavoriteTooltip();
+            if (level === 0) {
+                if (selectedPrimaryId === category.id && selectedSecondaryId === null) return;
+                selectedPrimaryId = category.id;
+                selectedSecondaryId = null;
+                mobileLevel = 1;
+                renderPrimaryDragPreview?.(category);
+                return;
+            }
+            event.preventDefault();
+            for (const target of root.querySelectorAll(".cpw-prompt-card-library__row-main--drop-target")) {
+                target.classList.remove("cpw-prompt-card-library__row-main--drop-target");
+            }
+            button.classList.add("cpw-prompt-card-library__row-main--drop-target");
+        });
+        button.addEventListener("dragover", (event) => {
+            if (!draggingCardId || level !== 1) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            button.classList.add("cpw-prompt-card-library__row-main--drop-target");
+        });
+        button.addEventListener("dragleave", (event) => {
+            if (level !== 1 || button.contains(event.relatedTarget)) return;
+            button.classList.remove("cpw-prompt-card-library__row-main--drop-target");
+        });
+        button.addEventListener("drop", (event) => {
+            if (level !== 1) return;
+            const cardId = draggingCardId
+                || event.dataTransfer?.getData("application/x-prompt-weaver-favorite-id");
+            if (!cardId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            moveFavoriteToCategory(cardId, category);
+        });
         const openActions = ({ x, y, focus = false }) => {
+            if (busy) return;
             openContextMenu({
                 anchor: button,
                 x,
@@ -1544,6 +1742,7 @@ export function openPromptCardLibraryMenu({
         backLevel = null,
         createLevel = null,
         parentId = null,
+        action = null,
     } = {}) => {
         const panelHeaderNode = element("div", "cpw-prompt-card-library__panel-header");
         if (backLevel !== null) {
@@ -1572,25 +1771,95 @@ export function openPromptCardLibraryMenu({
             });
             panelHeaderNode.append(add);
         }
+        if (action) {
+            const add = element("button", "cpw-prompt-card-library__panel-add", action.text ?? "+");
+            add.type = "button";
+            add.title = action.label;
+            add.setAttribute("aria-label", action.label);
+            add.disabled = Boolean(action.disabled);
+            add.addEventListener("click", action.onClick);
+            panelHeaderNode.append(add);
+        }
         return panelHeaderNode;
     };
 
+    renderPrimaryDragPreview = (primary) => {
+        const secondaryPanel = panels.querySelector(
+            '.cpw-prompt-card-library__panel[data-level="1"]',
+        );
+        if (!secondaryPanel) {
+            render();
+            return;
+        }
+        for (const primaryButton of panels.querySelectorAll(
+            '.cpw-prompt-card-library__row-main[data-library-level="0"]',
+        )) {
+            const selected = primaryButton.dataset.categoryId === primary.id;
+            primaryButton.classList.toggle("cpw-prompt-card-library__row-main--selected", selected);
+            primaryButton.classList.toggle("cpw-prompt-card-library__row-main--drag-expand", selected);
+        }
+        const secondaryCategories = categoryChildren(library, primary.id);
+        const secondaryList = element("div", "cpw-prompt-card-library__list");
+        if (secondaryCategories.length) {
+            for (const category of secondaryCategories) secondaryList.append(categoryRow(category, 1));
+        } else {
+            secondaryList.append(element(
+                "div",
+                "cpw-prompt-card-library__empty",
+                t("Create a secondary category for favorite cards."),
+            ));
+        }
+        secondaryPanel.replaceChildren(
+            panelHeader(t("Secondary Categories"), {
+                backLevel: 0,
+                createLevel: "secondary",
+                parentId: primary.id,
+            }),
+            secondaryList,
+        );
+        root.dataset.mobileLevel = "1";
+        position();
+    };
+
     const favoriteCardRow = (card) => {
+        const cardName = card.title.trim() || t("Untitled Card");
         const wrapper = element("div", "cpw-prompt-card-library__favorite-wrap");
         const row = element("div", "cpw-prompt-card-library__favorite-row");
-        const choose = element("button", "cpw-prompt-card-library__favorite-main");
-        choose.type = "button";
-        choose.title = t("Right-click for favorite actions");
+        const choose = element(
+            mode === "assign" ? "div" : "button",
+            "cpw-prompt-card-library__favorite-main",
+        );
+        if (mode === "assign") {
+            choose.tabIndex = 0;
+            choose.setAttribute("role", "group");
+        } else {
+            choose.type = "button";
+        }
+        choose.setAttribute("aria-label", mode === "assign" ? cardName : t("Choose {name}", { name: cardName }));
         choose.setAttribute("aria-haspopup", "menu");
-        const title = element("strong", "cpw-prompt-card-library__favorite-title", card.title.trim() || t("Untitled Card"));
+        const titleLine = element("span", "cpw-prompt-card-library__favorite-title-line");
+        const title = element("strong", "cpw-prompt-card-library__favorite-title", cardName);
+        const count = element("span", "cpw-prompt-card-library__favorite-count", `(${favoriteCardPromptCount(card)})`);
         const preview = element("span", "cpw-prompt-card-library__favorite-preview", card.prompt);
-        choose.append(title, preview);
-        choose.addEventListener("click", () => {
-            closeContextMenu();
-            onChooseCard?.(card);
-            close({ restoreFocus: false });
+        titleLine.append(title, count);
+        choose.append(titleLine, preview);
+        choose.addEventListener("pointerenter", () => showFavoriteTooltip(card, choose));
+        choose.addEventListener("pointerleave", () => {
+            if (document.activeElement !== choose) hideFavoriteTooltip();
         });
+        choose.addEventListener("focus", () => showFavoriteTooltip(card, choose));
+        choose.addEventListener("blur", () => {
+            if (!choose.matches(":hover")) hideFavoriteTooltip();
+        });
+        if (mode !== "assign") {
+            choose.addEventListener("click", () => {
+                closeContextMenu();
+                onChooseCard?.(card);
+                close({ restoreFocus: false });
+            });
+        }
         const openActions = ({ x, y, focus = false }) => {
+            if (busy) return;
             openContextMenu({
                 anchor: choose,
                 x,
@@ -1608,7 +1877,6 @@ export function openPromptCardLibraryMenu({
                             render();
                         },
                     },
-                    { label: t("Remove"), danger: true, onSelect: () => deleteFavorite(card) },
                 ],
             });
         };
@@ -1624,33 +1892,83 @@ export function openPromptCardLibraryMenu({
             const rect = choose.getBoundingClientRect();
             openActions({ x: rect.left + 8, y: rect.bottom + 4, focus: true });
         });
+        row.draggable = mode === "assign";
+        row.dataset.favoriteDragId = card.id;
+        row.addEventListener("dragstart", (event) => {
+            if (
+                busy
+                || mode !== "assign"
+                || event.target.closest?.(
+                    ".cpw-prompt-card-library__favorite-overwrite, .cpw-prompt-card-library__favorite-delete",
+                )
+            ) {
+                event.preventDefault();
+                return;
+            }
+            draggingCardId = card.id;
+            disarmFavoriteDelete();
+            hideFavoriteTooltip();
+            closeContextMenu();
+            root.classList.add("cpw-prompt-card-library--dragging");
+            row.classList.add("cpw-prompt-card-library__favorite-row--dragging");
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("application/x-prompt-weaver-favorite-id", card.id);
+                event.dataTransfer.setData("text/plain", cardName);
+            }
+        });
+        row.addEventListener("dragend", () => clearDragState({ renderAfter: true }));
+        const overwriteButton = mode === "assign"
+            ? element("button", "cpw-prompt-card-library__favorite-overwrite", t("Overwrite"))
+            : null;
+        if (overwriteButton) {
+            const overwriteLabel = t("Overwrite {name} with the current draft", { name: cardName });
+            overwriteButton.type = "button";
+            overwriteButton.title = overwriteLabel;
+            overwriteButton.setAttribute("aria-label", overwriteLabel);
+            overwriteButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+            overwriteButton.addEventListener("click", async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                await overwriteFavoriteFromDraft(card);
+            });
+        }
+        const deleteButton = element("button", "cpw-prompt-card-library__favorite-delete", "×");
+        deleteButton.type = "button";
+        deleteButton.dataset.favoriteDeleteId = card.id;
+        deleteButton.dataset.favoriteDeleteName = cardName;
+        deleteButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+        deleteButton.addEventListener("click", async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            hideFavoriteTooltip();
+            if (busy || deletingCardId) return;
+            if (armedDeleteCardId !== card.id) {
+                disarmFavoriteDelete();
+                armedDeleteCardId = card.id;
+                syncDeleteButtons();
+                armedDeleteTimer = setTimeout(() => {
+                    armedDeleteTimer = 0;
+                    disarmFavoriteDelete();
+                }, FAVORITE_DELETE_CONFIRM_MS);
+                return;
+            }
+            await deleteFavorite(card);
+        });
+        deleteButton.addEventListener("blur", () => {
+            if (armedDeleteCardId === card.id) disarmFavoriteDelete();
+        });
         row.append(choose);
+        if (overwriteButton) row.append(overwriteButton);
+        row.append(deleteButton);
         wrapper.append(row);
+        queueMicrotask(syncDeleteButtons);
         return wrapper;
-    };
-
-    const renderAssignActions = (container) => {
-        if (mode !== "assign") return;
-        const favorite = currentFavorite();
-        if (!favorite) return;
-        const actionBar = element("div", "cpw-prompt-card-library__assign-actions");
-        const path = element("span", "cpw-prompt-card-library__current-path", categoryPath(favorite.category_id));
-        const snapshot = promptCardFavoriteSnapshot(getSnapshot?.() ?? {});
-        const dirty = promptCardFavoriteFingerprint(snapshot) !== promptCardFavoriteFingerprint(favorite);
-        const update = element("button", "", t("Update Favorite"));
-        const remove = element("button", "cpw-prompt-card-library__danger", t("Remove Favorite"));
-        update.type = "button";
-        remove.type = "button";
-        update.disabled = !dirty || !snapshot.prompt.trim();
-        update.title = dirty ? t("Update the saved snapshot from this card") : t("Favorite is up to date");
-        update.addEventListener("click", updateCurrentFavorite);
-        remove.addEventListener("click", removeCurrentFavorite);
-        actionBar.append(path, update, remove);
-        container.append(actionBar);
     };
 
     function render() {
         if (closed) return;
+        hideFavoriteTooltip();
         closeContextMenu();
         if (mode === "assign" && !favoriteSelectionInitialized) {
             const favorite = currentFavorite();
@@ -1679,8 +1997,8 @@ export function openPromptCardLibraryMenu({
 
         const primaryPanel = element("section", "cpw-prompt-card-library__panel");
         primaryPanel.dataset.level = "0";
+        primaryPanel.addEventListener("pointerenter", hideFavoriteTooltip);
         primaryPanel.append(panelHeader(t("Primary Categories"), { createLevel: "primary" }));
-        renderAssignActions(primaryPanel);
         const primaryList = element("div", "cpw-prompt-card-library__list");
         if (primaryCategories.length) {
             for (const category of primaryCategories) primaryList.append(categoryRow(category, 0));
@@ -1692,6 +2010,7 @@ export function openPromptCardLibraryMenu({
 
         const secondaryPanel = element("section", "cpw-prompt-card-library__panel");
         secondaryPanel.dataset.level = "1";
+        secondaryPanel.addEventListener("pointerenter", hideFavoriteTooltip);
         secondaryPanel.append(panelHeader(t("Secondary Categories"), {
             backLevel: 0,
             createLevel: "secondary",
@@ -1714,7 +2033,15 @@ export function openPromptCardLibraryMenu({
 
         const cardPanel = element("section", "cpw-prompt-card-library__panel");
         cardPanel.dataset.level = "2";
-        cardPanel.append(panelHeader(t("My Favorites"), { backLevel: 1 }));
+        const draftSnapshot = promptCardFavoriteSnapshot(getSnapshot?.() ?? {});
+        cardPanel.append(panelHeader(t("My Favorites"), {
+            backLevel: 1,
+            action: mode === "assign" ? {
+                label: t("Add current draft to favorites"),
+                disabled: !secondary || !draftSnapshot.prompt.trim(),
+                onClick: createFavoriteFromDraft,
+            } : null,
+        }));
         const cardList = element("div", "cpw-prompt-card-library__list");
         const cards = secondary ? library.cards.filter((card) => card.category_id === secondary.id) : [];
         if (cards.length) {
@@ -1727,24 +2054,34 @@ export function openPromptCardLibraryMenu({
             ));
         }
         cardPanel.append(cardList);
-        panels.replaceChildren(primaryPanel, secondaryPanel);
-        if (mode !== "assign") panels.append(cardPanel);
+        panels.replaceChildren(primaryPanel, secondaryPanel, cardPanel);
         root.dataset.mobileLevel = String(mobileLevel);
         setBusy(busy);
+        syncDeleteButtons();
         position();
     }
 
     const onDocumentPointerDown = (event) => {
+        const deleteButton = event.target?.closest?.(".cpw-prompt-card-library__favorite-delete");
+        if (armedDeleteCardId && deleteButton?.dataset.favoriteDeleteId !== armedDeleteCardId) {
+            disarmFavoriteDelete();
+        }
+        if (event.target?.closest?.(".cpw-prompt-card-confirm__overlay")) return;
         if (activeContextMenu?.contains(event.target)) return;
         closeContextMenu();
         if (!root.contains(event.target) && !anchor?.contains?.(event.target)) close({ restoreFocus: false });
     };
 
+    const onDocumentDragEnd = () => {
+        if (draggingCardId) clearDragState({ renderAfter: true });
+    };
+
     const focusPanelItem = (direction) => {
         const panel = root.querySelector(
-            `.cpw-prompt-card-library__panel[data-level="${root.classList.contains("cpw-prompt-card-library--narrow") ? mobileLevel : Math.min(mobileLevel, mode === "assign" ? 1 : 2)}"]`,
+            `.cpw-prompt-card-library__panel[data-level="${root.classList.contains("cpw-prompt-card-library--narrow") ? mobileLevel : Math.min(mobileLevel, 2)}"]`,
         ) ?? root.querySelector(".cpw-prompt-card-library__panel");
-        const buttons = [...panel.querySelectorAll("button:not([disabled])")].filter((button) => button.offsetParent !== null);
+        const buttons = [...panel.querySelectorAll('button:not([disabled]), [tabindex="0"]')]
+            .filter((button) => button.offsetParent !== null);
         if (!buttons.length) return;
         const index = buttons.indexOf(document.activeElement);
         const next = direction === "home"
@@ -1772,7 +2109,7 @@ export function openPromptCardLibraryMenu({
         } else if (event.key === "End") {
             event.preventDefault();
             focusPanelItem("end");
-        } else if (event.key === "ArrowRight" && mobileLevel < (mode === "assign" ? 1 : 2)) {
+        } else if (event.key === "ArrowRight" && mobileLevel < 2) {
             event.preventDefault();
             mobileLevel += 1;
             render();
@@ -1798,6 +2135,7 @@ export function openPromptCardLibraryMenu({
     root.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     document.addEventListener("keydown", onDocumentKeyDown, true);
+    document.addEventListener("dragend", onDocumentDragEnd, true);
     window.addEventListener("resize", onViewportChange);
     window.addEventListener("scroll", onViewportChange, true);
     render();

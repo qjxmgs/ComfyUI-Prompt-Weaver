@@ -1,4 +1,4 @@
-import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1";
+import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,

@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260831-favorite-tooltip-refine-v1";
+} from "./prompt_card_library.js?v=20260831-editor-favorite-hover-overwrite-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1";
+} from "./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -700,7 +700,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260831-favorite-tooltip-refine-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260831-editor-favorite-hover-overwrite-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -4287,6 +4287,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 mode: "assign",
                 favoriteId: editorFavoriteId,
                 getSnapshot: currentEditorFavoriteSnapshot,
+                resolvePromptTip: resolveFavoriteCardPromptTip,
                 onFavoriteLinked: (favoriteId) => {
                     editorFavoriteId = normalizePromptCardFavoriteId(favoriteId);
                 },

@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260831-favorite-cascade-actions-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260831-editor-favorites-three-column-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -35,6 +35,7 @@ const {
     promptCardCascadePanelPosition,
     promptCardCascadeTooltipPosition,
     promptCardFavoriteFingerprint,
+    promptCardFavoriteMoveTarget,
     promptCardFavoritePath,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
@@ -186,6 +187,33 @@ test("favorite switching replaces snapshot fields while preserving grid identity
     assert.equal(promptCardFavoriteFingerprint(switched), promptCardFavoriteFingerprint(favorite));
 });
 
+test("favorite moves accept only changed secondary-category targets", () => {
+    const library = normalizePromptCardLibrary(libraryPayload());
+    assert.deepEqual(promptCardFavoriteMoveTarget(library, CARD_ID, PRIMARY_ID), {
+        allowed: false,
+        changed: false,
+        changes: null,
+    });
+    assert.deepEqual(promptCardFavoriteMoveTarget(library, CARD_ID, SECONDARY_ID), {
+        allowed: true,
+        changed: false,
+        changes: null,
+    });
+    const targetId = "44444444-4444-4444-8444-444444444444";
+    library.categories.push({
+        id: targetId,
+        parent_id: PRIMARY_ID,
+        name: "服装",
+        created_at: CREATED_AT,
+        updated_at: CREATED_AT,
+    });
+    assert.deepEqual(promptCardFavoriteMoveTarget(library, CARD_ID, targetId), {
+        allowed: true,
+        changed: true,
+        changes: { category_id: targetId },
+    });
+});
+
 test("API client preserves collection paths, methods, and request bodies", async () => {
     const requests = [];
     const api = {
@@ -306,14 +334,14 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /titleShell\.append\(title, favoriteSwitchButton\)/);
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell, cardActions\)/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-favorite-tooltip-refine-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-favorite-tooltip-refine-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-editor-favorite-hover-overwrite-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-editor-favorite-hover-overwrite-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
     assert.match(gridSource, /footer\.append\(selectionActions, favoriteActions, commitActions\)/);
     assert.match(gridSource, /const currentEditorFavoriteSnapshot = \(\) => \{/);
-    assert.match(gridSource, /mode: "assign",[\s\S]*getSnapshot: currentEditorFavoriteSnapshot/);
+    assert.match(gridSource, /mode: "assign",[\s\S]*getSnapshot: currentEditorFavoriteSnapshot,[\s\S]*resolvePromptTip: resolveFavoriteCardPromptTip/);
     assert.doesNotMatch(gridSource, /const appendFavoriteCard = \(favorite\) =>/);
     assert.match(favoriteSource, /new BroadcastChannel|PROMPT_CARD_LIBRARY_SYNC_EVENT/);
     assert.match(favoriteSource, /export function openPromptCardFavoriteCascade/);
@@ -326,6 +354,10 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /resolvePromptTip\(card, \{ signal: controller\.signal \}\)/);
     assert.match(favoriteSource, /aria-describedby/);
     assert.match(favoriteSource, /hideFavoriteTooltip\(\)/);
+    assert.doesNotMatch(favoriteSource, /branchCloseTimer|scheduleBranchClose/);
+    assert.match(favoriteSource, /chooseButton\.addEventListener\("pointerleave"[\s\S]*document\.activeElement !== chooseButton[\s\S]*hideFavoriteTooltip\(\)/);
+    assert.match(favoriteSource, /chooseButton\.addEventListener\("blur"[\s\S]*!chooseButton\.matches\(":hover"\)[\s\S]*hideFavoriteTooltip\(\)/);
+    assert.match(favoriteSource, /panel\.addEventListener\("pointerenter", \(\) => \{\s*if \(level < 2\) hideFavoriteTooltip\(\);/s);
     assert.match(favoriteSource, /armedDeleteCardId !== card\.id/);
     assert.match(favoriteSource, /service\.mutate\(\(client\) => client\.deleteCard\(card\.id\)\)/);
     assert.match(favoriteSource, /event\.stopPropagation\(\)/);
@@ -339,8 +371,27 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /const visible = Boolean\(message\) && Boolean\(error\);/);
     assert.match(favoriteSource, /panelHeader\(t\("Primary Categories"\), \{ createLevel: "primary" \}\)/);
     assert.match(favoriteSource, /panelHeader\(t\("Secondary Categories"\), \{/);
-    assert.match(favoriteSource, /panelHeader\(t\("My Favorites"\), \{ backLevel: 1 \}\)/);
+    assert.match(favoriteSource, /panelHeader\(t\("My Favorites"\), \{[\s\S]*backLevel: 1,[\s\S]*action: mode === "assign"/);
     assert.match(favoriteSource, /cpw-prompt-card-library__panel-add/);
+    assert.match(favoriteSource, /panels\.replaceChildren\(primaryPanel, secondaryPanel, cardPanel\)/);
+    assert.doesNotMatch(favoriteSource, /renderAssignActions|cpw-prompt-card-library__assign-actions|cpw-prompt-card-library__current-path/);
+    assert.match(favoriteSource, /label: t\("Add current draft to favorites"\)/);
+    assert.match(favoriteSource, /client\.createCard\(selectedSecondaryId, snapshot\)/);
+    assert.match(favoriteSource, /title: t\("Overwrite favorite card\?"\)/);
+    assert.match(favoriteSource, /client\.updateCard\(card\.id, \{ snapshot \}\)/);
+    assert.match(favoriteSource, /event\.target\?\.closest\?\.\("\.cpw-prompt-card-confirm__overlay"\)/);
+    assert.match(favoriteSource, /button\.addEventListener\("pointerenter"[\s\S]*selectedSecondaryId = category\.id;[\s\S]*mobileLevel = 2;[\s\S]*render\(\);/);
+    assert.match(favoriteSource, /mode === "assign" \? "div" : "button"/);
+    assert.match(favoriteSource, /if \(mode !== "assign"\) \{\s*choose\.addEventListener\("click"/s);
+    assert.match(favoriteSource, /cpw-prompt-card-library__favorite-overwrite", t\("Overwrite"\)/);
+    assert.match(favoriteSource, /overwriteButton\.addEventListener\("click"[\s\S]*overwriteFavoriteFromDraft\(card\)/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__favorite-count/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__favorite-delete/);
+    assert.match(favoriteSource, /row\.draggable = mode === "assign"/);
+    assert.match(favoriteSource, /application\/x-prompt-weaver-favorite-id/);
+    assert.match(favoriteSource, /level === 0[\s\S]*selectedPrimaryId = category\.id[\s\S]*selectedSecondaryId = null/);
+    assert.match(favoriteSource, /renderPrimaryDragPreview\?\.\(category\)/);
+    assert.match(favoriteSource, /level !== 1[\s\S]*moveFavoriteToCategory\(cardId, category\)/);
     assert.doesNotMatch(favoriteSource, /cpw-prompt-card-library__create/);
     assert.doesNotMatch(favoriteSource, /cpw-prompt-card-library__more/);
     assert.doesNotMatch(favoriteSource, /cpw-prompt-card-library__row-actions/);
@@ -363,8 +414,13 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed \.cpw-prompt-grid__prompt-row::after/);
     assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*190px\s+190px\s+minmax\(240px,\s*1fr\);/s);
+    assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-header\s*\{[^}]*height:\s*32px;[^}]*min-height:\s*32px;[^}]*flex:\s*0 0 32px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-add\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*color:\s*var\(--error-text,/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*border-radius:\s*5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__tooltip\s*\{[^}]*z-index:\s*2147483630;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__row-main--drop-target/);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library__more/);
     assert.match(cssSource, /\.cpw-prompt-card-library__context-menu\s*\{[^}]*position:\s*fixed;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s);
     assert.match(cssSource, /@media \(max-width:\s*679px\)[\s\S]*\.cpw-prompt-card-library\[data-mobile-level=/s);
