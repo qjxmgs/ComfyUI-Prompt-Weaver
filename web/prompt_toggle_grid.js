@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260831-editor-favorite-hover-overwrite-v1";
+} from "./prompt_card_library.js?v=20260831-unified-favorite-delete-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -700,7 +700,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260831-editor-favorite-hover-overwrite-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260831-unified-favorite-delete-v1", import.meta.url).href;
     document.head.append(link);
 }
 

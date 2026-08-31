@@ -3044,38 +3044,44 @@
     font-size: 11px;
 }
 
+.cpw-prompt-card-favorite-delete {
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    color: var(--error-text, #ef7777);
+    background: transparent;
+    font: 700 16px/1 Inter, system-ui, sans-serif;
+    text-align: center;
+    cursor: pointer;
+}
+
+.cpw-prompt-card-favorite-delete:hover:not(:disabled),
+.cpw-prompt-card-favorite-delete:active:not(:disabled),
+.cpw-prompt-card-favorite-delete:focus-visible,
+.cpw-prompt-card-favorite-delete--armed {
+    outline: 0;
+    color: #fff;
+    background: color-mix(in srgb, var(--error-text, #ef7777) 76%, transparent);
+}
+
+.cpw-prompt-card-favorite-delete:focus-visible {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--error-text, #ef7777) 78%, transparent);
+}
+
+.cpw-prompt-card-favorite-delete:disabled {
+    cursor: wait;
+    opacity: 0.42;
+}
+
 .cpw-prompt-card-cascade__favorite-delete {
     position: absolute;
     top: 5px;
     right: 5px;
     z-index: 1;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 0;
-    border-radius: 3px;
-    color: var(--error-text, #ef6262);
-    background: transparent;
-    font: 700 15px/20px Inter, system-ui, sans-serif;
-    text-align: center;
-    cursor: pointer;
-}
-
-.cpw-prompt-card-cascade__favorite-delete:hover,
-.cpw-prompt-card-cascade__favorite-delete:active,
-.cpw-prompt-card-cascade__favorite-delete--armed {
-    color: color-mix(in srgb, var(--error-text, #ef6262) 82%, #fff);
-    background: transparent;
-}
-
-.cpw-prompt-card-cascade__favorite-delete:focus-visible {
-    outline: 1px solid currentColor;
-    outline-offset: 1px;
-}
-
-.cpw-prompt-card-cascade__favorite-delete:disabled {
-    cursor: wait;
-    opacity: 0.65;
 }
 
 .cpw-prompt-card-cascade__tooltip {
@@ -3583,34 +3589,6 @@
     top: 4px;
     right: 3px;
     z-index: 1;
-    width: 20px;
-    height: 20px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border: 0;
-    border-radius: 4px;
-    color: var(--error-text, #ef7777);
-    background: transparent;
-    font: 700 16px/1 Inter, system-ui, sans-serif;
-    cursor: pointer;
-}
-
-.cpw-prompt-card-library__favorite-delete:hover:not(:disabled),
-.cpw-prompt-card-library__favorite-delete:focus-visible,
-.cpw-prompt-card-library__favorite-delete--armed {
-    outline: 0;
-    color: #fff;
-    background: color-mix(in srgb, var(--error-text, #ef7777) 76%, transparent);
-}
-
-.cpw-prompt-card-library__favorite-delete:focus-visible {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--error-text, #ef7777) 78%, transparent);
-}
-
-.cpw-prompt-card-library__favorite-delete:disabled {
-    opacity: 0.42;
-    cursor: wait;
 }
 
 .cpw-prompt-card-library__empty {

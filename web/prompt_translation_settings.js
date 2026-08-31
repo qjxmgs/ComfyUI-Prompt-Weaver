@@ -135,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260831-editor-favorite-hover-overwrite-v1",
+        "./prompt_toggle_grid.css?v=20260831-unified-favorite-delete-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

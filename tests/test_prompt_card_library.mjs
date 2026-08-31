@@ -334,8 +334,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /titleShell\.append\(title, favoriteSwitchButton\)/);
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell, cardActions\)/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-editor-favorite-hover-overwrite-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-editor-favorite-hover-overwrite-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260831-unified-favorite-delete-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260831-unified-favorite-delete-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -350,7 +350,11 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /button\.setAttribute\("aria-expanded", String\(expanded\)\)/);
     assert.match(favoriteSource, /cpw-prompt-card-cascade__favorite-count/);
     assert.match(favoriteSource, /FAVORITE_DELETE_CONFIRM_MS = 3_000/);
-    assert.match(favoriteSource, /cpw-prompt-card-cascade__favorite-delete/);
+    assert.match(favoriteSource, /function createFavoriteDeleteController\(\{ root, isBusy = \(\) => false \}\)/);
+    assert.match(favoriteSource, /button\.classList\.toggle\("cpw-prompt-card-favorite-delete--armed", armed\)/);
+    assert.match(favoriteSource, /button\.addEventListener\("blur"[\s\S]*armedCardId === card\.id[\s\S]*disarm\(\)/);
+    assert.match(favoriteSource, /armedTimer = setTimeout\([\s\S]*FAVORITE_DELETE_CONFIRM_MS/);
+    assert.match(favoriteSource, /deleteController\.createButton\(\{[\s\S]*className: "cpw-prompt-card-cascade__favorite-delete"/);
     assert.match(favoriteSource, /resolvePromptTip\(card, \{ signal: controller\.signal \}\)/);
     assert.match(favoriteSource, /aria-describedby/);
     assert.match(favoriteSource, /hideFavoriteTooltip\(\)/);
@@ -358,7 +362,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /chooseButton\.addEventListener\("pointerleave"[\s\S]*document\.activeElement !== chooseButton[\s\S]*hideFavoriteTooltip\(\)/);
     assert.match(favoriteSource, /chooseButton\.addEventListener\("blur"[\s\S]*!chooseButton\.matches\(":hover"\)[\s\S]*hideFavoriteTooltip\(\)/);
     assert.match(favoriteSource, /panel\.addEventListener\("pointerenter", \(\) => \{\s*if \(level < 2\) hideFavoriteTooltip\(\);/s);
-    assert.match(favoriteSource, /armedDeleteCardId !== card\.id/);
+    assert.match(favoriteSource, /deleteController\.handlePointerDown\(event\)/);
+    assert.match(favoriteSource, /if \(deleteController\.disarm\(\)\)[\s\S]*event\.stopImmediatePropagation\(\)/);
     assert.match(favoriteSource, /service\.mutate\(\(client\) => client\.deleteCard\(card\.id\)\)/);
     assert.match(favoriteSource, /event\.stopPropagation\(\)/);
     assert.match(favoriteSource, /renderOpenBranch\(\)/);
@@ -386,7 +391,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-overwrite", t\("Overwrite"\)/);
     assert.match(favoriteSource, /overwriteButton\.addEventListener\("click"[\s\S]*overwriteFavoriteFromDraft\(card\)/);
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-count/);
-    assert.match(favoriteSource, /cpw-prompt-card-library__favorite-delete/);
+    assert.match(favoriteSource, /deleteController\.createButton\(\{[\s\S]*className: "cpw-prompt-card-library__favorite-delete"/);
     assert.match(favoriteSource, /row\.draggable = mode === "assign"/);
     assert.match(favoriteSource, /application\/x-prompt-weaver-favorite-id/);
     assert.match(favoriteSource, /level === 0[\s\S]*selectedPrimaryId = category\.id[\s\S]*selectedSecondaryId = null/);
@@ -403,8 +408,9 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-cascade__panel\s*\{[^}]*position:\s*fixed;[^}]*width:\s*min\(196px,/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__item--selected/);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-row\s*\{[^}]*position:\s*relative;/s);
-    assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*color:\s*var\(--error-text,/s);
-    assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-delete--armed/);
+    assert.match(cssSource, /\.cpw-prompt-card-favorite-delete\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px;[^}]*border-radius:\s*4px;[^}]*color:\s*var\(--error-text,/s);
+    assert.match(cssSource, /\.cpw-prompt-card-favorite-delete:hover:not\(:disabled\)[\s\S]*\.cpw-prompt-card-favorite-delete--armed\s*\{[^}]*color:\s*#fff;[^}]*background:\s*color-mix/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*5px;[^}]*right:\s*5px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip\s*\{[^}]*position:\s*fixed;[^}]*max-width:\s*min\(420px,[^}]*pointer-events:\s*none;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip\s*\{[^}]*border:[^}]*48%[^}]*background:[^}]*82%[^}]*box-shadow:[^}]*24%[^}]*font-size:\s*11px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip-line\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere;/s);
@@ -417,7 +423,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-header\s*\{[^}]*height:\s*32px;[^}]*min-height:\s*32px;[^}]*flex:\s*0 0 32px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-add\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
-    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*color:\s*var\(--error-text,/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*4px;[^}]*right:\s*3px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*border-radius:\s*5px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__tooltip\s*\{[^}]*z-index:\s*2147483630;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__row-main--drop-target/);
