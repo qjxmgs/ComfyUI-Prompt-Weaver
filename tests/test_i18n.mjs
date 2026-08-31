@@ -39,6 +39,14 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "Edit Card (");
     assert.equal(t("Favorite Cards"), "Favorite Cards");
     assert.equal(t("Close favorite cards"), "Close favorite cards");
+    assert.equal(t("Enable all cards"), "Enable all cards");
+    assert.equal(t("Disable all cards"), "Disable all cards");
+    assert.equal(tp("{count} column", "{count} columns", 1), "1 column");
+    assert.equal(tp("{count} column", "{count} columns", 6), "6 columns");
+    assert.equal(
+        t("Some cards are enabled. Activate to enable all cards"),
+        "Some cards are enabled. Activate to enable all cards",
+    );
     assert.equal(t("Click again to remove {name}", { name: "Card 01" }), "Click again to remove Card 01");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 1), "1 prompt active");
     assert.equal(tp("{count} prompt active", "{count} prompts active", 2), "2 prompts active");
@@ -55,6 +63,11 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "编辑卡片（");
     assert.equal(t("Favorite Cards"), "收藏卡片");
     assert.equal(t("Close favorite cards"), "关闭收藏卡片");
+    assert.equal(t("Enable all cards"), "全部开启卡片");
+    assert.equal(t("Disable all cards"), "全部关闭卡片");
+    assert.equal(tp("{count} column", "{count} columns", 1), "1 列");
+    assert.equal(tp("{count} column", "{count} columns", 6), "6 列");
+    assert.equal(t("Some cards are enabled. Activate to enable all cards"), "部分卡片已开启，点击后将全部开启");
     assert.equal(t("Move to Category"), "移动到分类");
     assert.equal(t("Move Up"), "上移");
     assert.equal(t("Move Down"), "下移");

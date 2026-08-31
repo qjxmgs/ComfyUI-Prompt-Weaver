@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+    promptGridMasterToggleState,
+    toggleAllPromptGridItems,
+} from "../web/prompt_grid_controls.js";
+
 const i18nSource = await readFile(
     new URL("../web/prompt_weaver_i18n.js", import.meta.url),
     "utf8",
@@ -10,7 +15,7 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const moduleSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-card-context-actions-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-grid-column-align-v1", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,
@@ -44,6 +49,32 @@ const state = {
     items: [{ id: "one", enabled: true, title: "画质", prompt: "masterpiece" }],
     ignored: "value",
 };
+
+test("prompt grid master toggle reports empty, off, mixed, and on states", () => {
+    assert.equal(promptGridMasterToggleState([]), "empty");
+    assert.equal(promptGridMasterToggleState([{ enabled: false }, { enabled: false }]), "off");
+    assert.equal(promptGridMasterToggleState([{ enabled: true }, { enabled: false }]), "mixed");
+    assert.equal(promptGridMasterToggleState([{ enabled: true }, { enabled: true }]), "on");
+});
+
+test("prompt grid master toggle enables mixed grids and disables fully enabled grids", () => {
+    const mixed = [
+        { id: "one", enabled: true, title: "One", prompt: "first", color: "red" },
+        { id: "two", enabled: false, title: "Two", prompt: "second", favorite_id: "favorite" },
+    ];
+    const enabled = toggleAllPromptGridItems(mixed);
+    assert.deepEqual(enabled, [
+        mixed[0],
+        { ...mixed[1], enabled: true },
+    ]);
+    assert.strictEqual(enabled[0], mixed[0]);
+    assert.deepEqual(toggleAllPromptGridItems(enabled), [
+        { ...mixed[0], enabled: false },
+        { ...mixed[1], enabled: false },
+    ]);
+    const empty = [];
+    assert.strictEqual(toggleAllPromptGridItems(empty), empty);
+});
 
 test("snapshot extraction keeps only execution state", () => {
     assert.deepEqual(snapshotFromState(state), {
@@ -403,6 +434,51 @@ test("archive toolbar keeps icon actions ordered and the archive group on one li
     assert.match(
         styleSource,
         /\.cpw-prompt-grid__archive-action:hover::after,[\s\S]*\.cpw-prompt-grid__archive-action:focus-visible::after/,
+    );
+});
+
+test("prompt grid toolbar uses one accessible three-state master toggle", async () => {
+    const toolbarSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    const styleSource = await readFile(
+        new URL("../web/prompt_toggle_grid.css", import.meta.url),
+        "utf8",
+    );
+    assert.match(toolbarSource, /const masterToggle = element\("button", "cpw-prompt-grid__master-toggle"\)/);
+    assert.match(toolbarSource, /masterToggle\.setAttribute\("role", "checkbox"\)/);
+    assert.match(toolbarSource, /leadingControls\.append\(masterToggle, columnGroup\)/);
+    assert.doesNotMatch(toolbarSource, /const columnLabel =/);
+    assert.match(toolbarSource, /createCustomSelect\("cpw-prompt-grid__column-select", t\("Grid columns"\)\)/);
+    assert.match(toolbarSource, /label: tp\("\{count\} column", "\{count\} columns", columns\)/);
+    assert.match(toolbarSource, /function refreshLocale\(\)[\s\S]*refreshColumnOptions\(\);[\s\S]*aria-label", t\("Grid columns"\)/);
+    assert.match(toolbarSource, /actions\.append\(addButton\)/);
+    assert.match(toolbarSource, /toolbar\.append\(leadingControls, archiveGroup, actions\)/);
+    assert.doesNotMatch(toolbarSource, /actions\.append\(addButton, enableAllButton, disableAllButton\)/);
+    assert.match(toolbarSource, /toggleState === "mixed" \? "mixed" : String\(toggleState === "on"\)/);
+    assert.match(toolbarSource, /masterToggle\.disabled = toggleState === "empty"/);
+    assert.match(toolbarSource, /masterToggle\.dataset\.tooltip = label/);
+    assert.match(toolbarSource, /masterToggle\.setAttribute\("aria-label", label\)/);
+    assert.match(
+        toolbarSource,
+        /masterToggle\.addEventListener\("click",[\s\S]*state\.items = toggleAllPromptGridItems\(state\.items\);[\s\S]*commit\(true\);/,
+    );
+    assert.match(styleSource, /\.cpw-prompt-grid__master-toggle\s*\{[^}]*width:\s*34px;[^}]*height:\s*28px;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__master-toggle\s*\{[^}]*appearance:\s*none;[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__leading-controls\s*\{[^}]*flex:\s*0 0 auto;[^}]*gap:\s*4px;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__column-select > \.cpw-prompt-grid__select\s*\{[^}]*width:\s*auto;[^}]*min-width:\s*62px;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__master-toggle-track\s*\{[^}]*width:\s*30px;[^}]*height:\s*18px;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__master-toggle\[data-state="on"\][\s\S]*translateX\(12px\)/);
+    assert.match(styleSource, /\.cpw-prompt-grid__master-toggle\[data-state="mixed"\][\s\S]*translateX\(6px\)/);
+    assert.match(styleSource, /\.cpw-prompt-grid__master-toggle:focus-visible \.cpw-prompt-grid__master-toggle-track/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__master-toggle::after\s*\{[^}]*top:\s*calc\(100% \+ 6px\);[^}]*left:\s*0;[^}]*z-index:\s*100;[^}]*content:\s*attr\(data-tooltip\);/s,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-grid__master-toggle:hover::after,[\s\S]*\.cpw-prompt-grid__master-toggle:focus-visible::after/,
     );
 });
 

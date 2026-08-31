@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260901-card-context-actions-v1";
+} from "./prompt_card_library.js?v=20260901-grid-column-align-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260901-card-context-actions-v1";
+} from "./prompt_weaver_i18n.js?v=20260901-grid-column-align-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -87,6 +87,10 @@ import {
     movePromptGridItemToEdge,
     resolveImmediateInsertionSide,
 } from "./prompt_grid_reorder.js?v=20260812-item-context-menu";
+import {
+    promptGridMasterToggleState,
+    toggleAllPromptGridItems,
+} from "./prompt_grid_controls.js?v=20260901-grid-column-align-v1";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -700,7 +704,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260901-card-context-actions-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260901-grid-column-align-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -747,15 +751,20 @@ function createPromptGridWidget(node, inputName, inputData) {
     const root = element("div", "cpw-prompt-grid");
     const toolbar = element("div", "cpw-prompt-grid__toolbar");
     const columnGroup = element("div", "cpw-prompt-grid__columns");
-    const columnLabel = element("span", "", t("Columns"));
-    columnGroup.append(columnLabel);
-    const columnSelect = createCustomSelect("", t("Grid columns"));
-    columnSelect.customSelect.setOptions(
-        Array.from({ length: MAX_COLUMNS - MIN_COLUMNS + 1 }, (_, index) => {
-            const columns = MIN_COLUMNS + index;
-            return { value: String(columns), label: String(columns) };
-        }),
-    );
+    const columnSelect = createCustomSelect("cpw-prompt-grid__column-select", t("Grid columns"));
+    const refreshColumnOptions = () => {
+        columnSelect.customSelect.setOptions(Array.from(
+            { length: MAX_COLUMNS - MIN_COLUMNS + 1 },
+            (_, index) => {
+                const columns = MIN_COLUMNS + index;
+                return {
+                    value: String(columns),
+                    label: tp("{count} column", "{count} columns", columns),
+                };
+            },
+        ));
+    };
+    refreshColumnOptions();
     columnGroup.append(columnSelect);
 
     const archiveGroup = element("div", "cpw-prompt-grid__archives");
@@ -804,17 +813,23 @@ function createPromptGridWidget(node, inputName, inputData) {
         manageArchivesButton,
     );
 
+    const leadingControls = element("div", "cpw-prompt-grid__leading-controls");
     const actions = element("div", "cpw-prompt-grid__actions");
     const addButton = element(
         "button",
         "cpw-prompt-grid__button cpw-prompt-grid__button--primary",
         t("+ Add Card"),
     );
-    const enableAllButton = element("button", "cpw-prompt-grid__button", t("Enable All"));
-    const disableAllButton = element("button", "cpw-prompt-grid__button", t("Disable All"));
-    for (const button of [addButton, enableAllButton, disableAllButton]) button.type = "button";
-    actions.append(addButton, enableAllButton, disableAllButton);
-    toolbar.append(columnGroup, archiveGroup, actions);
+    const masterToggle = element("button", "cpw-prompt-grid__master-toggle");
+    masterToggle.type = "button";
+    masterToggle.setAttribute("role", "checkbox");
+    const masterToggleTrack = element("span", "cpw-prompt-grid__master-toggle-track");
+    masterToggleTrack.append(element("span", "cpw-prompt-grid__master-toggle-thumb"));
+    masterToggle.append(masterToggleTrack);
+    addButton.type = "button";
+    leadingControls.append(masterToggle, columnGroup);
+    actions.append(addButton);
+    toolbar.append(leadingControls, archiveGroup, actions);
 
     const errorPanel = element("div", "cpw-prompt-grid__error");
     errorPanel.hidden = true;
@@ -864,10 +879,30 @@ function createPromptGridWidget(node, inputName, inputData) {
         console.warn("[Prompt Weaver] Could not load favorite cards", error);
     });
 
+    function syncMasterToggle() {
+        const items = state?.items ?? [];
+        const toggleState = promptGridMasterToggleState(items);
+        const label = toggleState === "on"
+            ? t("Disable all cards")
+            : toggleState === "mixed"
+                ? t("Some cards are enabled. Activate to enable all cards")
+                : toggleState === "empty"
+                    ? t("No cards to toggle")
+                    : t("Enable all cards");
+        masterToggle.disabled = toggleState === "empty";
+        masterToggle.dataset.state = toggleState;
+        masterToggle.dataset.tooltip = label;
+        masterToggle.setAttribute("aria-label", label);
+        masterToggle.setAttribute(
+            "aria-checked",
+            toggleState === "mixed" ? "mixed" : String(toggleState === "on"),
+        );
+    }
+
     function refreshLocale() {
         if (disposed) return;
         syncLocale(app);
-        columnLabel.textContent = t("Columns");
+        refreshColumnOptions();
         columnSelect.querySelector("button")?.setAttribute("aria-label", t("Grid columns"));
         archiveSelect.querySelector("button")?.setAttribute(
             "aria-label",
@@ -877,8 +912,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         setArchiveActionLabel(restoreArchiveButton, t("Restore"));
         setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
         addButton.textContent = t("+ Add Card");
-        enableAllButton.textContent = t("Enable All");
-        disableAllButton.textContent = t("Disable All");
+        syncMasterToggle();
         errorTitle.textContent = t("Configuration could not be read");
         resetButton.textContent = t("Reset to Default");
         for (const card of root.querySelectorAll(".cpw-prompt-grid__card")) {
@@ -932,6 +966,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const previousValue = serializedValue;
         serializedValue = JSON.stringify(state);
         parseError = null;
+        syncMasterToggle();
         if (renderAfter) render();
         notifyWidgetChanged(node, widget, inputName, serializedValue, previousValue, captureHistory);
         reconcileArchiveSelection();
@@ -4698,6 +4733,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         for (const controller of cardAutocompleteControllers) controller.destroy();
         cardAutocompleteControllers.clear();
         const invalid = Boolean(parseError) || !state;
+        syncMasterToggle();
         toolbar.hidden = invalid;
         scroll.hidden = invalid;
         errorPanel.hidden = !invalid;
@@ -4739,14 +4775,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         scheduleNodeHeightFit();
         queueMicrotask(() => grid.querySelector(".cpw-prompt-grid__card:last-child .cpw-prompt-grid__prompt")?.focus());
     });
-    enableAllButton.addEventListener("click", () => {
-        if (!state) return;
-        state.items = state.items.map((item) => ({ ...item, enabled: true }));
-        commit(true);
-    });
-    disableAllButton.addEventListener("click", () => {
-        if (!state) return;
-        state.items = state.items.map((item) => ({ ...item, enabled: false }));
+    masterToggle.addEventListener("click", () => {
+        if (!state?.items.length) return;
+        state.items = toggleAllPromptGridItems(state.items);
         commit(true);
     });
     archiveSelect.addEventListener("focusin", () => refreshArchives());
