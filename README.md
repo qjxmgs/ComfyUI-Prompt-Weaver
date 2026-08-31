@@ -53,8 +53,8 @@ Each card contains:
 - An enable switch.
 - An editable title used only for identification; it is not included in the output.
 - A fixed single-line prompt field and a tag-editor button.
-- Drag-to-reorder with live displacement animation, plus a delete button. Press `Esc` while dragging to restore the original order.
-- An optional card color selected from the card context menu. Right-clicking a text field keeps the browser's native menu.
+- Drag-to-reorder from any non-interactive blank area with live displacement animation. Blank areas use a grab cursor, and `Esc` restores the original order while dragging.
+- Card color and deletion actions in the card context menu. Delete expands in place to a Confirm/Cancel row before removing any card; right-clicking a text field keeps the browser's native menu.
 
 The toolbar can add cards, enable or disable every card, and select a fixed layout of 1–6 columns. A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
 

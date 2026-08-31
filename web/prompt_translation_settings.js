@@ -6,7 +6,7 @@ import {
     getLocale,
     subscribeLocale,
     t,
-} from "./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2";
+} from "./prompt_weaver_i18n.js?v=20260901-card-context-actions-v1";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,
@@ -135,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260831-favorite-rename-v2",
+        "./prompt_toggle_grid.css?v=20260901-card-context-actions-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

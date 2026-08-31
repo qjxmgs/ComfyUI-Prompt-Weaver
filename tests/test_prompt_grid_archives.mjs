@@ -10,7 +10,7 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const moduleSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-card-context-actions-v1", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,
@@ -443,6 +443,16 @@ test("prompt grid cards expose the item context menu while text inputs keep nati
     assert.match(widgetSource, /input\[type="text"\], textarea, \[contenteditable="true"\]/);
     assert.match(widgetSource, /makeAction\(t\("Move to Top"\)/);
     assert.match(widgetSource, /t\("Move to Bottom"\),/);
+    assert.match(widgetSource, /makeAction\(t\("Delete"\), false, renderDeleteConfirmation\)/);
+    assert.match(widgetSource, /cpw-prompt-grid__item-menu-delete-question", t\("Confirm\?"\)/);
+    assert.match(widgetSource, /confirmation\.append\(question, confirm, cancel\)/);
+    assert.match(widgetSource, /queueMicrotask\(\(\) => cancel\.focus\(\)\)/);
+    assert.match(widgetSource, /if \(deleteConfirming\) \{\s*renderDeleteAction\(\{ restoreFocus: true \}\);/s);
+    assert.match(widgetSource, /function deleteItem\(itemId\)[\s\S]*state\.items = nextItems;[\s\S]*commit\(true\);/);
+    assert.match(widgetSource, /card\.addEventListener\("pointerdown",[\s\S]*event\.target\?\.closest\?\.\([\s\S]*button, input, textarea, select, option, label, a,[\s\S]*beginPointerDrag\(event, item\.id, card, card\);/);
+    assert.doesNotMatch(widgetSource, /element\("button", "cpw-prompt-grid__drag"/);
+    assert.doesNotMatch(widgetSource, /element\("button", "cpw-prompt-grid__delete"/);
+    assert.doesNotMatch(widgetSource, /cpw-prompt-grid__card-actions/);
     assert.match(widgetSource, /document\.addEventListener\("pointerdown", onDocumentPointerDown, true\)/);
     assert.match(widgetSource, /document\.addEventListener\("scroll", onViewportChange, true\)/);
     assert.match(widgetSource, /window\.addEventListener\("resize", onViewportChange\)/);
@@ -450,6 +460,12 @@ test("prompt grid cards expose the item context menu while text inputs keep nati
     assert.match(styleSource, /\.cpw-prompt-grid__card--colored\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-grid__item-menu\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-grid__item-color\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-grid__card\s*\{[^}]*cursor:\s*grab;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__card--dragging\s*\{[^}]*cursor:\s*grabbing;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__item-menu-delete-confirm\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/s);
+    assert.match(styleSource, /\.cpw-prompt-grid__item-menu-action--danger/);
+    assert.doesNotMatch(styleSource, /\.cpw-prompt-grid__card-actions/);
+    assert.doesNotMatch(styleSource, /\.cpw-prompt-grid__delete--confirm/);
 });
 
 test("export bundle and preview use the stable portable format", () => {

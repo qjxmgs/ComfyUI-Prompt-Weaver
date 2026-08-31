@@ -389,8 +389,6 @@
 
 .cpw-prompt-grid__button,
 .cpw-prompt-grid__select,
-.cpw-prompt-grid__drag,
-.cpw-prompt-grid__delete,
 .cpw-prompt-grid__prompt-edit,
 .cpw-prompt-grid__title,
 .cpw-prompt-grid__prompt {
@@ -402,8 +400,6 @@
 
 .cpw-prompt-grid__button,
 .cpw-prompt-grid__select,
-.cpw-prompt-grid__drag,
-.cpw-prompt-grid__delete,
 .cpw-prompt-grid__prompt-edit {
     min-height: 26px;
     border-radius: 5px;
@@ -511,8 +507,6 @@
 }
 
 .cpw-prompt-grid__button:hover,
-.cpw-prompt-grid__drag:hover,
-.cpw-prompt-grid__delete:hover,
 .cpw-prompt-grid__prompt-edit:hover {
     border-color: var(--p-primary-color, #7c6df2);
     background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 18%, var(--comfy-input-bg, #17181a));
@@ -661,7 +655,16 @@
     border-radius: 7px;
     background: color-mix(in srgb, var(--comfy-menu-bg, #202124) 92%, var(--p-primary-color, #7c6df2) 8%);
     box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+    cursor: grab;
     transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.cpw-prompt-grid__card :is(input, textarea, [contenteditable="true"]) {
+    cursor: text;
+}
+
+.cpw-prompt-grid__card :is(button, label, select, a) {
+    cursor: pointer;
 }
 
 .cpw-prompt-grid__card--colored {
@@ -685,6 +688,7 @@
 
 .cpw-prompt-grid__card--dragging {
     opacity: 0.35;
+    cursor: grabbing;
 }
 
 .cpw-prompt-grid__card--drop {
@@ -861,68 +865,74 @@
     border-radius: 5px;
 }
 
-.cpw-prompt-grid__card-actions {
-    flex: 0 0 18px;
-    width: 18px;
-    height: 28px;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
+.cpw-prompt-grid__item-menu-action--danger {
+    color: var(--error-text, #ef7777);
 }
 
-.cpw-prompt-grid__drag,
-.cpw-prompt-grid__delete {
-    position: static;
-    display: flex;
+.cpw-prompt-grid__item-menu-action--danger:hover:not(:disabled),
+.cpw-prompt-grid__item-menu-action--danger:focus-visible {
+    color: #fff;
+    background: color-mix(in srgb, var(--error-text, #ef7777) 72%, transparent);
+}
+
+.cpw-prompt-grid__item-menu-delete-slot {
+    min-width: 0;
+}
+
+.cpw-prompt-grid__item-menu-delete-confirm {
+    min-height: 30px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    justify-content: center;
-    width: 100%;
+    gap: 4px;
+    padding: 2px 3px 2px 9px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--error-text, #ef7777) 10%, transparent);
+}
+
+.cpw-prompt-grid__item-menu-delete-question {
     min-width: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    line-height: 1;
+    overflow: hidden;
+    color: var(--error-text, #ef7777);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.cpw-prompt-grid__drag {
-    flex: 1 1 auto;
-    height: auto;
-    min-height: 0;
-    font-size: 14px;
-    cursor: grab;
-    touch-action: none;
-    user-select: none;
+.cpw-prompt-grid__item-menu-delete-choice {
+    min-width: 38px;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid color-mix(in srgb, var(--border-color, #4b4d52) 82%, transparent);
+    border-radius: 5px;
+    color: var(--input-text, #ddd);
+    background: color-mix(in srgb, var(--comfy-input-bg, #17181a) 76%, transparent);
+    font: 600 11px/1 Inter, system-ui, sans-serif;
+    cursor: pointer;
 }
 
-.cpw-prompt-grid__drag:active {
-    cursor: grabbing;
+.cpw-prompt-grid__item-menu-delete-choice--confirm {
+    border-color: color-mix(in srgb, var(--error-text, #ef7777) 70%, transparent);
+    color: #fff;
+    background: color-mix(in srgb, var(--error-text, #ef7777) 68%, transparent);
 }
 
-.cpw-prompt-grid__delete {
-    flex: 0 0 8px;
-    height: 8px;
-    min-height: 8px;
-    font-size: 9px;
-    color: var(--error-text, #ee7777);
+.cpw-prompt-grid__item-menu-delete-choice:hover,
+.cpw-prompt-grid__item-menu-delete-choice:focus-visible {
+    outline: 0;
+    border-color: color-mix(in srgb, var(--p-primary-color, #7c6df2) 72%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--p-primary-color, #7c6df2) 44%, transparent);
 }
 
-.cpw-prompt-grid__drag:hover,
-.cpw-prompt-grid__delete:hover {
-    border: 0;
-    background: transparent;
+.cpw-prompt-grid__item-menu-delete-choice--confirm:hover,
+.cpw-prompt-grid__item-menu-delete-choice--confirm:focus-visible {
+    border-color: color-mix(in srgb, var(--error-text, #ef7777) 90%, #fff 10%);
+    background: color-mix(in srgb, var(--error-text, #ef7777) 82%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--error-text, #ef7777) 52%, transparent);
 }
 
-.cpw-prompt-grid__delete--confirm {
-    width: 100%;
-    min-width: 0;
-    height: 8px;
-    min-height: 8px;
-    padding: 0;
-    font-size: 9px;
-    color: #ff7777;
-    background: transparent;
+.cpw-prompt-grid__item-menu-delete-choice:active {
+    transform: translateY(1px);
 }
 
 .cpw-prompt-grid__title {

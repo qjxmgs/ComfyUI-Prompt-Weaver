@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260831-favorite-rename-v2";
+} from "./prompt_card_library.js?v=20260901-card-context-actions-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260831-favorite-rename-v2";
+} from "./prompt_weaver_i18n.js?v=20260901-card-context-actions-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -700,7 +700,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260831-favorite-rename-v2", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260901-card-context-actions-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -882,11 +882,6 @@ function createPromptGridWidget(node, inputName, inputData) {
         errorTitle.textContent = t("Configuration could not be read");
         resetButton.textContent = t("Reset to Default");
         for (const card of root.querySelectorAll(".cpw-prompt-grid__card")) {
-            const drag = card.querySelector(".cpw-prompt-grid__drag");
-            if (drag) {
-                drag.title = t("Drag to reorder");
-                drag.setAttribute("aria-label", t("Drag this card to reorder it"));
-            }
             card.querySelector(".cpw-prompt-grid__switch input")?.setAttribute(
                 "aria-label",
                 t("Enable this prompt"),
@@ -895,14 +890,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (titleInput) {
                 titleInput.placeholder = t("Prompt title");
                 titleInput.setAttribute("aria-label", t("Prompt title"));
-            }
-            const deleteButton = card.querySelector(".cpw-prompt-grid__delete");
-            if (deleteButton) {
-                const deleteMessage = deleteButton.classList.contains("cpw-prompt-grid__delete--confirm")
-                    ? t("Click again to delete a non-empty prompt")
-                    : t("Delete this prompt");
-                deleteButton.title = deleteMessage;
-                deleteButton.setAttribute("aria-label", t("Delete this prompt"));
             }
             const promptInput = card.querySelector(".cpw-prompt-grid__prompt");
             if (promptInput) {
@@ -2681,6 +2668,16 @@ function createPromptGridWidget(node, inputName, inputData) {
         commit(false, true);
     }
 
+    function deleteItem(itemId) {
+        if (!state) return;
+        const nextItems = state.items.filter((candidate) => candidate.id !== itemId);
+        if (nextItems.length === state.items.length) return;
+        closeItemContextMenu();
+        state.items = nextItems;
+        commit(true);
+        scheduleNodeHeightFit();
+    }
+
     function openItemContextMenu(event, item, card) {
         if (!state || disposed || dragSession) return;
         if (event.target.closest('input[type="text"], textarea, [contenteditable="true"]')) return;
@@ -2702,6 +2699,44 @@ function createPromptGridWidget(node, inputName, inputData) {
             button.disabled = disabled;
             button.addEventListener("click", () => action());
             return button;
+        };
+        let deleteConfirming = false;
+        const deleteSlot = element("div", "cpw-prompt-grid__item-menu-delete-slot");
+        deleteSlot.setAttribute("role", "none");
+
+        const renderDeleteAction = ({ restoreFocus = false } = {}) => {
+            deleteConfirming = false;
+            const deleteAction = makeAction(t("Delete"), false, renderDeleteConfirmation);
+            deleteAction.classList.add("cpw-prompt-grid__item-menu-action--danger");
+            deleteSlot.replaceChildren(deleteAction);
+            if (restoreFocus) queueMicrotask(() => deleteAction.focus());
+        };
+
+        const renderDeleteConfirmation = () => {
+            deleteConfirming = true;
+            const confirmation = element("div", "cpw-prompt-grid__item-menu-delete-confirm");
+            confirmation.setAttribute("role", "group");
+            confirmation.setAttribute("aria-label", t("Confirm?"));
+            const question = element("span", "cpw-prompt-grid__item-menu-delete-question", t("Confirm?"));
+            const confirm = element(
+                "button",
+                "cpw-prompt-grid__item-menu-delete-choice cpw-prompt-grid__item-menu-delete-choice--confirm",
+                t("Confirm"),
+            );
+            confirm.type = "button";
+            confirm.setAttribute("role", "menuitem");
+            confirm.addEventListener("click", () => deleteItem(item.id));
+            const cancel = element(
+                "button",
+                "cpw-prompt-grid__item-menu-delete-choice",
+                t("Cancel"),
+            );
+            cancel.type = "button";
+            cancel.setAttribute("role", "menuitem");
+            cancel.addEventListener("click", () => renderDeleteAction({ restoreFocus: true }));
+            confirmation.append(question, confirm, cancel);
+            deleteSlot.replaceChildren(confirmation);
+            queueMicrotask(() => cancel.focus());
         };
         const topButton = makeAction(t("Move to Top"), currentIndex === 0, () => (
             moveItemToEdge(item.id, "start")
@@ -2742,7 +2777,18 @@ function createPromptGridWidget(node, inputName, inputData) {
             colorButton.addEventListener("click", () => setItemColor(item.id, option.key));
             colorGroup.append(colorButton);
         }
-        menu.append(topButton, bottomButton, separator, colorLabel, colorGroup);
+        const deleteSeparator = element("div", "cpw-prompt-grid__item-menu-separator");
+        deleteSeparator.setAttribute("role", "separator");
+        menu.append(
+            topButton,
+            bottomButton,
+            separator,
+            colorLabel,
+            colorGroup,
+            deleteSeparator,
+            deleteSlot,
+        );
+        renderDeleteAction();
 
         const onDocumentPointerDown = (pointerEvent) => {
             if (!menu.contains(pointerEvent.target)) closeItemContextMenu();
@@ -2753,6 +2799,10 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (keyEvent.key === "Escape") {
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
+                if (deleteConfirming) {
+                    renderDeleteAction({ restoreFocus: true });
+                    return;
+                }
                 closeItemContextMenu({ restoreFocus: true });
                 return;
             }
@@ -4561,10 +4611,6 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
 
         const header = element("div", "cpw-prompt-grid__card-header");
-        const dragHandle = element("button", "cpw-prompt-grid__drag", "⠿");
-        dragHandle.type = "button";
-        dragHandle.title = t("Drag to reorder");
-        dragHandle.setAttribute("aria-label", t("Drag this card to reorder it"));
 
         const toggleLabel = element("label", "cpw-prompt-grid__switch");
         const toggle = element("input", "");
@@ -4589,14 +4635,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteSwitchButton.setAttribute("aria-label", favoriteSwitchLabel);
         favoriteSwitchButton.append(element("span", "cpw-prompt-grid__favorite-switch-icon"));
         titleShell.append(title, favoriteSwitchButton);
-
-        const deleteButton = element("button", "cpw-prompt-grid__delete", "×");
-        deleteButton.type = "button";
-        deleteButton.title = t("Delete this prompt");
-        deleteButton.setAttribute("aria-label", t("Delete this prompt"));
-        const cardActions = element("div", "cpw-prompt-grid__card-actions");
-        cardActions.append(deleteButton, dragHandle);
-        header.append(toggleLabel, titleShell, cardActions);
+        header.append(toggleLabel, titleShell);
 
         const prompt = element("input", "cpw-prompt-grid__prompt");
         prompt.type = "text";
@@ -4610,16 +4649,6 @@ function createPromptGridWidget(node, inputName, inputData) {
         const promptRow = element("div", "cpw-prompt-grid__prompt-row");
         promptRow.append(prompt, promptEditButton);
         card.append(header, promptRow);
-
-        let deleteArmed = false;
-        let deleteResetTimer = null;
-
-        function resetDeleteConfirmation() {
-            deleteArmed = false;
-            deleteButton.textContent = "×";
-            deleteButton.title = t("Delete this prompt");
-            deleteButton.classList.remove("cpw-prompt-grid__delete--confirm");
-        }
 
         toggle.addEventListener("change", () => {
             card.classList.toggle("cpw-prompt-grid__card--disabled", !toggle.checked);
@@ -4643,30 +4672,17 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteSwitchButton.addEventListener("click", () => (
             openCardFavoriteSwitchMenu(item.id, favoriteSwitchButton)
         ));
-        deleteButton.addEventListener("click", () => {
-            const liveItem = state?.items.find((candidate) => candidate.id === item.id) ?? item;
-            const hasRetainedPrompts = Array.isArray(liveItem.prompt_tokens)
-                && liveItem.prompt_tokens.some((entry) => !entry.selected);
-            if ((prompt.value.trim() || hasRetainedPrompts) && !deleteArmed) {
-                deleteArmed = true;
-                deleteButton.textContent = "!";
-                deleteButton.title = t("Click again to delete a non-empty prompt");
-                deleteButton.classList.add("cpw-prompt-grid__delete--confirm");
-                clearTimeout(deleteResetTimer);
-                deleteResetTimer = setTimeout(resetDeleteConfirmation, 3000);
-                return;
-            }
-            clearTimeout(deleteResetTimer);
-            state.items = state.items.filter((candidate) => candidate.id !== item.id);
-            commit(true);
-            scheduleNodeHeightFit();
+        card.addEventListener("pointerdown", (event) => {
+            const interactive = event.target?.closest?.(
+                'button, input, textarea, select, option, label, a, [contenteditable="true"]',
+            );
+            if (interactive) return;
+            beginPointerDrag(event, item.id, card, card);
         });
-
-        dragHandle.addEventListener("pointerdown", (event) => beginPointerDrag(event, item.id, card, dragHandle));
-        dragHandle.addEventListener("pointermove", movePointerDrag);
-        dragHandle.addEventListener("pointerup", finishPointerDrag);
-        dragHandle.addEventListener("pointercancel", cancelPointerDrag);
-        dragHandle.addEventListener("lostpointercapture", losePointerCapture);
+        card.addEventListener("pointermove", movePointerDrag);
+        card.addEventListener("pointerup", finishPointerDrag);
+        card.addEventListener("pointercancel", cancelPointerDrag);
+        card.addEventListener("lostpointercapture", losePointerCapture);
         card.addEventListener("contextmenu", (event) => openItemContextMenu(event, item, card));
         return card;
     }
