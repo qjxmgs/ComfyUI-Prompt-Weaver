@@ -89,8 +89,9 @@ import {
 } from "./prompt_grid_reorder.js?v=20260812-item-context-menu";
 import {
     promptGridMasterToggleState,
+    promptGridWheelTarget,
     toggleAllPromptGridItems,
-} from "./prompt_grid_controls.js?v=20260901-favorite-text-import-v1";
+} from "./prompt_grid_controls.js?v=20260901-grid-wheel-routing-v1";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -4850,6 +4851,18 @@ function createPromptGridWidget(node, inputName, inputData) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
     root.addEventListener("wheel", (event) => {
+        const scrollContainer = event.target?.closest?.(".cpw-prompt-grid__scroll");
+        const wheelTarget = promptGridWheelTarget({
+            insideScrollArea: Boolean(scrollContainer),
+            scrollHeight: scrollContainer?.scrollHeight,
+            clientHeight: scrollContainer?.clientHeight,
+            deltaY: event.deltaY,
+            ctrlKey: event.ctrlKey,
+        });
+        if (wheelTarget === "grid") {
+            event.stopPropagation();
+            return;
+        }
         const graphCanvas = app.canvas;
         if (typeof graphCanvas?.processMouseWheel === "function") {
             event.preventDefault();

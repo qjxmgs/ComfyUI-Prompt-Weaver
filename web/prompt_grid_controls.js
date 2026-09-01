@@ -13,3 +13,15 @@ export function toggleAllPromptGridItems(items) {
         item.enabled === enabled ? item : { ...item, enabled }
     ));
 }
+
+export function promptGridWheelTarget({
+    insideScrollArea = false,
+    scrollHeight = 0,
+    clientHeight = 0,
+    deltaY = 0,
+    ctrlKey = false,
+} = {}) {
+    const hasVerticalScroll = Boolean(insideScrollArea)
+        && Number(scrollHeight) > Number(clientHeight) + 1;
+    return !ctrlKey && hasVerticalScroll && Number(deltaY) !== 0 ? "grid" : "canvas";
+}

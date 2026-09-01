@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
     promptGridMasterToggleState,
+    promptGridWheelTarget,
     toggleAllPromptGridItems,
 } from "../web/prompt_grid_controls.js";
 
@@ -74,6 +75,20 @@ test("prompt grid master toggle enables mixed grids and disables fully enabled g
     ]);
     const empty = [];
     assert.strictEqual(toggleAllPromptGridItems(empty), empty);
+});
+
+test("prompt grid wheel routing prioritizes a visible vertical scrollbar", () => {
+    const scrollable = {
+        insideScrollArea: true,
+        scrollHeight: 620,
+        clientHeight: 300,
+        deltaY: 120,
+    };
+    assert.equal(promptGridWheelTarget(scrollable), "grid");
+    assert.equal(promptGridWheelTarget({ ...scrollable, deltaY: -120 }), "grid");
+    assert.equal(promptGridWheelTarget({ ...scrollable, ctrlKey: true }), "canvas");
+    assert.equal(promptGridWheelTarget({ ...scrollable, scrollHeight: 300 }), "canvas");
+    assert.equal(promptGridWheelTarget({ ...scrollable, insideScrollArea: false }), "canvas");
 });
 
 test("snapshot extraction keeps only execution state", () => {
@@ -546,6 +561,9 @@ test("prompt grid cards expose the item context menu while text inputs keep nati
     assert.match(widgetSource, /window\.addEventListener\("resize", onViewportChange\)/);
     assert.match(widgetSource, /keyEvent\.key === "Escape"/);
     assert.match(widgetSource, /root\.addEventListener\("wheel", \(event\) => \{/);
+    assert.match(widgetSource, /event\.target\?\.closest\?\.\("\.cpw-prompt-grid__scroll"\)/);
+    assert.match(widgetSource, /const wheelTarget = promptGridWheelTarget\(\{/);
+    assert.match(widgetSource, /if \(wheelTarget === "grid"\) \{\s*event\.stopPropagation\(\);\s*return;/s);
     assert.match(widgetSource, /graphCanvas\.processMouseWheel\(event\)/);
     assert.match(widgetSource, /canvasElement\.dispatchEvent\(new WheelEvent\("wheel", event\)\)/);
     assert.match(widgetSource, /\}, \{ passive: false \}\);/);
