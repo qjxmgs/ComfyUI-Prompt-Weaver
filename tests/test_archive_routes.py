@@ -635,6 +635,36 @@ class ArchiveRouteTests(unittest.TestCase):
             / "prompt-card-library.json"
         ).is_file())
 
+    def test_prompt_card_library_batch_import_skips_invalid_entries(self):
+        primary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        )).payload["category"]
+        secondary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "角色", "parent_id": primary["id"]})
+        )).payload["category"]
+        response = self.run_async(self.module.import_prompt_card_library_cards(_Request({
+            "category_id": secondary["id"],
+            "cards": [
+                {"title": "One", "prompt": "prompt one"},
+                {"title": "x" * 201, "prompt": "invalid"},
+                {"title": "Two", "prompt": "prompt two"},
+            ],
+        })))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["imported"], 2)
+        self.assertEqual(response.payload["skipped"], 1)
+        self.assertEqual(response.payload["errors"][0]["index"], 1)
+        self.assertEqual(
+            [card["title"] for card in response.payload["library"]["cards"]],
+            ["One", "Two"],
+        )
+
+        invalid = self.run_async(self.module.import_prompt_card_library_cards(_Request({
+            "category_id": secondary["id"],
+            "cards": "invalid",
+        })))
+        self.assertEqual(invalid.status, 400)
+
     def test_prompt_card_library_routes_move_update_and_migrate_before_delete(self):
         def create_branch(primary_name, secondary_name):
             primary = self.run_async(self.module.create_prompt_card_library_category(

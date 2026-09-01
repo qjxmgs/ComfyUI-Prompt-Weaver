@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -13,6 +13,7 @@ const MAX_CARD_PROMPT_LENGTH = 100_000;
 const MAX_PRIMARY_CATEGORIES = 100;
 const MAX_SECONDARY_CATEGORIES = 500;
 const MAX_FAVORITE_CARDS = 2_000;
+const MAX_FAVORITE_IMPORT_BYTES = 512 * 1024;
 const FAVORITE_DELETE_CONFIRM_MS = 3_000;
 const FAVORITE_STATUS_VISIBLE_MS = 3_000;
 const FAVORITE_STATUS_TRANSITION_MS = 180;
@@ -176,6 +177,40 @@ export function favoriteCardBilingualPrompt(value, translations = []) {
                 : "";
             return translation && translation !== "—" ? translation : token;
         }).join("，"),
+    };
+}
+
+export function parseFavoriteCardImportText(value) {
+    const lines = String(value ?? "")
+        .split(/\r\n|\n|\r/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const cards = [];
+    const errors = [];
+    const pairedLength = lines.length - (lines.length % 2);
+    for (let index = 0; index < pairedLength; index += 2) {
+        const title = lines[index];
+        const prompt = lines[index + 1];
+        const entry = index / 2;
+        if (title.length > MAX_CARD_TITLE_LENGTH) {
+            errors.push({ index: entry, title, prompt, reason: "title_too_long" });
+            continue;
+        }
+        if (!prompt.trim()) {
+            errors.push({ index: entry, title, prompt, reason: "prompt_empty" });
+            continue;
+        }
+        if (prompt.length > MAX_CARD_PROMPT_LENGTH) {
+            errors.push({ index: entry, title, prompt, reason: "prompt_too_long" });
+            continue;
+        }
+        cards.push({ title, prompt });
+    }
+    return {
+        cards,
+        errors,
+        trailingTitle: lines.length % 2 ? lines.at(-1) : null,
+        nonBlankLineCount: lines.length,
     };
 }
 
@@ -473,6 +508,14 @@ export class PromptCardLibraryClient {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ category_id: categoryId, snapshot }),
+        });
+    }
+
+    importCards(categoryId, cards) {
+        return this.request("/cards/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category_id: categoryId, cards }),
         });
     }
 
@@ -1246,6 +1289,12 @@ export function openPromptCardLibraryMenu({
     root.tabIndex = -1;
     const header = element("header", "cpw-prompt-card-library__header");
     const heading = element("strong", "cpw-prompt-card-library__heading", t("Favorite Cards"));
+    const importButton = element("button", "cpw-prompt-card-library__import", t("Import"));
+    importButton.type = "button";
+    importButton.title = t("Import favorite cards from text");
+    importButton.setAttribute("aria-label", t("Import favorite cards from text"));
+    importButton.setAttribute("aria-haspopup", "dialog");
+    importButton.setAttribute("aria-expanded", "false");
     const closeButton = element("button", "cpw-prompt-card-library__close", "×");
     closeButton.type = "button";
     closeButton.title = t("Close");
@@ -1256,7 +1305,7 @@ export function openPromptCardLibraryMenu({
     status.setAttribute("aria-live", "polite");
     status.append(statusText);
     status.hidden = true;
-    header.append(heading, status, closeButton);
+    header.append(heading, importButton, status, closeButton);
     const panels = element("div", "cpw-prompt-card-library__panels");
     const resizeHandle = element("div", "cpw-prompt-card-library__resize-handle");
     resizeHandle.tabIndex = 0;
@@ -1280,6 +1329,7 @@ export function openPromptCardLibraryMenu({
     let closed = false;
     let favoriteSelectionInitialized = false;
     let activeContextMenu = null;
+    let activeImportDialog = null;
     let favoriteTooltip = null;
     let favoriteTooltipAnchor = null;
     let favoriteTooltipAbortController = null;
@@ -1642,6 +1692,7 @@ export function openPromptCardLibraryMenu({
 
     const close = ({ restoreFocus = true } = {}) => {
         if (closed) return;
+        closeImportDialog(false);
         persistGeometry();
         closed = true;
         if (statusVisibleTimer) clearTimeout(statusVisibleTimer);
@@ -1764,6 +1815,234 @@ export function openPromptCardLibraryMenu({
             ? library.categories.find((category) => category.id === secondary.parent_id)
             : null;
         return primary && secondary ? `${primary.name} / ${secondary.name}` : secondary?.name ?? "";
+    };
+
+    const closeImportDialog = (restoreFocus = true) => {
+        const current = activeImportDialog;
+        if (!current) return;
+        activeImportDialog = null;
+        document.removeEventListener("keydown", current.onKeyDown, true);
+        current.overlay.remove();
+        importButton.setAttribute("aria-expanded", "false");
+        if (restoreFocus && importButton.isConnected) importButton.focus();
+    };
+
+    const importEntryErrorText = (entry) => {
+        if (entry?.reason === "title_too_long") return t("Title exceeds 200 characters.");
+        if (entry?.reason === "prompt_too_long") return t("Prompt exceeds 100,000 characters.");
+        return t("Prompt cannot be empty.");
+    };
+
+    const openImportDialog = () => {
+        closeImportDialog(false);
+        deleteController.disarm();
+        hideFavoriteTooltip();
+        closeContextMenu();
+        const secondaryCategories = library.categories.filter((category) => category.parent_id !== null);
+        const defaultCategoryId = secondaryCategories.some((category) => category.id === selectedSecondaryId)
+            ? selectedSecondaryId
+            : (secondaryCategories[0]?.id ?? "");
+        const overlay = element("div", "cpw-prompt-card-import__overlay");
+        const dialog = element("section", "cpw-prompt-card-import");
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-label", t("Import Favorite Cards"));
+        const importHeader = element("header", "cpw-prompt-card-import__header");
+        const importHeading = element("h3", "cpw-prompt-card-import__title", t("Import Favorite Cards"));
+        const importClose = element("button", "cpw-prompt-card-import__close", "×");
+        importClose.type = "button";
+        importClose.title = t("Close");
+        importClose.setAttribute("aria-label", t("Close favorite card import"));
+        importHeader.append(importHeading, importClose);
+        const categoryLabel = element("label", "cpw-prompt-card-import__field");
+        categoryLabel.append(element("span", "cpw-prompt-card-import__label", t("Target secondary category")));
+        const categorySelect = element("select", "cpw-prompt-card-import__select");
+        categorySelect.setAttribute("aria-label", t("Target secondary category"));
+        if (secondaryCategories.length) {
+            for (const category of secondaryCategories) {
+                const option = element("option", "", categoryPath(category.id));
+                option.value = category.id;
+                option.selected = category.id === defaultCategoryId;
+                categorySelect.append(option);
+            }
+        } else {
+            const option = element("option", "", t("No secondary categories available"));
+            option.value = "";
+            categorySelect.append(option);
+            categorySelect.disabled = true;
+        }
+        categoryLabel.append(categorySelect);
+        const textLabel = element("label", "cpw-prompt-card-import__field cpw-prompt-card-import__field--text");
+        textLabel.append(element(
+            "span",
+            "cpw-prompt-card-import__label",
+            t("Paste alternating title and prompt lines"),
+        ));
+        const textarea = element("textarea", "cpw-prompt-card-import__textarea");
+        textarea.maxLength = MAX_FAVORITE_IMPORT_BYTES;
+        textarea.placeholder = t("Card title\nprompt text\n\nAnother title\nanother prompt");
+        textarea.setAttribute("aria-label", t("Favorite cards import text"));
+        textLabel.append(textarea);
+        const message = element("div", "cpw-prompt-card-import__message");
+        message.setAttribute("role", "status");
+        message.setAttribute("aria-live", "polite");
+        const preview = element("div", "cpw-prompt-card-import__preview");
+        preview.hidden = true;
+        const actions = element("footer", "cpw-prompt-card-import__actions");
+        const previewButton = element("button", "cpw-prompt-card-import__button", t("Preview"));
+        const confirmButton = element(
+            "button",
+            "cpw-prompt-card-import__button cpw-prompt-card-import__button--primary",
+            t("Confirm Import"),
+        );
+        previewButton.type = "button";
+        confirmButton.type = "button";
+        actions.append(previewButton, confirmButton);
+        dialog.append(importHeader, categoryLabel, textLabel, message, preview, actions);
+        overlay.append(dialog);
+        let importBusy = false;
+        const onImportKeyDown = (event) => {
+            if (event.key !== "Escape" || importBusy) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            closeImportDialog();
+        };
+        document.body.append(overlay);
+        activeImportDialog = { overlay, onKeyDown: onImportKeyDown };
+        document.addEventListener("keydown", onImportKeyDown, true);
+        importButton.setAttribute("aria-expanded", "true");
+
+        const parseCurrent = () => {
+            const byteLength = new TextEncoder().encode(textarea.value).byteLength;
+            if (byteLength > MAX_FAVORITE_IMPORT_BYTES) {
+                return {
+                    cards: [],
+                    errors: [],
+                    trailingTitle: null,
+                    byteLimitExceeded: true,
+                };
+            }
+            return parseFavoriteCardImportText(textarea.value);
+        };
+        const skippedCount = (parsed) => parsed.errors.length + (parsed.trailingTitle ? 1 : 0);
+        const syncConfirm = () => {
+            const parsed = parseCurrent();
+            confirmButton.disabled = importBusy
+                || !categorySelect.value
+                || parsed.byteLimitExceeded
+                || !parsed.cards.length;
+        };
+        const setImportBusy = (value) => {
+            importBusy = Boolean(value);
+            dialog.setAttribute("aria-busy", String(importBusy));
+            importClose.disabled = importBusy;
+            categorySelect.disabled = importBusy || !secondaryCategories.length;
+            textarea.disabled = importBusy;
+            previewButton.disabled = importBusy;
+            syncConfirm();
+        };
+        const clearPreview = () => {
+            preview.hidden = true;
+            preview.replaceChildren();
+            message.textContent = secondaryCategories.length
+                ? ""
+                : t("Create a secondary category before importing favorite cards.");
+            message.classList.toggle("cpw-prompt-card-import__message--error", !secondaryCategories.length);
+            syncConfirm();
+        };
+        const renderPreview = (parsed) => {
+            preview.replaceChildren();
+            preview.hidden = false;
+            if (parsed.byteLimitExceeded) {
+                message.textContent = t("Import text cannot exceed 512 KiB.");
+                message.classList.add("cpw-prompt-card-import__message--error");
+                syncConfirm();
+                return;
+            }
+            const skipped = skippedCount(parsed);
+            message.textContent = t("{ready} cards ready; {skipped} entries will be skipped.", {
+                ready: parsed.cards.length,
+                skipped,
+            });
+            message.classList.toggle(
+                "cpw-prompt-card-import__message--error",
+                !parsed.cards.length,
+            );
+            for (const card of parsed.cards) {
+                const item = element("article", "cpw-prompt-card-import__item");
+                item.append(
+                    element("strong", "cpw-prompt-card-import__item-title", card.title),
+                    element("span", "cpw-prompt-card-import__item-prompt", card.prompt),
+                );
+                preview.append(item);
+            }
+            for (const entry of parsed.errors) {
+                const item = element("article", "cpw-prompt-card-import__item cpw-prompt-card-import__item--skipped");
+                item.append(
+                    element("strong", "cpw-prompt-card-import__item-title", entry.title),
+                    element("span", "cpw-prompt-card-import__item-prompt", importEntryErrorText(entry)),
+                );
+                preview.append(item);
+            }
+            if (parsed.trailingTitle) {
+                const item = element("article", "cpw-prompt-card-import__item cpw-prompt-card-import__item--skipped");
+                item.append(
+                    element("strong", "cpw-prompt-card-import__item-title", parsed.trailingTitle),
+                    element("span", "cpw-prompt-card-import__item-prompt", t("Ignored because no prompt line follows this title.")),
+                );
+                preview.append(item);
+            }
+            syncConfirm();
+        };
+        const onDraftChanged = () => clearPreview();
+        textarea.addEventListener("input", onDraftChanged);
+        categorySelect.addEventListener("change", onDraftChanged);
+        previewButton.addEventListener("click", () => renderPreview(parseCurrent()));
+        importClose.addEventListener("click", () => closeImportDialog());
+        overlay.addEventListener("pointerdown", (event) => {
+            if (event.target === overlay && !importBusy) closeImportDialog();
+        });
+        confirmButton.addEventListener("click", async () => {
+            const parsed = parseCurrent();
+            renderPreview(parsed);
+            if (parsed.byteLimitExceeded || !categorySelect.value || !parsed.cards.length) return;
+            const targetCategoryId = categorySelect.value;
+            setImportBusy(true);
+            message.textContent = t("Importing…");
+            message.classList.remove("cpw-prompt-card-import__message--error");
+            setBusy(true);
+            try {
+                const result = await service.mutate(
+                    (client) => client.importCards(targetCategoryId, parsed.cards),
+                );
+                library = service.library;
+                const imported = Number(result?.imported) || 0;
+                const skipped = skippedCount(parsed) + (Number(result?.skipped) || 0);
+                if (!imported) {
+                    message.textContent = t("No favorite cards could be imported.");
+                    message.classList.add("cpw-prompt-card-import__message--error");
+                    return;
+                }
+                const target = library.categories.find((category) => category.id === targetCategoryId);
+                selectedPrimaryId = target?.parent_id ?? selectedPrimaryId;
+                selectedSecondaryId = targetCategoryId;
+                mobileLevel = 2;
+                closeImportDialog(false);
+                render();
+                setStatus(t("Imported {imported} favorite cards; skipped {skipped}.", {
+                    imported,
+                    skipped,
+                }));
+            } catch (error) {
+                message.textContent = error instanceof Error ? error.message : String(error);
+                message.classList.add("cpw-prompt-card-import__message--error");
+            } finally {
+                setBusy(false);
+                if (activeImportDialog?.overlay === overlay) setImportBusy(false);
+            }
+        });
+        clearPreview();
+        queueMicrotask(() => (categorySelect.disabled ? textarea : categorySelect).focus());
     };
 
     const setBusy = (value) => {
@@ -3049,6 +3328,7 @@ export function openPromptCardLibraryMenu({
     const onDocumentPointerDown = (event) => {
         deleteController.handlePointerDown(event);
         if (event.target?.closest?.(".cpw-prompt-card-confirm__overlay")) return;
+        if (activeImportDialog?.overlay.contains(event.target)) return;
         if (activeContextMenu?.contains(event.target)) return;
         closeContextMenu();
         if (!root.contains(event.target) && !anchor?.contains?.(event.target)) close({ restoreFocus: false });
@@ -3127,6 +3407,7 @@ export function openPromptCardLibraryMenu({
         render();
     });
     closeButton.addEventListener("click", () => close());
+    importButton.addEventListener("click", openImportDialog);
     header.addEventListener("pointerdown", (event) => {
         if (event.button !== 0 || event.target.closest("button, input, select, a, [role='button']")) return;
         position();

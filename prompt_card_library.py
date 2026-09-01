@@ -499,6 +499,45 @@ class PromptCardLibraryStore:
             self._write_unlocked(data)
             return card, data["revision"]
 
+    def import_cards(self, category_id, snapshots):
+        category_id = _normalize_uuid(category_id, "category_id")
+        if not isinstance(snapshots, list):
+            raise PromptCardLibraryValidationError("cards must be an array")
+        with self._lock:
+            data = self._read_unlocked()
+            self._secondary_category(data, category_id)
+            available = max(0, MAX_CARDS - len(data["cards"]))
+            timestamp = _now()
+            imported = []
+            errors = []
+            for index, value in enumerate(snapshots):
+                try:
+                    import_value = (
+                        {"title": value.get("title"), "prompt": value.get("prompt")}
+                        if isinstance(value, dict)
+                        else value
+                    )
+                    normalized = normalize_card_snapshot(import_value)
+                except (PromptCardLibraryValidationError, PromptCardLibraryCapacityError) as error:
+                    errors.append({"index": index, "error": str(error)})
+                    continue
+                if len(imported) >= available:
+                    errors.append({"index": index, "error": "favorite card limit reached"})
+                    continue
+                card = {
+                    "id": str(uuid.uuid4()),
+                    "category_id": category_id,
+                    **normalized,
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                }
+                imported.append(card)
+            if imported:
+                data["cards"].extend(imported)
+                self._increment_revision(data)
+                self._write_unlocked(data)
+            return imported, errors, data["revision"]
+
     def update_card(self, card_id, category_id=None, snapshot=None):
         card_id = _normalize_uuid(card_id, "favorite card id")
         if category_id is None and snapshot is None:

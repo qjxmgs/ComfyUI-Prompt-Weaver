@@ -686,6 +686,38 @@ async def create_prompt_card_library_card(request):
         return _prompt_card_library_error_response(error)
 
 
+@PromptServer.instance.routes.post("/prompt-weaver/prompt-card-library/cards/import")
+async def import_prompt_card_library_cards(request):
+    try:
+        payload = await _request_json(
+            request,
+            MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        cards, errors, revision = store.import_cards(
+            payload.get("category_id"),
+            payload.get("cards"),
+        )
+        return web.json_response({
+            "imported": len(cards),
+            "skipped": len(errors),
+            "errors": errors,
+            "cards": cards,
+            "revision": revision,
+            "library": store.list_library(),
+        })
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/order")
 async def reorder_prompt_card_library_cards(request):
     try:

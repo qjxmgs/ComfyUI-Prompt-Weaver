@@ -72,6 +72,81 @@ class PromptCardLibraryStoreTests(unittest.TestCase):
         with self.assertRaises(PromptCardLibraryNotFoundError):
             self.store.delete_card(card["id"])
 
+    def test_batch_import_skips_invalid_cards_and_writes_once_in_input_order(self):
+        _primary, secondary = self.create_branch()
+        before_revision = self.store.list_library()["revision"]
+        entries = [
+            {
+                "title": "First",
+                "prompt": "first prompt",
+                "color": "red",
+                "retain_unselected": False,
+            },
+            {"title": "x" * 201, "prompt": "too long title"},
+            {"title": "Missing", "prompt": "   "},
+            {"title": "First", "prompt": "duplicate titles are allowed"},
+        ]
+        with mock.patch.object(
+            self.store,
+            "_write_unlocked",
+            wraps=self.store._write_unlocked,
+        ) as write:
+            cards, errors, revision = self.store.import_cards(secondary["id"], entries)
+        self.assertEqual([card["prompt"] for card in cards], [
+            "first prompt",
+            "duplicate titles are allowed",
+        ])
+        self.assertNotIn("color", cards[0])
+        self.assertNotIn("retain_unselected", cards[0])
+        self.assertNotIn("prompt_tokens", cards[0])
+        self.assertEqual([error["index"] for error in errors], [1, 2])
+        self.assertEqual(revision, before_revision + 1)
+        self.assertEqual(write.call_count, 1)
+        self.assertEqual(cards[0]["created_at"], cards[1]["created_at"])
+        self.assertEqual(
+            [card["id"] for card in self.store.list_library()["cards"]],
+            [card["id"] for card in cards],
+        )
+
+    def test_batch_import_all_invalid_is_a_noop_and_capacity_skips_overflow(self):
+        primary, secondary = self.create_branch()
+        before = Path(self.path).read_bytes()
+        before_revision = self.store.list_library()["revision"]
+        cards, errors, revision = self.store.import_cards(secondary["id"], [
+            {"title": "Invalid", "prompt": ""},
+        ])
+        self.assertEqual(cards, [])
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(revision, before_revision)
+        self.assertEqual(Path(self.path).read_bytes(), before)
+
+        self.store.create_card(secondary["id"], snapshot("existing"))
+        with mock.patch.object(library_module, "MAX_CARDS", 2):
+            cards, errors, _revision = self.store.import_cards(secondary["id"], [
+                {"title": "Imported", "prompt": "one"},
+                {"title": "Overflow", "prompt": "two"},
+            ])
+        self.assertEqual([card["title"] for card in cards], ["Imported"])
+        self.assertEqual(errors, [{"index": 1, "error": "favorite card limit reached"}])
+        with self.assertRaises(PromptCardLibraryValidationError):
+            self.store.import_cards(primary["id"], [])
+        with self.assertRaises(PromptCardLibraryValidationError):
+            self.store.import_cards(secondary["id"], {})
+
+    def test_batch_import_replacement_failure_preserves_the_existing_library(self):
+        _primary, secondary = self.create_branch()
+        before = Path(self.path).read_bytes()
+        with mock.patch.object(library_module.os, "replace", side_effect=OSError("failed")):
+            with self.assertRaises(OSError):
+                self.store.import_cards(secondary["id"], [
+                    {"title": "Imported", "prompt": "prompt"},
+                ])
+        self.assertEqual(Path(self.path).read_bytes(), before)
+        self.assertEqual(
+            [path.name for path in Path(self.path).parent.iterdir()],
+            [Path(self.path).name],
+        )
+
     def test_sibling_names_are_case_insensitive_but_other_parents_may_reuse_names(self):
         first, first_child = self.create_branch("First", "People")
         second, _revision = self.store.create_category("Second")
