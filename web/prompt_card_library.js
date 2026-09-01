@@ -1356,6 +1356,9 @@ export function openPromptCardLibraryMenu({
     let renderPrimaryDragPreview = null;
     let renderSecondaryDragPreview = null;
     const deleteController = createFavoriteDeleteController({ root, isBusy: () => busy });
+    const isCategoryNavigationLocked = () => Boolean(editingFavoriteId)
+        || Boolean(editingCategoryId)
+        || creatingParentId !== undefined;
 
     const hideFavoriteTooltip = () => {
         favoriteTooltipGeneration += 1;
@@ -2609,6 +2612,7 @@ export function openPromptCardLibraryMenu({
     const configureCategoryDropList = (list, parentId, categories) => {
         list.dataset.categoryOrderList = parentId ?? "root";
         list.addEventListener("dragover", (event) => {
+            if (isCategoryNavigationLocked()) return;
             if (!draggingCategoryId) return;
             const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
             const allowed = dragged?.parent_id === null ? parentId === null : parentId !== null;
@@ -2620,6 +2624,7 @@ export function openPromptCardLibraryMenu({
             updateCategoryDragScroll(list, event.clientY);
         });
         list.addEventListener("drop", (event) => {
+            if (isCategoryNavigationLocked()) return;
             if (!draggingCategoryId || categoryDragTargetParentId !== parentId) return;
             event.preventDefault();
             event.stopPropagation();
@@ -2694,12 +2699,14 @@ export function openPromptCardLibraryMenu({
 
     const categoryRow = (category, level) => {
         if (editingCategoryId === category.id) return categoryEditor(category, category.parent_id);
+        const categoryControlsLocked = isCategoryNavigationLocked();
         const wrapper = element("div", "cpw-prompt-card-library__row-wrap");
         wrapper.dataset.categoryId = category.id;
         const row = element("div", "cpw-prompt-card-library__row");
-        row.draggable = true;
+        row.draggable = !categoryControlsLocked;
         const button = element("button", "cpw-prompt-card-library__row-main", category.name);
         button.type = "button";
+        button.disabled = categoryControlsLocked;
         button.dataset.libraryLevel = String(level);
         button.dataset.categoryId = category.id;
         button.title = t("Drag to reorder; right-click for category actions");
@@ -2716,7 +2723,7 @@ export function openPromptCardLibraryMenu({
         chevron.setAttribute("aria-hidden", "true");
         button.append(chevron);
         button.addEventListener("pointerenter", () => {
-            if (busy || draggingCategoryId) return;
+            if (busy || draggingCategoryId || categoryControlsLocked) return;
             deleteController.disarm();
             hideFavoriteTooltip();
             if (level === 0) {
@@ -2732,6 +2739,7 @@ export function openPromptCardLibraryMenu({
             render();
         });
         button.addEventListener("click", () => {
+            if (categoryControlsLocked) return;
             deleteController.disarm();
             hideFavoriteTooltip();
             closeContextMenu();
@@ -2747,6 +2755,7 @@ export function openPromptCardLibraryMenu({
             } else chooseSecondary(category);
         });
         button.addEventListener("dragenter", (event) => {
+            if (categoryControlsLocked) return;
             if (draggingCategoryId) {
                 const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
                 if (level === 0 && dragged?.parent_id !== null) {
@@ -2775,6 +2784,7 @@ export function openPromptCardLibraryMenu({
             button.classList.add("cpw-prompt-card-library__row-main--drop-target");
         });
         button.addEventListener("dragover", (event) => {
+            if (categoryControlsLocked) return;
             if (draggingCategoryId) {
                 const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
                 if (level !== 0 || dragged?.parent_id === null) return;
@@ -2795,6 +2805,7 @@ export function openPromptCardLibraryMenu({
             button.classList.remove("cpw-prompt-card-library__row-main--drop-target");
         });
         button.addEventListener("drop", (event) => {
+            if (categoryControlsLocked) return;
             if (draggingCategoryId) {
                 const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
                 if (level !== 0 || dragged?.parent_id === null) return;
@@ -2813,7 +2824,7 @@ export function openPromptCardLibraryMenu({
             moveFavoriteToCategory(cardId, category);
         });
         const openActions = ({ x, y, focus = false }) => {
-            if (busy) return;
+            if (busy || categoryControlsLocked) return;
             const siblings = categoryChildren(library, category.parent_id);
             const categoryIndex = siblings.findIndex((candidate) => candidate.id === category.id);
             const items = [
@@ -2865,9 +2876,11 @@ export function openPromptCardLibraryMenu({
         row.addEventListener("contextmenu", (event) => {
             event.preventDefault();
             event.stopPropagation();
+            if (categoryControlsLocked) return;
             openActions({ x: event.clientX, y: event.clientY });
         });
         button.addEventListener("keydown", (event) => {
+            if (categoryControlsLocked) return;
             if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
             event.preventDefault();
             event.stopPropagation();
@@ -2875,7 +2888,7 @@ export function openPromptCardLibraryMenu({
             openActions({ x: rect.left + 8, y: rect.bottom + 4, focus: true });
         });
         row.addEventListener("dragstart", (event) => {
-            if (busy) {
+            if (busy || categoryControlsLocked) {
                 event.preventDefault();
                 return;
             }
@@ -2908,9 +2921,11 @@ export function openPromptCardLibraryMenu({
         if (backLevel !== null) {
             const back = element("button", "cpw-prompt-card-library__back", "‹");
             back.type = "button";
+            back.disabled = isCategoryNavigationLocked();
             back.title = t("Back");
             back.setAttribute("aria-label", t("Back"));
             back.addEventListener("click", () => {
+                if (isCategoryNavigationLocked()) return;
                 mobileLevel = backLevel;
                 render();
             });
@@ -2924,8 +2939,9 @@ export function openPromptCardLibraryMenu({
             add.type = "button";
             add.title = tooltip;
             add.setAttribute("aria-label", tooltip);
-            add.disabled = !isPrimary && !parentId;
+            add.disabled = isCategoryNavigationLocked() || (!isPrimary && !parentId);
             add.addEventListener("click", () => {
+                if (isCategoryNavigationLocked()) return;
                 if (!isPrimary && !parentId) return;
                 startCategoryEditor(null, isPrimary ? null : parentId);
             });
@@ -3227,6 +3243,8 @@ export function openPromptCardLibraryMenu({
         if (!editingFavorite || editingFavorite.category_id !== selectedSecondaryId) {
             editingFavoriteId = null;
         }
+        const categoryControlsLocked = isCategoryNavigationLocked();
+        root.classList.toggle("cpw-prompt-card-library--category-navigation-locked", categoryControlsLocked);
         if (mode === "assign" && !favoriteSelectionInitialized) {
             const favorite = currentFavorite();
             const secondary = favorite

@@ -490,8 +490,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-favorite-text-import-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-favorite-text-import-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-category-navigation-lock-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-category-navigation-lock-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -590,6 +590,13 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /label: t\("Move to Bottom"\)/);
     assert.match(favoriteSource, /label: t\("Rename"\),\s*onSelect: \(\) => startFavoriteEditor\(card\)/s);
     assert.match(favoriteSource, /const favoriteCardEditor = \(card\) => \{/);
+    assert.match(favoriteSource, /const isCategoryNavigationLocked = \(\) => Boolean\(editingFavoriteId\)[\s\S]*Boolean\(editingCategoryId\)[\s\S]*creatingParentId !== undefined;/);
+    assert.match(favoriteSource, /const categoryControlsLocked = isCategoryNavigationLocked\(\);/);
+    assert.match(favoriteSource, /row\.draggable = !categoryControlsLocked;/);
+    assert.match(favoriteSource, /button\.disabled = categoryControlsLocked;/);
+    assert.match(favoriteSource, /if \(busy \|\| draggingCategoryId \|\| categoryControlsLocked\) return;/);
+    assert.match(favoriteSource, /if \(isCategoryNavigationLocked\(\)\) return;[\s\S]*if \(!draggingCategoryId\) return;/);
+    assert.match(favoriteSource, /root\.classList\.toggle\("cpw-prompt-card-library--category-navigation-locked", categoryControlsLocked\)/);
     assert.doesNotMatch(favoriteSource, /cpw-prompt-card-library__favorite-rename-label/);
     assert.match(favoriteSource, /editor\.append\(input, cancel, confirm\)/);
     assert.match(favoriteSource, /client\.updateCard\(card\.id, \{ snapshot \}\)[\s\S]*t\("Favorite renamed\."\)/);
@@ -650,6 +657,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-library__row--dragging\s*\{[^}]*opacity:\s*0\.52;/s);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library__favorite-rename-label/);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-rename-cancel,\s*\.cpw-prompt-card-library__favorite-rename-confirm\s*\{[^}]*border-radius:\s*5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library--category-navigation-locked \.cpw-prompt-card-library__row-main:disabled\s*\{[^}]*opacity:\s*0\.58;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__row-main:hover:not\(:disabled\)/);
     assert.match(cssSource, /\.cpw-prompt-card-library__tooltip\s*\{[^}]*z-index:\s*2147483646;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__row-main--drop-target/);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-wrap--insert-before::before/);

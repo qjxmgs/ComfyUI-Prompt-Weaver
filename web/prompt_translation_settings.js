@@ -135,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260901-favorite-text-import-v1",
+        "./prompt_toggle_grid.css?v=20260901-category-navigation-lock-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

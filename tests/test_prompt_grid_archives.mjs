@@ -545,6 +545,10 @@ test("prompt grid cards expose the item context menu while text inputs keep nati
     assert.match(widgetSource, /document\.addEventListener\("scroll", onViewportChange, true\)/);
     assert.match(widgetSource, /window\.addEventListener\("resize", onViewportChange\)/);
     assert.match(widgetSource, /keyEvent\.key === "Escape"/);
+    assert.match(widgetSource, /root\.addEventListener\("wheel", \(event\) => \{/);
+    assert.match(widgetSource, /graphCanvas\.processMouseWheel\(event\)/);
+    assert.match(widgetSource, /canvasElement\.dispatchEvent\(new WheelEvent\("wheel", event\)\)/);
+    assert.match(widgetSource, /\}, \{ passive: false \}\);/);
     assert.match(styleSource, /\.cpw-prompt-grid__card--colored\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-grid__item-menu\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-grid__item-color\s*\{/);

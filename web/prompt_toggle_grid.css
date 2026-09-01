@@ -3536,6 +3536,11 @@
     border-left: 1px solid var(--border-color, #4b4d52);
 }
 
+.cpw-prompt-card-library--category-navigation-locked .cpw-prompt-card-library__row-main:disabled {
+    opacity: 0.58;
+    cursor: default;
+}
+
 .cpw-prompt-card-library__panel-header {
     height: 32px;
     min-height: 32px;
@@ -3600,6 +3605,11 @@
     background: transparent;
     font: 700 20px/1 Inter, system-ui, sans-serif;
     cursor: pointer;
+}
+
+.cpw-prompt-card-library__back:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
 }
 
 .cpw-prompt-card-library__list {
@@ -3726,7 +3736,7 @@
     cursor: grab;
 }
 
-.cpw-prompt-card-library__row-main:hover,
+.cpw-prompt-card-library__row-main:hover:not(:disabled),
 .cpw-prompt-card-library__row-main:focus-visible,
 .cpw-prompt-card-library__row-main--selected {
     outline: 0;
