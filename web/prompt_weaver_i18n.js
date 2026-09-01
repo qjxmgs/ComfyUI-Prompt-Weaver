@@ -72,6 +72,7 @@ const CHINESE_MESSAGES = Object.freeze({
     "Primary Categories": "一级分类",
     "Secondary Categories": "二级分类",
     "Favorite Cards": "收藏卡片",
+    "Favorite Cards Manager": "收藏卡片管理",
     "Remove {name} from favorites": "从收藏中删除 {name}",
     "Click again to remove {name}": "再次点击删除 {name}",
     "Removing {name}…": "正在删除 {name}…",

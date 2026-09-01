@@ -15,7 +15,7 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const moduleSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,
@@ -396,7 +396,7 @@ test("archive toolbar keeps icon actions ordered and the archive group on one li
     );
     assert.match(
         toolbarSource,
-        /archiveGroup\.append\(\s*archiveSelect,\s*quickSaveArchiveButton,\s*restoreArchiveButton,\s*manageArchivesButton,/,
+        /archiveGroup\.append\(\s*archiveSelect,\s*quickSaveArchiveButton,\s*restoreArchiveButton,\s*manageArchivesButton,\s*manageFavoritesButton,/,
     );
     assert.match(
         styleSource,
@@ -404,7 +404,7 @@ test("archive toolbar keeps icon actions ordered and the archive group on one li
     );
     assert.match(
         toolbarSource,
-        /cpw-prompt-grid__archive-action-icon--save[\s\S]*cpw-prompt-grid__archive-action-icon--restore[\s\S]*cpw-prompt-grid__archive-action-icon--manage/,
+        /cpw-prompt-grid__archive-action-icon--save[\s\S]*cpw-prompt-grid__archive-action-icon--restore[\s\S]*cpw-prompt-grid__archive-action-icon--manage[\s\S]*cpw-prompt-grid__archive-action-icon--favorite-manage/,
     );
     assert.match(toolbarSource, /button\.dataset\.tooltip = label/);
     assert.match(toolbarSource, /button\.setAttribute\("aria-label", label\)/);
@@ -412,6 +412,10 @@ test("archive toolbar keeps icon actions ordered and the archive group on one li
     assert.doesNotMatch(toolbarSource, /quickSaveArchiveButton\.textContent/);
     assert.doesNotMatch(toolbarSource, /restoreArchiveButton\.textContent/);
     assert.doesNotMatch(toolbarSource, /manageArchivesButton\.textContent/);
+    assert.doesNotMatch(toolbarSource, /manageFavoritesButton\.textContent/);
+    assert.match(toolbarSource, /mode:\s*"manage"/);
+    assert.match(toolbarSource, /manageFavoritesButton\.addEventListener\("click", openFavoriteManager\)/);
+    assert.match(styleSource, /ic_favorite_manage\.png/);
     assert.match(
         styleSource,
         /\.cpw-prompt-grid__archives\s*\{[^}]*flex-wrap:\s*nowrap;/s,
@@ -482,13 +486,21 @@ test("prompt grid toolbar uses one accessible three-state master toggle", async 
     );
 });
 
-test("archive toolbar icon assets are valid 64px PNG files", async () => {
+test("toolbar and favorite icon assets are valid PNG files", async () => {
     for (const fileName of ["ic_save.png", "ic_restore.png", "ic_manage.png"]) {
         const png = await readFile(
             new URL(`../web/assets/icons/${fileName}`, import.meta.url),
         );
         assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
         assert.equal(png.readUInt32BE(16), 64);
+        assert.equal(png.readUInt32BE(20), 64);
+    }
+    for (const [fileName, width] of [["ic_favorite.png", 67], ["ic_favorite_manage.png", 85]]) {
+        const png = await readFile(
+            new URL(`../web/assets/icons/${fileName}`, import.meta.url),
+        );
+        assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+        assert.equal(png.readUInt32BE(16), width);
         assert.equal(png.readUInt32BE(20), 64);
     }
 });

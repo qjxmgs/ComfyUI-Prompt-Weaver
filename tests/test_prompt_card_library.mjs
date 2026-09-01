@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -442,8 +442,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-secondary-editor-alignment-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-secondary-editor-alignment-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-favorite-manager-toolbar-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-favorite-manager-toolbar-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -483,6 +483,10 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /renderOpenBranch\(\)/);
     assert.match(favoriteSource, /root\.setAttribute\("aria-label", t\("Favorite Cards"\)\)/);
     assert.match(favoriteSource, /__heading", t\("Favorite Cards"\)\)/);
+    assert.match(favoriteSource, /root\.classList\.toggle\("cpw-prompt-card-library--manage", mode === "manage"\)/);
+    assert.match(favoriteSource, /const canManageOrder = mode === "assign" \|\| mode === "manage";/);
+    assert.match(favoriteSource, /if \(mode === "browse"\) \{[\s\S]*onChooseCard\?\.\(card\);/);
+    assert.match(favoriteSource, /const overwriteButton = mode === "assign"/);
     assert.match(favoriteSource, /t\("Close favorite cards"\)/);
     assert.match(favoriteSource, /t\("Favorite card library data is invalid\."\)/);
     assert.match(favoriteSource, /t\("Favorite card library request failed \(HTTP \{status\}\)"/);
@@ -507,13 +511,13 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /client\.updateCard\(card\.id, \{ snapshot \}\)/);
     assert.match(favoriteSource, /event\.target\?\.closest\?\.\("\.cpw-prompt-card-confirm__overlay"\)/);
     assert.match(favoriteSource, /button\.addEventListener\("pointerenter"[\s\S]*selectedSecondaryId = category\.id;[\s\S]*mobileLevel = 2;[\s\S]*render\(\);/);
-    assert.match(favoriteSource, /mode === "assign" \? "div" : "button"/);
-    assert.match(favoriteSource, /if \(mode !== "assign"\) \{\s*choose\.addEventListener\("click"/s);
+    assert.match(favoriteSource, /canManageOrder \? "div" : "button"/);
+    assert.match(favoriteSource, /if \(mode === "browse"\) \{\s*choose\.addEventListener\("click"/s);
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-overwrite", t\("Overwrite"\)/);
     assert.match(favoriteSource, /overwriteButton\.addEventListener\("click"[\s\S]*overwriteFavoriteFromDraft\(card\)/);
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-count/);
     assert.match(favoriteSource, /deleteController\.createButton\(\{[\s\S]*className: "cpw-prompt-card-library__favorite-delete"/);
-    assert.match(favoriteSource, /row\.draggable = mode === "assign"/);
+    assert.match(favoriteSource, /row\.draggable = canManageOrder/);
     assert.match(favoriteSource, /client\.reorderCards\(categoryId, reordered\.ids\)/);
     assert.match(favoriteSource, /client\.positionCard\(card\.id, category\.id, insertionIndex\)/);
     assert.match(favoriteSource, /client\.positionCategory\(category\.id, target\.parentId, target\.index\)/);
@@ -578,6 +582,9 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-library__inline-save,\s*\.cpw-prompt-card-library__inline-cancel\s*\{[^}]*height:\s*31px;[^}]*min-height:\s*31px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__status\s*\{[^}]*display:\s*inline-flex;[^}]*border-radius:\s*5px;[^}]*clip-path:\s*inset\(0 100% 0 0 round 5px\);[^}]*transition:/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__status--visible\s*\{[^}]*clip-path:\s*inset\(0 0 0 0 round 5px\);[^}]*opacity:\s*1;/s);
+    assert.match(cssSource, /\.cpw-prompt-grid__archive-action-icon--favorite-manage\s*\{[^}]*ic_favorite_manage\.png/s);
+    assert.match(cssSource, /\.cpw-prompt-editor__favorite-icon\s*\{[^}]*width:\s*16px;[^}]*height:\s*16px;[^}]*ic_favorite\.png/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library--manage \.cpw-prompt-card-library__favorite-row/);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-add\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*right:\s*3px;[^}]*transform:\s*translateY\(-50%\);/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);[^}]*border-radius:\s*5px;/s);

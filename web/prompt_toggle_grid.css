@@ -611,6 +611,16 @@
     --cpw-archive-action-icon: url("./assets/icons/ic_manage.png");
 }
 
+.cpw-prompt-grid__archive-action-icon--favorite-manage {
+    --cpw-archive-action-icon: url("./assets/icons/ic_favorite_manage.png");
+}
+
+.cpw-prompt-grid__favorite-manage[aria-expanded="true"] {
+    border-color: var(--p-primary-color, #7c6df2);
+    color: color-mix(in srgb, var(--p-primary-color, #7c6df2) 82%, var(--input-text, #fff));
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 16%, var(--comfy-input-bg, #17181a));
+}
+
 .cpw-prompt-grid__archive-action::after {
     position: absolute;
     top: calc(100% + 4px);
@@ -3082,6 +3092,8 @@
 .cpw-prompt-editor__favorite-icon {
     width: 16px;
     height: 16px;
+    -webkit-mask: url("./assets/icons/ic_favorite.png") center / contain no-repeat;
+    mask: url("./assets/icons/ic_favorite.png") center / contain no-repeat;
 }
 
 .cpw-prompt-card-cascade {
@@ -3883,11 +3895,13 @@
     cursor: wait;
 }
 
-.cpw-prompt-card-library--assign .cpw-prompt-card-library__favorite-row {
+.cpw-prompt-card-library--assign .cpw-prompt-card-library__favorite-row,
+.cpw-prompt-card-library--manage .cpw-prompt-card-library__favorite-row {
     cursor: grab;
 }
 
-.cpw-prompt-card-library--assign .cpw-prompt-card-library__favorite-main {
+.cpw-prompt-card-library--assign .cpw-prompt-card-library__favorite-main,
+.cpw-prompt-card-library--manage .cpw-prompt-card-library__favorite-main {
     cursor: grab;
 }
 

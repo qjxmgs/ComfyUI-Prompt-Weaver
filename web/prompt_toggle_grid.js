@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260901-secondary-editor-alignment-v1";
+} from "./prompt_card_library.js?v=20260901-favorite-manager-toolbar-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1";
+} from "./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -90,7 +90,7 @@ import {
 import {
     promptGridMasterToggleState,
     toggleAllPromptGridItems,
-} from "./prompt_grid_controls.js?v=20260901-secondary-editor-alignment-v1";
+} from "./prompt_grid_controls.js?v=20260901-favorite-manager-toolbar-v1";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -704,7 +704,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260901-secondary-editor-alignment-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260901-favorite-manager-toolbar-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -796,9 +796,20 @@ function createPromptGridWidget(node, inputName, inputData) {
         "span",
         "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--manage",
     ));
+    const manageFavoritesButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-action cpw-prompt-grid__favorite-manage",
+    );
+    manageFavoritesButton.append(element(
+        "span",
+        "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--favorite-manage",
+    ));
     quickSaveArchiveButton.type = "button";
     restoreArchiveButton.type = "button";
     manageArchivesButton.type = "button";
+    manageFavoritesButton.type = "button";
+    manageFavoritesButton.setAttribute("aria-haspopup", "dialog");
+    manageFavoritesButton.setAttribute("aria-expanded", "false");
     const setArchiveActionLabel = (button, label) => {
         button.dataset.tooltip = label;
         button.setAttribute("aria-label", label);
@@ -806,11 +817,13 @@ function createPromptGridWidget(node, inputName, inputData) {
     setArchiveActionLabel(quickSaveArchiveButton, t("Save"));
     setArchiveActionLabel(restoreArchiveButton, t("Restore"));
     setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
+    setArchiveActionLabel(manageFavoritesButton, t("Favorite Cards Manager"));
     archiveGroup.append(
         archiveSelect,
         quickSaveArchiveButton,
         restoreArchiveButton,
         manageArchivesButton,
+        manageFavoritesButton,
     );
 
     const leadingControls = element("div", "cpw-prompt-grid__leading-controls");
@@ -911,6 +924,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         setArchiveActionLabel(quickSaveArchiveButton, t("Save"));
         setArchiveActionLabel(restoreArchiveButton, t("Restore"));
         setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
+        setArchiveActionLabel(manageFavoritesButton, t("Favorite Cards Manager"));
         addButton.textContent = t("+ Add Card");
         syncMasterToggle();
         errorTitle.textContent = t("Configuration could not be read");
@@ -2571,6 +2585,26 @@ function createPromptGridWidget(node, inputName, inputData) {
         const menu = activePromptCardLibraryMenu;
         activePromptCardLibraryMenu = null;
         menu?.close?.({ restoreFocus });
+    }
+
+    function openFavoriteManager() {
+        closePromptCardLibraryMenu(false);
+        let controller = null;
+        controller = openPromptCardLibraryMenu({
+            service: promptCardLibraryService,
+            anchor: manageFavoritesButton,
+            mode: "manage",
+            resolvePromptTip: resolveFavoriteCardPromptTip,
+            onClose: () => {
+                if (activePromptCardLibraryMenu === controller) {
+                    activePromptCardLibraryMenu = null;
+                }
+                manageFavoritesButton.setAttribute("aria-expanded", "false");
+            },
+        });
+        controller.anchor = manageFavoritesButton;
+        activePromptCardLibraryMenu = controller;
+        manageFavoritesButton.setAttribute("aria-expanded", "true");
     }
 
     function switchItemToFavorite(itemId, favorite) {
@@ -4798,6 +4832,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     quickSaveArchiveButton.addEventListener("click", quickSaveActiveArchive);
     restoreArchiveButton.addEventListener("click", restoreActiveArchive);
     manageArchivesButton.addEventListener("click", openArchiveManager);
+    manageFavoritesButton.addEventListener("click", openFavoriteManager);
     resetButton.addEventListener("click", () => {
         state = createDefaultConfig();
         parseError = null;

@@ -1,4 +1,4 @@
-import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1";
+import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,

@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-manager-toolbar-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -1240,6 +1240,7 @@ export function openPromptCardLibraryMenu({
 }) {
     const root = element("section", "cpw-prompt-card-library");
     root.classList.toggle("cpw-prompt-card-library--assign", mode === "assign");
+    root.classList.toggle("cpw-prompt-card-library--manage", mode === "manage");
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-label", t("Favorite Cards"));
     root.tabIndex = -1;
@@ -2783,21 +2784,22 @@ export function openPromptCardLibraryMenu({
 
     const favoriteCardRow = (card) => {
         if (editingFavoriteId === card.id) return favoriteCardEditor(card);
+        const canManageOrder = mode === "assign" || mode === "manage";
         const cardName = card.title.trim() || t("Untitled Card");
         const wrapper = element("div", "cpw-prompt-card-library__favorite-wrap");
         wrapper.dataset.favoriteCardId = card.id;
         const row = element("div", "cpw-prompt-card-library__favorite-row");
         const choose = element(
-            mode === "assign" ? "div" : "button",
+            canManageOrder ? "div" : "button",
             "cpw-prompt-card-library__favorite-main",
         );
-        if (mode === "assign") {
+        if (canManageOrder) {
             choose.tabIndex = 0;
             choose.setAttribute("role", "group");
         } else {
             choose.type = "button";
         }
-        choose.setAttribute("aria-label", mode === "assign" ? cardName : t("Choose {name}", { name: cardName }));
+        choose.setAttribute("aria-label", canManageOrder ? cardName : t("Choose {name}", { name: cardName }));
         choose.setAttribute("aria-haspopup", "menu");
         const titleLine = element("span", "cpw-prompt-card-library__favorite-title-line");
         const title = element("strong", "cpw-prompt-card-library__favorite-title", cardName);
@@ -2813,7 +2815,7 @@ export function openPromptCardLibraryMenu({
         choose.addEventListener("blur", () => {
             if (!choose.matches(":hover")) hideFavoriteTooltip();
         });
-        if (mode !== "assign") {
+        if (mode === "browse") {
             choose.addEventListener("click", () => {
                 closeContextMenu();
                 onChooseCard?.(card);
@@ -2881,12 +2883,12 @@ export function openPromptCardLibraryMenu({
             const rect = choose.getBoundingClientRect();
             openActions({ x: rect.left + 8, y: rect.bottom + 4, focus: true });
         });
-        row.draggable = mode === "assign";
+        row.draggable = canManageOrder;
         row.dataset.favoriteDragId = card.id;
         row.addEventListener("dragstart", (event) => {
             if (
                 busy
-                || mode !== "assign"
+                || !canManageOrder
                 || event.target.closest?.(
                     ".cpw-prompt-card-library__favorite-overwrite, .cpw-prompt-card-library__favorite-delete",
                 )
