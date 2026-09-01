@@ -1,4 +1,4 @@
-import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1";
+import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,

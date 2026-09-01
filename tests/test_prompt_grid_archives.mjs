@@ -15,7 +15,7 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const moduleSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,

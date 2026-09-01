@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -14,6 +14,8 @@ const MAX_PRIMARY_CATEGORIES = 100;
 const MAX_SECONDARY_CATEGORIES = 500;
 const MAX_FAVORITE_CARDS = 2_000;
 const FAVORITE_DELETE_CONFIRM_MS = 3_000;
+const FAVORITE_STATUS_VISIBLE_MS = 3_000;
+const FAVORITE_STATUS_TRANSITION_MS = 180;
 const FAVORITE_GEOMETRY_STORAGE_KEY = "prompt-weaver-prompt-card-library-geometry-v1";
 const FAVORITE_WINDOW_MARGIN = 8;
 const FAVORITE_WINDOW_MIN_WIDTH = 340;
@@ -1247,11 +1249,13 @@ export function openPromptCardLibraryMenu({
     closeButton.type = "button";
     closeButton.title = t("Close");
     closeButton.setAttribute("aria-label", t("Close favorite cards"));
-    header.append(heading, closeButton);
     const status = element("div", "cpw-prompt-card-library__status");
+    const statusText = element("span", "cpw-prompt-card-library__status-text");
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
+    status.append(statusText);
     status.hidden = true;
+    header.append(heading, status, closeButton);
     const panels = element("div", "cpw-prompt-card-library__panels");
     const resizeHandle = element("div", "cpw-prompt-card-library__resize-handle");
     resizeHandle.tabIndex = 0;
@@ -1259,7 +1263,7 @@ export function openPromptCardLibraryMenu({
     resizeHandle.setAttribute("aria-orientation", "horizontal");
     resizeHandle.title = t("Resize Favorite Cards");
     resizeHandle.setAttribute("aria-label", t("Resize Favorite Cards"));
-    root.append(header, status, panels, resizeHandle);
+    root.append(header, panels, resizeHandle);
     document.body.append(root);
 
     let library = service.library;
@@ -1293,6 +1297,8 @@ export function openPromptCardLibraryMenu({
     let categoryDragScrollSpeed = 0;
     let categoryDragScrollList = null;
     let categoryDragClientY = null;
+    let statusVisibleTimer = 0;
+    let statusHideTimer = 0;
     let geometryInitialized = false;
     let windowMoveSession = null;
     let windowResizeSession = null;
@@ -1518,10 +1524,34 @@ export function openPromptCardLibraryMenu({
     };
 
     const setStatus = (message = "", error = false) => {
-        const visible = Boolean(message) && Boolean(error);
-        status.textContent = visible ? message : "";
-        status.hidden = !visible;
-        status.classList.toggle("cpw-prompt-card-library__status--error", visible);
+        if (statusVisibleTimer) clearTimeout(statusVisibleTimer);
+        if (statusHideTimer) clearTimeout(statusHideTimer);
+        statusVisibleTimer = 0;
+        statusHideTimer = 0;
+        const text = String(message || "");
+        if (!text) {
+            status.classList.remove("cpw-prompt-card-library__status--visible");
+            statusHideTimer = setTimeout(() => {
+                statusHideTimer = 0;
+                status.hidden = true;
+                status.title = "";
+                status.removeAttribute("aria-label");
+            }, FAVORITE_STATUS_TRANSITION_MS);
+            return;
+        }
+        statusText.textContent = text;
+        status.replaceChildren(statusText);
+        status.hidden = false;
+        status.title = text;
+        status.setAttribute("aria-label", text);
+        status.classList.toggle("cpw-prompt-card-library__status--error", Boolean(error));
+        status.classList.remove("cpw-prompt-card-library__status--visible");
+        void status.offsetWidth;
+        status.classList.add("cpw-prompt-card-library__status--visible");
+        statusVisibleTimer = setTimeout(() => {
+            statusVisibleTimer = 0;
+            setStatus("");
+        }, FAVORITE_STATUS_VISIBLE_MS);
     };
 
     const setRetryStatus = (message) => {
@@ -1539,9 +1569,22 @@ export function openPromptCardLibraryMenu({
                 setRetryStatus(error instanceof Error ? error.message : String(error));
             }
         });
+        if (statusVisibleTimer) clearTimeout(statusVisibleTimer);
+        if (statusHideTimer) clearTimeout(statusHideTimer);
+        statusVisibleTimer = 0;
+        statusHideTimer = 0;
         status.replaceChildren(text, retry);
         status.hidden = false;
+        status.title = message;
+        status.setAttribute("aria-label", message);
         status.classList.add("cpw-prompt-card-library__status--error");
+        status.classList.remove("cpw-prompt-card-library__status--visible");
+        void status.offsetWidth;
+        status.classList.add("cpw-prompt-card-library__status--visible");
+        statusVisibleTimer = setTimeout(() => {
+            statusVisibleTimer = 0;
+            setStatus("");
+        }, FAVORITE_STATUS_VISIBLE_MS);
     };
 
     const currentFavorite = () => {
@@ -1600,6 +1643,10 @@ export function openPromptCardLibraryMenu({
         if (closed) return;
         persistGeometry();
         closed = true;
+        if (statusVisibleTimer) clearTimeout(statusVisibleTimer);
+        if (statusHideTimer) clearTimeout(statusHideTimer);
+        statusVisibleTimer = 0;
+        statusHideTimer = 0;
         deleteController.destroy();
         hideFavoriteTooltip();
         clearDragState();
@@ -1620,11 +1667,7 @@ export function openPromptCardLibraryMenu({
     };
 
     const position = () => {
-        if (closed) return;
-        if (geometryInitialized) {
-            applyGeometry(currentGeometry());
-            return;
-        }
+        if (closed || geometryInitialized) return;
         const stored = normalizePromptCardLibraryGeometry(readStoredGeometry(), {
             viewportWidth: window.innerWidth,
             viewportHeight: window.innerHeight,
@@ -1664,7 +1707,8 @@ export function openPromptCardLibraryMenu({
 
     const onViewportResize = () => {
         closeContextMenu();
-        position();
+        if (geometryInitialized) applyGeometry(currentGeometry());
+        else position();
         positionFavoriteTooltip();
     };
 

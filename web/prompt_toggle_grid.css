@@ -3327,11 +3327,14 @@
 }
 
 .cpw-prompt-card-library__header {
+    height: 38px;
     min-height: 38px;
+    flex: 0 0 38px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    justify-content: flex-start;
+    gap: 8px;
+    overflow: hidden;
     padding: 6px 7px 6px 11px;
     border-bottom: 1px solid var(--border-color, #4b4d52);
     background: color-mix(in srgb, var(--comfy-menu-bg, #202124) 84%, var(--p-primary-color, #7c6df2) 16%);
@@ -3346,6 +3349,7 @@
 
 .cpw-prompt-card-library__heading {
     min-width: 0;
+    flex: 0 0 auto;
     overflow: hidden;
     font-size: 13px;
     text-overflow: ellipsis;
@@ -3356,6 +3360,7 @@
     width: 26px;
     height: 26px;
     min-width: 26px;
+    margin-left: auto;
     display: grid;
     place-items: center;
     padding: 0;
@@ -3380,20 +3385,57 @@
 }
 
 .cpw-prompt-card-library__status {
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border-color, #4b4d52);
+    min-width: 0;
+    max-width: min(420px, calc(100% - 104px));
+    min-height: 24px;
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--p-primary-color, #7c6df2) 42%, transparent);
+    border-radius: 5px;
     color: var(--descrip-text, #aaa);
     background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 9%, transparent);
-    white-space: normal;
+    clip-path: inset(0 100% 0 0 round 5px);
+    opacity: 0;
+    transform: translateX(-5px);
+    transform-origin: left center;
+    transition:
+        clip-path 180ms ease,
+        opacity 140ms ease,
+        transform 180ms ease;
+    white-space: nowrap;
+}
+
+.cpw-prompt-card-library__status[hidden] {
+    display: none;
+}
+
+.cpw-prompt-card-library__status--visible {
+    clip-path: inset(0 0 0 0 round 5px);
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.cpw-prompt-card-library__status-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .cpw-prompt-card-library__status--error {
+    border-color: color-mix(in srgb, var(--error-text, #ef7777) 62%, transparent);
     color: var(--error-text, #ef7777);
     background: color-mix(in srgb, var(--error-text, #ef7777) 10%, transparent);
 }
 
 .cpw-prompt-card-library__retry {
-    margin-left: 8px;
+    margin-left: 3px;
+    flex: 0 0 auto;
     padding: 2px 8px;
     border: 1px solid currentColor;
     border-radius: 4px;
@@ -4102,7 +4144,8 @@
 
 @media (prefers-reduced-motion: reduce) {
     .cpw-prompt-grid__favorite-switch,
-    .cpw-prompt-card-cascade__panel {
+    .cpw-prompt-card-cascade__panel,
+    .cpw-prompt-card-library__status {
         transition: none;
     }
 

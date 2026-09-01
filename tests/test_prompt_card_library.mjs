@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -442,8 +442,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-favorite-category-order-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-favorite-category-order-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-favorite-panel-stability-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-favorite-panel-stability-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -487,7 +487,11 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /t\("Favorite card library data is invalid\."\)/);
     assert.match(favoriteSource, /t\("Favorite card library request failed \(HTTP \{status\}\)"/);
     assert.doesNotMatch(favoriteSource, /Prompt Card Favorites|prompt card favorites/);
-    assert.match(favoriteSource, /const visible = Boolean\(message\) && Boolean\(error\);/);
+    assert.match(favoriteSource, /FAVORITE_STATUS_VISIBLE_MS = 3_000/);
+    assert.match(favoriteSource, /header\.append\(heading, status, closeButton\)/);
+    assert.match(favoriteSource, /root\.append\(header, panels, resizeHandle\)/);
+    assert.doesNotMatch(favoriteSource, /root\.append\(header, status, panels/);
+    assert.match(favoriteSource, /statusVisibleTimer = setTimeout\(\(\) => \{[\s\S]*setStatus\(""\);[\s\S]*FAVORITE_STATUS_VISIBLE_MS/);
     assert.match(favoriteSource, /panelHeader\(t\("Primary Categories"\), \{ createLevel: "primary" \}\)/);
     assert.match(favoriteSource, /panelHeader\(t\("Secondary Categories"\), \{/);
     assert.match(favoriteSource, /panelHeader\(t\("My Favorites"\), \{[\s\S]*backLevel: 1,[\s\S]*action: mode === "assign"/);
@@ -531,6 +535,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /client\.updateCard\(card\.id, \{ snapshot \}\)[\s\S]*t\("Favorite renamed\."\)/);
     assert.match(favoriteSource, /FAVORITE_GEOMETRY_STORAGE_KEY/);
     assert.match(favoriteSource, /localStorage\.setItem\(FAVORITE_GEOMETRY_STORAGE_KEY/);
+    assert.match(favoriteSource, /const position = \(\) => \{\s*if \(closed \|\| geometryInitialized\) return;/);
+    assert.match(favoriteSource, /const onViewportResize = \(\) => \{[\s\S]*if \(geometryInitialized\) applyGeometry\(currentGeometry\(\)\);[\s\S]*else position\(\);/);
     assert.match(favoriteSource, /cpw-prompt-card-library__resize-handle/);
     assert.match(favoriteSource, /header\.addEventListener\("pointerdown"/);
     assert.match(favoriteSource, /application\/x-prompt-weaver-favorite-id/);
@@ -561,7 +567,10 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*190px\s+190px\s+minmax\(240px,\s*1fr\);/s);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__header\s*\{[^}]*height:\s*38px;[^}]*min-height:\s*38px;[^}]*flex:\s*0 0 38px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-header\s*\{[^}]*height:\s*32px;[^}]*min-height:\s*32px;[^}]*flex:\s*0 0 32px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__status\s*\{[^}]*display:\s*inline-flex;[^}]*border-radius:\s*5px;[^}]*clip-path:\s*inset\(0 100% 0 0 round 5px\);[^}]*transition:/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__status--visible\s*\{[^}]*clip-path:\s*inset\(0 0 0 0 round 5px\);[^}]*opacity:\s*1;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-add\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*right:\s*3px;[^}]*transform:\s*translateY\(-50%\);/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);[^}]*border-radius:\s*5px;/s);
