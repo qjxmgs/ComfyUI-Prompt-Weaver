@@ -3666,6 +3666,7 @@
 
 .cpw-prompt-card-library__row-main {
     min-width: 0;
+    height: 31px;
     min-height: 31px;
     flex: 1 1 auto;
     display: flex;
@@ -3765,15 +3766,18 @@
 }
 
 .cpw-prompt-card-library__inline-editor {
+    height: 31px;
+    min-height: 31px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
     gap: 3px;
-    padding: 3px;
+    padding: 0;
 }
 
 .cpw-prompt-card-library__category-input {
     min-width: 0;
-    height: 28px;
+    height: 31px;
     padding: 4px 6px;
     border: 1px solid var(--p-primary-color, #7c6df2);
     border-radius: 4px;
@@ -3785,7 +3789,8 @@
 
 .cpw-prompt-card-library__inline-save,
 .cpw-prompt-card-library__inline-cancel {
-    min-height: 28px;
+    height: 31px;
+    min-height: 31px;
     padding: 3px 5px;
     border-radius: 4px;
 }

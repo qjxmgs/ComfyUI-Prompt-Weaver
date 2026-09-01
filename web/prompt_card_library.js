@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -2689,7 +2689,7 @@ export function openPromptCardLibraryMenu({
             secondaryList.append(element(
                 "div",
                 "cpw-prompt-card-library__empty",
-                t("Create a secondary category for favorite cards."),
+                t("Create a secondary category."),
             ));
         }
         secondaryPanel.replaceChildren(
@@ -2997,11 +2997,11 @@ export function openPromptCardLibraryMenu({
         if (primary) {
             if (secondaryCategories.length) {
                 for (const category of secondaryCategories) secondaryList.append(categoryRow(category, 1));
-            } else {
-                secondaryList.append(element("div", "cpw-prompt-card-library__empty", t("Create a secondary category for favorite cards.")));
             }
             if (creatingParentId === primary.id) {
                 secondaryList.append(categoryEditor(null, primary.id));
+            } else if (!secondaryCategories.length) {
+                secondaryList.append(element("div", "cpw-prompt-card-library__empty", t("Create a secondary category.")));
             }
             configureCategoryDropList(secondaryList, primary.id, secondaryCategories);
         } else {

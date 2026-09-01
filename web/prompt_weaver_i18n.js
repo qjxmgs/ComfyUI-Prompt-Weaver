@@ -79,7 +79,7 @@ const CHINESE_MESSAGES = Object.freeze({
     "New Primary Category": "新建一级分类",
     "New Secondary Category": "新建二级分类",
     "Create a primary category to begin.": "请先新建一级分类。",
-    "Create a secondary category for favorite cards.": "请新建用于存放收藏卡片的二级分类。",
+    "Create a secondary category.": "请新建二级分类",
     "There are no primary categories.": "暂无一级分类。",
     "There are no secondary categories.": "暂无二级分类。",
     "Choose a primary category.": "请选择一级分类。",

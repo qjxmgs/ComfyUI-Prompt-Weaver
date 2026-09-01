@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-panel-stability-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260901-secondary-editor-alignment-v1";
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const DEFAULT_RESULT_LIMIT = 30;
