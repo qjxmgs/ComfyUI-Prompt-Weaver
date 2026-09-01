@@ -601,6 +601,37 @@ async def update_prompt_card_library_category(request):
         return _prompt_card_library_error_response(error)
 
 
+@PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/categories/{category_id}/position")
+async def position_prompt_card_library_category(request):
+    try:
+        payload = await _request_json(
+            request,
+            16 * 1024,
+            PromptCardLibraryCapacityError,
+            PromptCardLibraryValidationError,
+        )
+        store = _prompt_card_library_store(request)
+        changed, category, revision = store.position_category(
+            request.match_info["category_id"],
+            payload.get("parent_id"),
+            payload.get("index"),
+        )
+        return web.json_response({
+            "changed": changed,
+            "category": category,
+            "revision": revision,
+            "library": store.list_library(),
+        })
+    except (
+        PromptCardLibraryValidationError,
+        PromptCardLibraryConflictError,
+        PromptCardLibraryNotFoundError,
+        PromptCardLibraryCapacityError,
+        PromptCardLibraryCorruptError,
+    ) as error:
+        return _prompt_card_library_error_response(error)
+
+
 @PromptServer.instance.routes.delete("/prompt-weaver/prompt-card-library/categories/{category_id}")
 async def delete_prompt_card_library_category(request):
     try:

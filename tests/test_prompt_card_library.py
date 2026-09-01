@@ -82,6 +82,81 @@ class PromptCardLibraryStoreTests(unittest.TestCase):
         reused, _revision = self.store.create_category("People", second["id"])
         self.assertEqual(reused["name"], first_child["name"])
 
+    def test_category_position_reorders_primary_and_secondary_siblings(self):
+        first, first_child = self.create_branch("First", "One")
+        second, second_child = self.create_branch("Second", "Two")
+        third, before_revision = self.store.create_category("Third")
+        extra, before_secondary_revision = self.store.create_category("Three", second["id"])
+
+        changed, positioned, revision = self.store.position_category(third["id"], None, 0)
+        self.assertTrue(changed)
+        self.assertEqual(positioned["id"], third["id"])
+        self.assertEqual(revision, before_secondary_revision + 1)
+        self.assertEqual(
+            [item["id"] for item in self.store.list_library()["categories"] if item["parent_id"] is None],
+            [third["id"], first["id"], second["id"]],
+        )
+
+        changed, positioned, revision = self.store.position_category(extra["id"], second["id"], 0)
+        self.assertTrue(changed)
+        self.assertEqual(positioned["parent_id"], second["id"])
+        self.assertEqual(
+            [
+                item["id"]
+                for item in self.store.list_library()["categories"]
+                if item["parent_id"] == second["id"]
+            ],
+            [extra["id"], second_child["id"]],
+        )
+        self.assertNotEqual(first_child["id"], second_child["id"])
+
+    def test_category_position_reparents_secondary_and_rejects_invalid_moves(self):
+        first, moving = self.create_branch("First", "Shared")
+        second, target_first = self.create_branch("Second", "Existing")
+        target_second, revision = self.store.create_category("Tail", second["id"])
+
+        changed, positioned, moved_revision = self.store.position_category(
+            moving["id"], second["id"], 1
+        )
+        self.assertTrue(changed)
+        self.assertEqual(moved_revision, revision + 1)
+        self.assertEqual(positioned["parent_id"], second["id"])
+        self.assertEqual(
+            [
+                item["id"]
+                for item in self.store.list_library()["categories"]
+                if item["parent_id"] == second["id"]
+            ],
+            [target_first["id"], moving["id"], target_second["id"]],
+        )
+        unchanged, _category, same_revision = self.store.position_category(
+            moving["id"], second["id"], 1
+        )
+        self.assertFalse(unchanged)
+        self.assertEqual(same_revision, moved_revision)
+
+        before = Path(self.path).read_bytes()
+        for category_id, parent_id, index in (
+            (first["id"], second["id"], 0),
+            (moving["id"], None, 0),
+            (moving["id"], target_first["id"], 0),
+            (moving["id"], second["id"], -1),
+            (moving["id"], second["id"], 4),
+            (moving["id"], second["id"], True),
+        ):
+            with self.subTest(category_id=category_id, parent_id=parent_id, index=index):
+                with self.assertRaises(PromptCardLibraryValidationError):
+                    self.store.position_category(category_id, parent_id, index)
+                self.assertEqual(Path(self.path).read_bytes(), before)
+
+    def test_category_reparent_rejects_duplicate_target_name(self):
+        _first, moving = self.create_branch("First", "Shared")
+        second, _existing = self.create_branch("Second", "Shared")
+        before = Path(self.path).read_bytes()
+        with self.assertRaises(PromptCardLibraryConflictError):
+            self.store.position_category(moving["id"], second["id"], 1)
+        self.assertEqual(Path(self.path).read_bytes(), before)
+
     def test_nonempty_secondary_delete_requires_and_applies_migration(self):
         _first, source = self.create_branch("人物", "角色")
         _second, target = self.create_branch("场景", "室内")

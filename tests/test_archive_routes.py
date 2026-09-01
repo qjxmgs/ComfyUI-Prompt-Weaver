@@ -710,6 +710,55 @@ class ArchiveRouteTests(unittest.TestCase):
         ))
         self.assertEqual(invalid.status, 400)
 
+    def test_prompt_card_library_category_position_route_reorders_and_reparents(self):
+        first = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        )).payload["category"]
+        second = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "服装", "parent_id": None})
+        )).payload["category"]
+        moving = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "角色", "parent_id": first["id"]})
+        )).payload["category"]
+        target = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "上衣", "parent_id": second["id"]})
+        )).payload["category"]
+
+        reordered = self.run_async(self.module.position_prompt_card_library_category(
+            _Request(
+                {"parent_id": None, "index": 0},
+                match_info={"category_id": second["id"]},
+            )
+        ))
+        self.assertEqual(reordered.status, 200)
+        self.assertTrue(reordered.payload["changed"])
+        self.assertEqual(
+            [
+                item["id"]
+                for item in reordered.payload["library"]["categories"]
+                if item["parent_id"] is None
+            ],
+            [second["id"], first["id"]],
+        )
+
+        moved = self.run_async(self.module.position_prompt_card_library_category(
+            _Request(
+                {"parent_id": second["id"], "index": 0},
+                match_info={"category_id": moving["id"]},
+            )
+        ))
+        self.assertEqual(moved.status, 200)
+        self.assertTrue(moved.payload["changed"])
+        self.assertEqual(moved.payload["category"]["parent_id"], second["id"])
+        self.assertEqual(
+            [
+                item["id"]
+                for item in moved.payload["library"]["categories"]
+                if item["parent_id"] == second["id"]
+            ],
+            [moving["id"], target["id"]],
+        )
+
     def test_prompt_card_library_position_route_moves_card_into_target_order(self):
         primary = self.run_async(self.module.create_prompt_card_library_category(
             _Request({"name": "人物", "parent_id": None})

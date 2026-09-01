@@ -39,6 +39,8 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "Edit Card (");
     assert.equal(t("Favorite Cards"), "Favorite Cards");
     assert.equal(t("Close favorite cards"), "Close favorite cards");
+    assert.equal(t("Category order updated."), "Category order updated.");
+    assert.equal(t("Category moved to {name}.", { name: "People" }), "Category moved to People.");
     assert.equal(t("Enable all cards"), "Enable all cards");
     assert.equal(t("Disable all cards"), "Disable all cards");
     assert.equal(tp("{count} column", "{count} columns", 1), "1 column");
@@ -63,6 +65,8 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Edit Card ("), "编辑卡片（");
     assert.equal(t("Favorite Cards"), "收藏卡片");
     assert.equal(t("Close favorite cards"), "关闭收藏卡片");
+    assert.equal(t("Category order updated."), "分类顺序已更新。");
+    assert.equal(t("Category moved to {name}.", { name: "人物" }), "分类已移动到人物。");
     assert.equal(t("Enable all cards"), "全部开启卡片");
     assert.equal(t("Disable all cards"), "全部关闭卡片");
     assert.equal(tp("{count} column", "{count} columns", 1), "1 列");

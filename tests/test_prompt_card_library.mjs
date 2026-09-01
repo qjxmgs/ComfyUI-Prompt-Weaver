@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-grid-column-align-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260901-grid-column-align-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -35,6 +35,7 @@ const {
     normalizePromptCardLibraryGeometry,
     promptCardCascadePanelPosition,
     promptCardCascadeTooltipPosition,
+    promptCardCategoryPosition,
     promptCardFavoriteFingerprint,
     promptCardFavoriteMoveTarget,
     promptCardFavoriteReorder,
@@ -235,6 +236,42 @@ test("favorite reorder uses insertion boundaries and filters no-op moves", () =>
     });
 });
 
+test("category positioning supports sibling order and secondary reparenting", () => {
+    const firstPrimary = { id: "p1", parent_id: null };
+    const secondPrimary = { id: "p2", parent_id: null };
+    const firstSecondary = { id: "s1", parent_id: "p1" };
+    const secondSecondary = { id: "s2", parent_id: "p1" };
+    const targetSecondary = { id: "s3", parent_id: "p2" };
+    const categories = [firstPrimary, secondPrimary, firstSecondary, secondSecondary, targetSecondary];
+
+    assert.deepEqual(promptCardCategoryPosition(categories, "p2", null, 0), {
+        allowed: true,
+        changed: true,
+        parentId: null,
+        index: 0,
+    });
+    assert.deepEqual(promptCardCategoryPosition(categories, "s1", "p1", 2), {
+        allowed: true,
+        changed: true,
+        parentId: "p1",
+        index: 1,
+    });
+    assert.deepEqual(promptCardCategoryPosition(categories, "s2", "p1", 2), {
+        allowed: true,
+        changed: false,
+        parentId: "p1",
+        index: 1,
+    });
+    assert.deepEqual(promptCardCategoryPosition(categories, "s1", "p2", 1), {
+        allowed: true,
+        changed: true,
+        parentId: "p2",
+        index: 1,
+    });
+    assert.equal(promptCardCategoryPosition(categories, "p1", "p2", 0).allowed, false);
+    assert.equal(promptCardCategoryPosition(categories, "s1", null, 0).allowed, false);
+});
+
 test("favorite window geometry validates, clamps, and preserves visible bounds", () => {
     assert.equal(normalizePromptCardLibraryGeometry(null, {
         viewportWidth: 1000,
@@ -272,6 +309,7 @@ test("API client preserves collection paths, methods, and request bodies", async
     await client.list();
     await client.createCategory("人物");
     await client.updateCategory("id with space", "角色");
+    await client.positionCategory("id with space", PRIMARY_ID, 2);
     await client.deleteCategory("id with space", SECONDARY_ID);
     await client.createCard(SECONDARY_ID, { title: "主角", prompt: "1girl" });
     await client.updateCard("id with space", { category_id: SECONDARY_ID });
@@ -283,22 +321,28 @@ test("API client preserves collection paths, methods, and request bodies", async
     assert.equal(requests[1].options.method, "POST");
     assert.equal(requests[2].path, "/prompt-weaver/prompt-card-library/categories/id%20with%20space");
     assert.equal(requests[2].options.method, "PATCH");
-    assert.deepEqual(JSON.parse(requests[3].options.body), { target_category_id: SECONDARY_ID });
-    assert.equal(requests[4].path, "/prompt-weaver/prompt-card-library/cards");
-    assert.equal(requests[5].options.method, "PATCH");
-    assert.equal(requests[6].options.method, "DELETE");
-    assert.equal(requests[7].path, "/prompt-weaver/prompt-card-library/cards/order");
-    assert.equal(requests[7].options.method, "PATCH");
-    assert.deepEqual(JSON.parse(requests[7].options.body), {
+    assert.equal(
+        requests[3].path,
+        "/prompt-weaver/prompt-card-library/categories/id%20with%20space/position",
+    );
+    assert.equal(requests[3].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[3].options.body), { parent_id: PRIMARY_ID, index: 2 });
+    assert.deepEqual(JSON.parse(requests[4].options.body), { target_category_id: SECONDARY_ID });
+    assert.equal(requests[5].path, "/prompt-weaver/prompt-card-library/cards");
+    assert.equal(requests[6].options.method, "PATCH");
+    assert.equal(requests[7].options.method, "DELETE");
+    assert.equal(requests[8].path, "/prompt-weaver/prompt-card-library/cards/order");
+    assert.equal(requests[8].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[8].options.body), {
         category_id: SECONDARY_ID,
         card_ids: [CARD_ID],
     });
     assert.equal(
-        requests[8].path,
+        requests[9].path,
         "/prompt-weaver/prompt-card-library/cards/id%20with%20space/position",
     );
-    assert.equal(requests[8].options.method, "PATCH");
-    assert.deepEqual(JSON.parse(requests[8].options.body), {
+    assert.equal(requests[9].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[9].options.body), {
         category_id: SECONDARY_ID,
         index: 2,
     });
@@ -398,8 +442,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-grid-column-align-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-grid-column-align-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-favorite-category-order-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-favorite-category-order-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -465,6 +509,11 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /row\.draggable = mode === "assign"/);
     assert.match(favoriteSource, /client\.reorderCards\(categoryId, reordered\.ids\)/);
     assert.match(favoriteSource, /client\.positionCard\(card\.id, category\.id, insertionIndex\)/);
+    assert.match(favoriteSource, /client\.positionCategory\(category\.id, target\.parentId, target\.index\)/);
+    assert.match(favoriteSource, /configureCategoryDropList\(primaryList, null, primaryCategories\)/);
+    assert.match(favoriteSource, /configureCategoryDropList\(secondaryList, primary\.id, secondaryCategories\)/);
+    assert.match(favoriteSource, /application\/x-prompt-weaver-category-id/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__row-wrap--insert-before/);
     assert.match(favoriteSource, /renderSecondaryDragPreview\?\.\(category\)/);
     assert.match(favoriteSource, /configureFavoriteDropList\(previewList, secondary, cards, \{ allowCrossCategory: true \}\)/);
     assert.match(favoriteSource, /cpw-prompt-card-library__list--drag-source/);
@@ -518,6 +567,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);[^}]*border-radius:\s*5px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-title-line,\s*\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-preview\s*\{[^}]*padding-right:\s*68\.5px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-rename-editor\s*\{[^}]*grid-template-columns:\s*minmax\(42px, 1fr\) auto auto;[^}]*align-items:\s*center;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__row-wrap--insert-before::before/);
+    assert.match(cssSource, /\.cpw-prompt-card-library__row--dragging\s*\{[^}]*opacity:\s*0\.52;/s);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library__favorite-rename-label/);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-rename-cancel,\s*\.cpw-prompt-card-library__favorite-rename-confirm\s*\{[^}]*border-radius:\s*5px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__tooltip\s*\{[^}]*z-index:\s*2147483646;/s);

@@ -355,6 +355,85 @@ class PromptCardLibraryStore:
             self._write_unlocked(data)
             return category, data["revision"]
 
+    def position_category(self, category_id, parent_id, index):
+        category_id = _normalize_uuid(category_id, "category id")
+        normalized_parent = None if parent_id is None else _normalize_uuid(parent_id, "parent_id")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise PromptCardLibraryValidationError("index must be an integer")
+        with self._lock:
+            data = self._read_unlocked()
+            category = self._category(data, category_id)
+            if category is None:
+                raise PromptCardLibraryNotFoundError("category not found")
+
+            source_parent = category["parent_id"]
+            if source_parent is None:
+                if normalized_parent is not None:
+                    raise PromptCardLibraryValidationError("primary categories must remain at the root")
+            else:
+                if normalized_parent is None:
+                    raise PromptCardLibraryValidationError("secondary categories must belong to a primary category")
+                target_parent = self._category(data, normalized_parent)
+                if target_parent is None:
+                    raise PromptCardLibraryNotFoundError("parent category not found")
+                if target_parent["parent_id"] is not None:
+                    raise PromptCardLibraryValidationError("categories support exactly two levels")
+                if any(
+                    item["id"] != category_id
+                    and item["parent_id"] == normalized_parent
+                    and item["name"].casefold() == category["name"].casefold()
+                    for item in data["categories"]
+                ):
+                    raise PromptCardLibraryConflictError(
+                        "a sibling category with the same name already exists"
+                    )
+
+            target_siblings = [
+                item
+                for item in data["categories"]
+                if item["parent_id"] == normalized_parent and item["id"] != category_id
+            ]
+            if index < 0 or index > len(target_siblings):
+                raise PromptCardLibraryValidationError("index is outside the target category")
+            current_siblings = [
+                item for item in data["categories"] if item["parent_id"] == source_parent
+            ]
+            current_index = next(
+                position for position, item in enumerate(current_siblings) if item["id"] == category_id
+            )
+            if source_parent == normalized_parent and current_index == index:
+                return False, category, data["revision"]
+
+            remaining = [item for item in data["categories"] if item["id"] != category_id]
+            category["parent_id"] = normalized_parent
+            category["updated_at"] = _now()
+            target_siblings.insert(index, category)
+            target_indexes = [
+                position
+                for position, item in enumerate(remaining)
+                if item["parent_id"] == normalized_parent
+            ]
+            if target_indexes:
+                insert_at = target_indexes[-1] + 1
+            elif normalized_parent is not None:
+                parent_index = next(
+                    position
+                    for position, item in enumerate(remaining)
+                    if item["id"] == normalized_parent
+                )
+                insert_at = parent_index + 1
+            else:
+                insert_at = len(remaining)
+            remaining.insert(insert_at, category)
+            ordered = iter(target_siblings)
+            data["categories"] = [
+                next(ordered) if item["parent_id"] == normalized_parent else item
+                for item in remaining
+            ]
+            self._increment_revision(data)
+            self._write_unlocked(data)
+            return True, category, data["revision"]
+
     def delete_category(self, category_id, target_category_id=None):
         category_id = _normalize_uuid(category_id, "category id")
         normalized_target = (

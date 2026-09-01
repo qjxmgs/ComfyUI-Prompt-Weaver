@@ -3579,7 +3579,9 @@
 }
 
 .cpw-prompt-card-library__favorite-wrap--insert-before::before,
-.cpw-prompt-card-library__favorite-wrap--insert-after::after {
+.cpw-prompt-card-library__favorite-wrap--insert-after::after,
+.cpw-prompt-card-library__row-wrap--insert-before::before,
+.cpw-prompt-card-library__row-wrap--insert-after::after {
     position: absolute;
     z-index: 3;
     left: 4px;
@@ -3592,11 +3594,13 @@
     pointer-events: none;
 }
 
-.cpw-prompt-card-library__favorite-wrap--insert-before::before {
+.cpw-prompt-card-library__favorite-wrap--insert-before::before,
+.cpw-prompt-card-library__row-wrap--insert-before::before {
     top: -1px;
 }
 
-.cpw-prompt-card-library__favorite-wrap--insert-after::after {
+.cpw-prompt-card-library__favorite-wrap--insert-after::after,
+.cpw-prompt-card-library__row-wrap--insert-after::after {
     bottom: -1px;
 }
 
@@ -3632,6 +3636,7 @@
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: grab;
 }
 
 .cpw-prompt-card-library__row-main:hover,
@@ -3687,6 +3692,15 @@
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
+}
+
+.cpw-prompt-card-library__row:active .cpw-prompt-card-library__row-main,
+.cpw-prompt-card-library__row--dragging .cpw-prompt-card-library__row-main {
+    cursor: grabbing;
+}
+
+.cpw-prompt-card-library__row--dragging {
+    opacity: 0.52;
 }
 
 .cpw-prompt-card-library__context-item:hover,

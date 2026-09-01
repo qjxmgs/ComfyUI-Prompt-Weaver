@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260901-grid-column-align-v1";
+} from "./prompt_card_library.js?v=20260901-favorite-category-order-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260901-grid-column-align-v1";
+} from "./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -90,7 +90,7 @@ import {
 import {
     promptGridMasterToggleState,
     toggleAllPromptGridItems,
-} from "./prompt_grid_controls.js?v=20260901-grid-column-align-v1";
+} from "./prompt_grid_controls.js?v=20260901-favorite-category-order-v1";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -704,7 +704,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260901-grid-column-align-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260901-favorite-category-order-v1", import.meta.url).href;
     document.head.append(link);
 }
 

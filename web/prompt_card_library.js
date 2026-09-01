@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260901-grid-column-align-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-category-order-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -351,6 +351,36 @@ export function promptCardFavoriteReorder(cardIds, movedId, insertionIndex) {
     };
 }
 
+export function promptCardCategoryPosition(categories, categoryId, targetParentId, insertionIndex) {
+    const items = Array.isArray(categories) ? categories : [];
+    const category = items.find((candidate) => candidate?.id === categoryId) ?? null;
+    const normalizedParent = targetParentId ?? null;
+    const targetParent = normalizedParent === null
+        ? null
+        : items.find((candidate) => candidate?.id === normalizedParent) ?? null;
+    const allowed = Boolean(
+        category
+        && (
+            (category.parent_id === null && normalizedParent === null)
+            || (category.parent_id !== null && targetParent?.parent_id === null)
+        )
+    );
+    if (!allowed) return { allowed: false, changed: false, parentId: normalizedParent, index: 0 };
+    const targetSiblings = items.filter((candidate) => candidate?.parent_id === normalizedParent);
+    const sourceIndex = targetSiblings.findIndex((candidate) => candidate.id === categoryId);
+    const boundary = Math.min(
+        targetSiblings.length,
+        Math.max(0, Math.trunc(Number(insertionIndex) || 0)),
+    );
+    const index = sourceIndex >= 0 && boundary > sourceIndex ? boundary - 1 : boundary;
+    return {
+        allowed: true,
+        changed: category.parent_id !== normalizedParent || index !== sourceIndex,
+        parentId: normalizedParent,
+        index,
+    };
+}
+
 export function normalizePromptCardLibraryGeometry(value, {
     viewportWidth,
     viewportHeight,
@@ -417,6 +447,14 @@ export class PromptCardLibraryClient {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name }),
+        });
+    }
+
+    positionCategory(id, parentId, index) {
+        return this.request(`/categories/${encodeURIComponent(id)}/position`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parent_id: parentId, index }),
         });
     }
 
@@ -1232,6 +1270,7 @@ export function openPromptCardLibraryMenu({
     let editingFavoriteId = null;
     let creatingParentId = undefined;
     let movingCardId = null;
+    let movingCategoryId = null;
     let busy = false;
     let closed = false;
     let favoriteSelectionInitialized = false;
@@ -1247,6 +1286,13 @@ export function openPromptCardLibraryMenu({
     let favoriteDragScrollSpeed = 0;
     let favoriteDragScrollList = null;
     let favoriteDragClientY = null;
+    let draggingCategoryId = null;
+    let categoryInsertionIndex = null;
+    let categoryDragTargetParentId = undefined;
+    let categoryDragScrollFrame = 0;
+    let categoryDragScrollSpeed = 0;
+    let categoryDragScrollList = null;
+    let categoryDragClientY = null;
     let geometryInitialized = false;
     let windowMoveSession = null;
     let windowResizeSession = null;
@@ -1369,6 +1415,32 @@ export function openPromptCardLibraryMenu({
                 selectedSecondaryId = sourceCategory.id;
                 mobileLevel = 2;
             }
+        }
+        if (hadDrag && renderAfter && !closed) render();
+    };
+
+    const clearCategoryDragState = ({ renderAfter = false } = {}) => {
+        const hadDrag = Boolean(draggingCategoryId);
+        draggingCategoryId = null;
+        categoryInsertionIndex = null;
+        categoryDragTargetParentId = undefined;
+        categoryDragScrollSpeed = 0;
+        categoryDragScrollList = null;
+        categoryDragClientY = null;
+        if (categoryDragScrollFrame) cancelAnimationFrame(categoryDragScrollFrame);
+        categoryDragScrollFrame = 0;
+        root.classList.remove("cpw-prompt-card-library--category-dragging");
+        for (const row of root.querySelectorAll(".cpw-prompt-card-library__row--dragging")) {
+            row.classList.remove("cpw-prompt-card-library__row--dragging");
+        }
+        for (const target of root.querySelectorAll(
+            ".cpw-prompt-card-library__row-main--drop-target, .cpw-prompt-card-library__row-wrap--insert-before, .cpw-prompt-card-library__row-wrap--insert-after",
+        )) {
+            target.classList.remove(
+                "cpw-prompt-card-library__row-main--drop-target",
+                "cpw-prompt-card-library__row-wrap--insert-before",
+                "cpw-prompt-card-library__row-wrap--insert-after",
+            );
         }
         if (hadDrag && renderAfter && !closed) render();
     };
@@ -1531,6 +1603,7 @@ export function openPromptCardLibraryMenu({
         deleteController.destroy();
         hideFavoriteTooltip();
         clearDragState();
+        clearCategoryDragState();
         closeContextMenu();
         unsubscribe();
         document.removeEventListener("pointerdown", onDocumentPointerDown, true);
@@ -2060,6 +2133,188 @@ export function openPromptCardLibraryMenu({
         list.addEventListener("scroll", positionFavoriteTooltip, { passive: true });
     };
 
+    const positionCategory = async (categoryId, targetParentId, insertionIndex) => {
+        const category = library.categories.find((candidate) => candidate.id === categoryId);
+        const target = promptCardCategoryPosition(
+            library.categories,
+            categoryId,
+            targetParentId,
+            insertionIndex,
+        );
+        clearCategoryDragState();
+        if (!category || !target.allowed || !target.changed) {
+            render();
+            queueMicrotask(() => root.querySelector(
+                `[data-category-id="${categoryId}"]`,
+            )?.focus?.());
+            return;
+        }
+        const previousParentId = category.parent_id;
+        if (category.parent_id === null) {
+            selectedPrimaryId = category.id;
+            mobileLevel = 0;
+        } else {
+            selectedPrimaryId = target.parentId;
+            selectedSecondaryId = category.id;
+            mobileLevel = 1;
+        }
+        const parent = target.parentId
+            ? library.categories.find((candidate) => candidate.id === target.parentId)
+            : null;
+        const result = await runMutation(
+            (client) => client.positionCategory(category.id, target.parentId, target.index),
+            previousParentId === target.parentId
+                ? t("Category order updated.")
+                : t("Category moved to {name}.", { name: parent?.name ?? "" }),
+        );
+        if (!result) {
+            if (category.parent_id === null) {
+                selectedPrimaryId = category.id;
+                selectedSecondaryId = null;
+                mobileLevel = 0;
+            } else {
+                selectedPrimaryId = previousParentId;
+                selectedSecondaryId = category.id;
+                mobileLevel = 1;
+            }
+            render();
+        }
+        queueMicrotask(() => root.querySelector(
+            `[data-category-id="${category.id}"]`,
+        )?.focus?.());
+    };
+
+    const reorderCategoryByCommand = (category, command) => {
+        const siblings = categoryChildren(library, category.parent_id);
+        const index = siblings.findIndex((candidate) => candidate.id === category.id);
+        if (index < 0) return;
+        const insertionIndex = command === "top"
+            ? 0
+            : command === "up"
+                ? Math.max(0, index - 1)
+                : command === "down"
+                    ? Math.min(siblings.length, index + 2)
+                    : siblings.length;
+        positionCategory(category.id, category.parent_id, insertionIndex);
+    };
+
+    const moveSecondaryToPrimary = (categoryId, primary) => {
+        const category = library.categories.find((candidate) => candidate.id === categoryId);
+        movingCategoryId = null;
+        if (!category || category.parent_id === null || !primary || primary.parent_id !== null) {
+            render();
+            return;
+        }
+        if (category.parent_id === primary.id) {
+            selectedPrimaryId = primary.id;
+            selectedSecondaryId = category.id;
+            mobileLevel = 1;
+            render();
+            return;
+        }
+        const insertionIndex = categoryChildren(library, primary.id).length;
+        positionCategory(category.id, primary.id, insertionIndex);
+    };
+
+    const updateCategoryInsertion = (list, clientY, parentId) => {
+        const wrappers = [...list.querySelectorAll(":scope > .cpw-prompt-card-library__row-wrap")];
+        for (const wrapper of wrappers) {
+            wrapper.classList.remove(
+                "cpw-prompt-card-library__row-wrap--insert-before",
+                "cpw-prompt-card-library__row-wrap--insert-after",
+            );
+        }
+        let boundary = wrappers.length;
+        for (let index = 0; index < wrappers.length; index += 1) {
+            const rect = wrappers[index].getBoundingClientRect();
+            if (clientY < rect.top + rect.height / 2) {
+                boundary = index;
+                break;
+            }
+        }
+        categoryInsertionIndex = boundary;
+        categoryDragTargetParentId = parentId;
+        if (!wrappers.length) return;
+        if (boundary < wrappers.length) {
+            wrappers[boundary].classList.add("cpw-prompt-card-library__row-wrap--insert-before");
+        } else {
+            wrappers.at(-1).classList.add("cpw-prompt-card-library__row-wrap--insert-after");
+        }
+    };
+
+    const runCategoryDragScroll = () => {
+        categoryDragScrollFrame = 0;
+        if (!draggingCategoryId || !categoryDragScrollList?.isConnected || !categoryDragScrollSpeed) return;
+        const previousScrollTop = categoryDragScrollList.scrollTop;
+        categoryDragScrollList.scrollTop += categoryDragScrollSpeed;
+        if (categoryDragScrollList.scrollTop === previousScrollTop) {
+            categoryDragScrollSpeed = 0;
+            return;
+        }
+        if (categoryDragClientY !== null) {
+            updateCategoryInsertion(
+                categoryDragScrollList,
+                categoryDragClientY,
+                categoryDragTargetParentId,
+            );
+        }
+        categoryDragScrollFrame = requestAnimationFrame(runCategoryDragScroll);
+    };
+
+    const updateCategoryDragScroll = (list, clientY) => {
+        const rect = list.getBoundingClientRect();
+        let speed = 0;
+        if (clientY < rect.top + FAVORITE_DRAG_SCROLL_EDGE) {
+            const ratio = Math.min(1, (rect.top + FAVORITE_DRAG_SCROLL_EDGE - clientY) / FAVORITE_DRAG_SCROLL_EDGE);
+            speed = -Math.max(2, Math.round(FAVORITE_DRAG_SCROLL_MAX_SPEED * ratio));
+        } else if (clientY > rect.bottom - FAVORITE_DRAG_SCROLL_EDGE) {
+            const ratio = Math.min(1, (clientY - (rect.bottom - FAVORITE_DRAG_SCROLL_EDGE)) / FAVORITE_DRAG_SCROLL_EDGE);
+            speed = Math.max(2, Math.round(FAVORITE_DRAG_SCROLL_MAX_SPEED * ratio));
+        }
+        categoryDragScrollList = list;
+        categoryDragScrollSpeed = speed;
+        categoryDragClientY = clientY;
+        if (speed && !categoryDragScrollFrame) {
+            categoryDragScrollFrame = requestAnimationFrame(runCategoryDragScroll);
+        } else if (!speed && categoryDragScrollFrame) {
+            cancelAnimationFrame(categoryDragScrollFrame);
+            categoryDragScrollFrame = 0;
+        }
+    };
+
+    const configureCategoryDropList = (list, parentId, categories) => {
+        list.dataset.categoryOrderList = parentId ?? "root";
+        list.addEventListener("dragover", (event) => {
+            if (!draggingCategoryId) return;
+            const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
+            const allowed = dragged?.parent_id === null ? parentId === null : parentId !== null;
+            if (!dragged || !allowed) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            updateCategoryInsertion(list, event.clientY, parentId);
+            updateCategoryDragScroll(list, event.clientY);
+        });
+        list.addEventListener("drop", (event) => {
+            if (!draggingCategoryId || categoryDragTargetParentId !== parentId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            positionCategory(
+                draggingCategoryId,
+                parentId,
+                categoryInsertionIndex ?? categories.length,
+            );
+        });
+        list.addEventListener("dragleave", (event) => {
+            if (list.contains(event.relatedTarget)) return;
+            categoryDragScrollSpeed = 0;
+            categoryDragScrollList = null;
+            categoryDragClientY = null;
+            if (categoryDragScrollFrame) cancelAnimationFrame(categoryDragScrollFrame);
+            categoryDragScrollFrame = 0;
+        });
+    };
+
     const previewFavoriteCardRow = (card) => {
         const cardName = card.title.trim() || t("Untitled Card");
         const wrapper = element("div", "cpw-prompt-card-library__favorite-wrap");
@@ -2116,12 +2371,14 @@ export function openPromptCardLibraryMenu({
     const categoryRow = (category, level) => {
         if (editingCategoryId === category.id) return categoryEditor(category, category.parent_id);
         const wrapper = element("div", "cpw-prompt-card-library__row-wrap");
+        wrapper.dataset.categoryId = category.id;
         const row = element("div", "cpw-prompt-card-library__row");
+        row.draggable = true;
         const button = element("button", "cpw-prompt-card-library__row-main", category.name);
         button.type = "button";
         button.dataset.libraryLevel = String(level);
         button.dataset.categoryId = category.id;
-        button.title = t("Right-click for category actions");
+        button.title = t("Drag to reorder; right-click for category actions");
         button.setAttribute("aria-haspopup", "menu");
         button.classList.toggle(
             "cpw-prompt-card-library__row-main--selected",
@@ -2135,7 +2392,7 @@ export function openPromptCardLibraryMenu({
         chevron.setAttribute("aria-hidden", "true");
         button.append(chevron);
         button.addEventListener("pointerenter", () => {
-            if (busy) return;
+            if (busy || draggingCategoryId) return;
             deleteController.disarm();
             hideFavoriteTooltip();
             if (level === 0) {
@@ -2155,6 +2412,10 @@ export function openPromptCardLibraryMenu({
             hideFavoriteTooltip();
             closeContextMenu();
             if (level === 0) {
+                if (movingCategoryId) {
+                    moveSecondaryToPrimary(movingCategoryId, category);
+                    return;
+                }
                 selectedPrimaryId = category.id;
                 selectedSecondaryId = null;
                 mobileLevel = 1;
@@ -2162,6 +2423,15 @@ export function openPromptCardLibraryMenu({
             } else chooseSecondary(category);
         });
         button.addEventListener("dragenter", (event) => {
+            if (draggingCategoryId) {
+                const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
+                if (level === 0 && dragged?.parent_id !== null) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    button.classList.add("cpw-prompt-card-library__row-main--drop-target");
+                }
+                return;
+            }
             if (!draggingCardId) return;
             deleteController.disarm();
             hideFavoriteTooltip();
@@ -2181,6 +2451,15 @@ export function openPromptCardLibraryMenu({
             button.classList.add("cpw-prompt-card-library__row-main--drop-target");
         });
         button.addEventListener("dragover", (event) => {
+            if (draggingCategoryId) {
+                const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
+                if (level !== 0 || dragged?.parent_id === null) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+                button.classList.add("cpw-prompt-card-library__row-main--drop-target");
+                return;
+            }
             if (!draggingCardId || level !== 1) return;
             event.preventDefault();
             event.stopPropagation();
@@ -2188,10 +2467,19 @@ export function openPromptCardLibraryMenu({
             button.classList.add("cpw-prompt-card-library__row-main--drop-target");
         });
         button.addEventListener("dragleave", (event) => {
-            if (level !== 1 || button.contains(event.relatedTarget)) return;
+            if (button.contains(event.relatedTarget)) return;
             button.classList.remove("cpw-prompt-card-library__row-main--drop-target");
         });
         button.addEventListener("drop", (event) => {
+            if (draggingCategoryId) {
+                const dragged = library.categories.find((candidate) => candidate.id === draggingCategoryId);
+                if (level !== 0 || dragged?.parent_id === null) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const insertionIndex = categoryChildren(library, category.id).length;
+                positionCategory(draggingCategoryId, category.id, insertionIndex);
+                return;
+            }
             if (level !== 1) return;
             const cardId = draggingCardId
                 || event.dataTransfer?.getData("application/x-prompt-weaver-favorite-id");
@@ -2202,15 +2490,52 @@ export function openPromptCardLibraryMenu({
         });
         const openActions = ({ x, y, focus = false }) => {
             if (busy) return;
+            const siblings = categoryChildren(library, category.parent_id);
+            const categoryIndex = siblings.findIndex((candidate) => candidate.id === category.id);
+            const items = [
+                { label: t("Rename"), onSelect: () => startCategoryEditor(category) },
+                {
+                    label: t("Move to Top"),
+                    disabled: categoryIndex <= 0,
+                    onSelect: () => reorderCategoryByCommand(category, "top"),
+                },
+                {
+                    label: t("Move Up"),
+                    disabled: categoryIndex <= 0,
+                    onSelect: () => reorderCategoryByCommand(category, "up"),
+                },
+                {
+                    label: t("Move Down"),
+                    disabled: categoryIndex < 0 || categoryIndex >= siblings.length - 1,
+                    onSelect: () => reorderCategoryByCommand(category, "down"),
+                },
+                {
+                    label: t("Move to Bottom"),
+                    disabled: categoryIndex < 0 || categoryIndex >= siblings.length - 1,
+                    onSelect: () => reorderCategoryByCommand(category, "bottom"),
+                },
+            ];
+            if (level === 1) {
+                items.push({
+                    label: t("Move to Category"),
+                    disabled: categoryChildren(library, null).length < 2,
+                    onSelect: () => {
+                        movingCategoryId = category.id;
+                        movingCardId = null;
+                        selectedPrimaryId = null;
+                        selectedSecondaryId = null;
+                        mobileLevel = 0;
+                        render();
+                    },
+                });
+            }
+            items.push({ label: t("Delete"), danger: true, onSelect: () => deleteCategory(category) });
             openContextMenu({
                 anchor: button,
                 x,
                 y,
                 focus,
-                items: [
-                    { label: t("Rename"), onSelect: () => startCategoryEditor(category) },
-                    { label: t("Delete"), danger: true, onSelect: () => deleteCategory(category) },
-                ],
+                items,
             });
         };
         row.addEventListener("contextmenu", (event) => {
@@ -2225,6 +2550,25 @@ export function openPromptCardLibraryMenu({
             const rect = button.getBoundingClientRect();
             openActions({ x: rect.left + 8, y: rect.bottom + 4, focus: true });
         });
+        row.addEventListener("dragstart", (event) => {
+            if (busy) {
+                event.preventDefault();
+                return;
+            }
+            draggingCategoryId = category.id;
+            clearDragState();
+            deleteController.disarm();
+            hideFavoriteTooltip();
+            closeContextMenu();
+            root.classList.add("cpw-prompt-card-library--category-dragging");
+            row.classList.add("cpw-prompt-card-library__row--dragging");
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("application/x-prompt-weaver-category-id", category.id);
+                event.dataTransfer.setData("text/plain", category.name);
+            }
+        });
+        row.addEventListener("dragend", () => clearCategoryDragState({ renderAfter: true }));
         row.append(button);
         wrapper.append(row);
         return wrapper;
@@ -2470,6 +2814,7 @@ export function openPromptCardLibraryMenu({
                         label: t("Move to Category"),
                         onSelect: () => {
                             movingCardId = card.id;
+                            movingCategoryId = null;
                             selectedPrimaryId = null;
                             selectedSecondaryId = null;
                             mobileLevel = 0;
@@ -2593,6 +2938,7 @@ export function openPromptCardLibraryMenu({
             primaryList.append(element("div", "cpw-prompt-card-library__empty", t("Create a primary category to begin.")));
         }
         if (creatingParentId === null) primaryList.append(categoryEditor(null, null));
+        configureCategoryDropList(primaryList, null, primaryCategories);
         primaryPanel.append(primaryList);
 
         const secondaryPanel = element("section", "cpw-prompt-card-library__panel");
@@ -2613,6 +2959,7 @@ export function openPromptCardLibraryMenu({
             if (creatingParentId === primary.id) {
                 secondaryList.append(categoryEditor(null, primary.id));
             }
+            configureCategoryDropList(secondaryList, primary.id, secondaryCategories);
         } else {
             secondaryList.append(element("div", "cpw-prompt-card-library__empty", t("Choose a primary category.")));
         }
@@ -2663,6 +3010,7 @@ export function openPromptCardLibraryMenu({
 
     const onDocumentDragEnd = () => {
         if (draggingCardId) clearDragState({ renderAfter: true });
+        if (draggingCategoryId) clearCategoryDragState({ renderAfter: true });
     };
 
     const focusPanelItem = (direction) => {
@@ -2690,6 +3038,13 @@ export function openPromptCardLibraryMenu({
         if (event.key === "Escape") {
             event.preventDefault();
             if (deleteController.disarm()) {
+                event.stopImmediatePropagation();
+                return;
+            }
+            if (movingCardId || movingCategoryId) {
+                movingCardId = null;
+                movingCategoryId = null;
+                render();
                 event.stopImmediatePropagation();
                 return;
             }
