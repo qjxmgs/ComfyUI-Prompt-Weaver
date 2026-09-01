@@ -3375,6 +3375,7 @@ export function openPromptCardLibraryMenu({
 
     const onDocumentKeyDown = (event) => {
         if (closed || !root.contains(document.activeElement)) return;
+        if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
         if (
             event.target === resizeHandle
             && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)

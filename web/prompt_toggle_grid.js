@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260901-category-navigation-lock-v1";
+} from "./prompt_card_library.js?v=20260901-text-input-key-routing-v1";
 import {
     connectLocale,
     formatDateTime,
