@@ -73,11 +73,16 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /title\.append\(t\("Edit Card \("\), activeCount, t\("\)"\)\)/);
     assert.match(uiSource, /const cardTitleInput = element\("input", "cpw-prompt-editor__card-title"\)/);
     assert.match(uiSource, /cardTitleInput\.value = currentItem\?\.title \?\? ""/);
-    assert.match(uiSource, /headerMain\.append\(title, cardTitleInput, freeModeLabel, retainUnselectedLabel, historyActions\)/);
+    assert.match(uiSource, /titleBar\.append\(title, closeButton\)/);
+    assert.match(uiSource, /toolbar\.append\(cardTitleInput, historyActions, fontSizeControl\)/);
+    assert.match(uiSource, /modeActions\.append\(retainUnselectedLabel, freeModeLabel\)/);
+    assert.match(uiSource, /header\.append\(titleBar, toolbar\)/);
     assert.match(uiSource, /title: cardTitleInput\.value,[\s\S]*prompt: currentPromptDraft\(\)/);
     assert.match(uiSource, /const nextTitle = cardTitleInput\.value/);
     assert.match(uiSource, /updatePromptEditorItem\(itemId, \{[\s\S]*title: nextTitle,[\s\S]*prompt: nextPrompt/);
-    assert.match(uiSource, /header\.addEventListener\("pointerdown", beginPromptEditorDrag\)/);
+    assert.match(uiSource, /titleBar\.addEventListener\("pointerdown", beginPromptEditorDrag\)/);
+    assert.match(uiSource, /titleBar\.setPointerCapture\(event\.pointerId\)/);
+    assert.doesNotMatch(uiSource, /header\.addEventListener\("pointerdown", beginPromptEditorDrag\)/);
     assert.match(uiSource, /resizeHandle\.addEventListener\("pointerdown", beginPromptEditorResize\)/);
     assert.match(uiSource, /localStorage\?\.setItem\([\s\S]*?PROMPT_EDITOR_SIZE_STORAGE_KEY/);
     assert.match(uiSource, /PROMPT_EDITOR_FONT_SIZE_STORAGE_KEY/);
@@ -90,7 +95,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /fontSizeLabel\.textContent = t\("Font Size"\)/);
     assert.match(
         uiSource,
-        /headerMain\.append\(title, cardTitleInput, freeModeLabel, retainUnselectedLabel, historyActions\)/,
+        /toolbar\.append\(cardTitleInput, historyActions, fontSizeControl\)/,
     );
     assert.match(uiSource, /historyActions\.append\(undoButton, redoButton\)/);
     assert.match(uiSource, /cpw-prompt-editor__history-action--undo/);
@@ -105,7 +110,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     );
     assert.match(uiSource, /undoButton\.dataset\.tooltip = undoLabel/);
     assert.match(uiSource, /redoButton\.dataset\.tooltip = redoLabel/);
-    assert.match(uiSource, /headerActions\.append\(fontSizeControl, closeButton\)/);
+    assert.match(uiSource, /titleBar\.append\(title, closeButton\)/);
     assert.match(uiSource, /PROMPT_EDITOR_MIN_FONT_SIZE = 12/);
     assert.match(uiSource, /PROMPT_EDITOR_MAX_FONT_SIZE = 30/);
     assert.match(uiSource, /persistPromptEditorFontSize\(promptFontSize\)/);
@@ -114,7 +119,9 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(styleSource, /\.cpw-prompt-editor__active-count\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__resize-handle\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-control\s*\{/);
-    assert.match(styleSource, /\.cpw-prompt-editor__header-actions\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-editor__titlebar\s*\{[\s\S]*justify-content:\s*space-between;/);
+    assert.match(styleSource, /\.cpw-prompt-editor__toolbar\s*\{[\s\S]*flex-wrap:\s*wrap;/);
+    assert.doesNotMatch(styleSource, /\.cpw-prompt-editor__header-actions\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__card-title\s*\{[\s\S]*cursor:\s*text;[\s\S]*user-select:\s*text;/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-label\s*\{/);
     assert.match(

@@ -500,11 +500,11 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
     assert.match(gridSource, /prompt_card_library\.js\?v=20260902-editor-keyboard-layers-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-add-frame-stretch-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-footer-mode-controls-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
-    assert.match(gridSource, /footer\.append\(selectionActions, favoriteActions, commitActions\)/);
+    assert.match(gridSource, /footer\.append\(modeActions, selectionActions, favoriteActions, commitActions\)/);
     assert.match(gridSource, /const currentEditorFavoriteSnapshot = \(\) => \{/);
     assert.match(gridSource, /mode: "assign",[\s\S]*getSnapshot: currentEditorFavoriteSnapshot,[\s\S]*resolvePromptTip: resolveFavoriteCardPromptTip/);
     assert.doesNotMatch(gridSource, /const appendFavoriteCard = \(favorite\) =>/);

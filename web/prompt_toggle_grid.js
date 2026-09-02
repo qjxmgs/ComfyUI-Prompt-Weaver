@@ -705,7 +705,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260902-add-frame-stretch-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260902-footer-mode-controls-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -3374,13 +3374,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         dialog.style.setProperty("--cpw-prompt-editor-font-size", `${promptFontSize}px`);
 
         const header = element("header", "cpw-prompt-editor__header");
+        const titleBar = element("div", "cpw-prompt-editor__titlebar");
+        const toolbar = element("div", "cpw-prompt-editor__toolbar");
         const title = element("h2", "cpw-prompt-editor__title");
         const activeCount = element("span", "cpw-prompt-editor__active-count", "0");
         activeCount.setAttribute("aria-label", tp("{count} prompt active", "{count} prompts active", 0));
         title.append(t("Edit Card ("), activeCount, t(")"));
         title.id = `cpw-prompt-editor-${createId()}`;
         dialog.setAttribute("aria-labelledby", title.id);
-        const headerMain = element("div", "cpw-prompt-editor__header-main");
         const cardTitleInput = element("input", "cpw-prompt-editor__card-title");
         cardTitleInput.type = "text";
         cardTitleInput.value = currentItem?.title ?? "";
@@ -3466,14 +3467,13 @@ function createPromptGridWidget(node, inputName, inputData) {
         );
         fontSizeValue.setAttribute("for", fontSizeInput.id);
         fontSizeControl.append(fontSizeLabel, fontSizeInput, fontSizeValue);
-        headerMain.append(title, cardTitleInput, freeModeLabel, retainUnselectedLabel, historyActions);
-        const headerActions = element("div", "cpw-prompt-editor__header-actions");
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
         closeButton.title = t("Close without saving");
         closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
-        headerActions.append(fontSizeControl, closeButton);
-        header.append(headerMain, headerActions);
+        titleBar.append(title, closeButton);
+        toolbar.append(cardTitleInput, historyActions, fontSizeControl);
+        header.append(titleBar, toolbar);
 
         const content = element("div", "cpw-prompt-editor__content");
         const tokenList = element("div", "cpw-prompt-editor__tokens");
@@ -3485,6 +3485,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         content.append(tokenList, addStatus);
 
         const footer = element("footer", "cpw-prompt-editor__footer");
+        const modeActions = element("div", "cpw-prompt-editor__mode-actions");
+        modeActions.append(retainUnselectedLabel, freeModeLabel);
         const selectionActions = element("div", "cpw-prompt-editor__selection-actions");
         const enableAllButton = element("button", "cpw-prompt-editor__action", t("Enable All"));
         const disableAllButton = element("button", "cpw-prompt-editor__action", t("Disable All"));
@@ -3524,7 +3526,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteActions.append(favoriteCardsButton);
         const commitActions = element("div", "cpw-prompt-editor__commit-actions");
         commitActions.append(copyButton, confirmButton);
-        footer.append(selectionActions, favoriteActions, commitActions);
+        footer.append(modeActions, selectionActions, favoriteActions, commitActions);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
         resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
@@ -3669,7 +3671,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             };
             dialog.classList.add("cpw-prompt-editor--dragging");
             event.preventDefault();
-            header.setPointerCapture(event.pointerId);
+            titleBar.setPointerCapture(event.pointerId);
         };
         const movePromptEditorDrag = (event) => {
             if (!editorDragSession || event.pointerId !== editorDragSession.pointerId) return;
@@ -3688,7 +3690,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             const pointerId = editorDragSession.pointerId;
             editorDragSession = null;
             dialog.classList.remove("cpw-prompt-editor--dragging");
-            if (header.hasPointerCapture(pointerId)) header.releasePointerCapture(pointerId);
+            if (titleBar.hasPointerCapture(pointerId)) titleBar.releasePointerCapture(pointerId);
             event.preventDefault();
         };
         const cancelPromptEditorDrag = () => {
@@ -3696,8 +3698,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (!session) return false;
             editorDragSession = null;
             dialog.classList.remove("cpw-prompt-editor--dragging");
-            if (header.hasPointerCapture(session.pointerId)) {
-                header.releasePointerCapture(session.pointerId);
+            if (titleBar.hasPointerCapture(session.pointerId)) {
+                titleBar.releasePointerCapture(session.pointerId);
             }
             applyPromptEditorPosition({ left: session.startLeft, top: session.startTop });
             handleSuggestionAnchorChange();
@@ -4611,11 +4613,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             AUTOCOMPLETE_SETTINGS_EVENT,
             handlePromptTokenTranslationSettings,
         );
-        header.addEventListener("pointerdown", beginPromptEditorDrag);
-        header.addEventListener("pointermove", movePromptEditorDrag);
-        header.addEventListener("pointerup", endPromptEditorDrag);
-        header.addEventListener("pointercancel", endPromptEditorDrag);
-        header.addEventListener("lostpointercapture", endPromptEditorDrag);
+        titleBar.addEventListener("pointerdown", beginPromptEditorDrag);
+        titleBar.addEventListener("pointermove", movePromptEditorDrag);
+        titleBar.addEventListener("pointerup", endPromptEditorDrag);
+        titleBar.addEventListener("pointercancel", endPromptEditorDrag);
+        titleBar.addEventListener("lostpointercapture", endPromptEditorDrag);
         resizeHandle.addEventListener("pointerdown", beginPromptEditorResize);
         resizeHandle.addEventListener("pointermove", movePromptEditorResize);
         resizeHandle.addEventListener("pointerup", endPromptEditorResize);
