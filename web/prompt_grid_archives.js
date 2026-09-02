@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
+import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
 
 export const ARCHIVE_EXPORT_FORMAT = "prompt-weaver-prompt-grid-archives";
 export const ARCHIVE_FORMAT_VERSION = 1;

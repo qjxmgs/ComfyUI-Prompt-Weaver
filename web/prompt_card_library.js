@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
+import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -1291,6 +1291,7 @@ export function openPromptCardLibraryMenu({
     favoriteId = null,
     getSnapshot = null,
     onChooseCard = null,
+    onEditCard = null,
     resolvePromptTip = null,
     onFavoriteLinked = null,
     onClose = null,
@@ -1344,6 +1345,7 @@ export function openPromptCardLibraryMenu({
     let editingCategoryId = null;
     let editingFavoriteId = null;
     let creatingParentId = undefined;
+    let suspended = false;
     let movingCardId = null;
     let movingCategoryId = null;
     let busy = false;
@@ -3209,7 +3211,7 @@ export function openPromptCardLibraryMenu({
                 busy
                 || !canManageOrder
                 || event.target.closest?.(
-                    ".cpw-prompt-card-library__favorite-overwrite, .cpw-prompt-card-library__favorite-delete",
+                    ".cpw-prompt-card-library__favorite-overwrite, .cpw-prompt-card-library__favorite-edit, .cpw-prompt-card-library__favorite-delete",
                 )
             ) {
                 event.preventDefault();
@@ -3244,6 +3246,23 @@ export function openPromptCardLibraryMenu({
                 await overwriteFavoriteFromDraft(card);
             });
         }
+        const editButton = mode === "manage"
+            ? element("button", "cpw-prompt-card-library__favorite-edit", t("Edit"))
+            : null;
+        if (editButton) {
+            const editLabel = t("Edit {name}", { name: cardName });
+            editButton.type = "button";
+            editButton.title = editLabel;
+            editButton.setAttribute("aria-label", editLabel);
+            editButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+            editButton.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                hideFavoriteTooltip();
+                closeContextMenu();
+                onEditCard?.(card, editButton);
+            });
+        }
         const deleteButton = deleteController.createButton({
             className: "cpw-prompt-card-library__favorite-delete",
             card,
@@ -3252,6 +3271,7 @@ export function openPromptCardLibraryMenu({
         });
         row.append(choose);
         if (overwriteButton) row.append(overwriteButton);
+        if (editButton) row.append(editButton);
         row.append(deleteButton);
         wrapper.append(row);
         return wrapper;
@@ -3368,6 +3388,7 @@ export function openPromptCardLibraryMenu({
     }
 
     const onDocumentPointerDown = (event) => {
+        if (suspended) return;
         deleteController.handlePointerDown(event);
         if (event.target?.closest?.(".cpw-prompt-card-confirm__overlay")) return;
         if (activeImportDialog?.overlay.contains(event.target)) return;
@@ -3398,6 +3419,7 @@ export function openPromptCardLibraryMenu({
     };
 
     const onDocumentKeyDown = (event) => {
+        if (suspended) return;
         if (closed || !root.contains(document.activeElement)) return;
         if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
         if (
@@ -3449,6 +3471,18 @@ export function openPromptCardLibraryMenu({
         library = nextLibrary;
         render();
     });
+    const setSuspended = (value) => {
+        suspended = Boolean(value);
+        root.classList.toggle("cpw-prompt-card-library--suspended", suspended);
+        root.inert = suspended;
+        if (suspended) root.setAttribute("aria-hidden", "true");
+        else root.removeAttribute("aria-hidden");
+        if (suspended) {
+            hideFavoriteTooltip();
+            closeContextMenu();
+            deleteController.disarm();
+        }
+    };
     closeButton.addEventListener("click", () => close());
     importButton.addEventListener("click", openImportDialog);
     header.addEventListener("pointerdown", (event) => {
@@ -3532,5 +3566,5 @@ export function openPromptCardLibraryMenu({
             render();
         });
     position();
-    return { close, root };
+    return { close, root, setSuspended };
 }

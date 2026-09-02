@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -499,12 +499,12 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-window-modes-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-editor-selection-palette-v3/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-favorite-card-edit-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-favorite-card-edit-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
-    assert.match(gridSource, /footer\.append\(modeActions, favoriteActions, commitActions\)/);
+    assert.match(gridSource, /footer\.append\(modeActions\);[\s\S]*if \(!favoriteUpdateMode\) footer\.append\(favoriteActions\);[\s\S]*footer\.append\(commitActions\)/);
     assert.doesNotMatch(gridSource, /const selectionActions = element/);
     assert.match(gridSource, /const currentEditorFavoriteSnapshot = \(\) => \{/);
     assert.match(gridSource, /mode: "assign",[\s\S]*getSnapshot: currentEditorFavoriteSnapshot,[\s\S]*resolvePromptTip: resolveFavoriteCardPromptTip/);
@@ -584,6 +584,11 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /if \(mode === "browse"\) \{\s*choose\.addEventListener\("click"/s);
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-overwrite", t\("Overwrite"\)/);
     assert.match(favoriteSource, /overwriteButton\.addEventListener\("click"[\s\S]*overwriteFavoriteFromDraft\(card\)/);
+    assert.match(favoriteSource, /const editButton = mode === "manage"/);
+    assert.match(favoriteSource, /cpw-prompt-card-library__favorite-edit", t\("Edit"\)/);
+    assert.match(favoriteSource, /onEditCard\?\.\(card, editButton\)/);
+    assert.match(favoriteSource, /return \{ close, root, setSuspended \}/);
+    assert.match(favoriteSource, /if \(suspended\) return;[\s\S]*deleteController\.handlePointerDown/);
     assert.match(favoriteSource, /cpw-prompt-card-library__favorite-count/);
     assert.match(favoriteSource, /deleteController\.createButton\(\{[\s\S]*className: "cpw-prompt-card-library__favorite-delete"/);
     assert.match(favoriteSource, /row\.draggable = canManageOrder/);
@@ -676,8 +681,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-library--manage \.cpw-prompt-card-library__favorite-row/);
     assert.match(cssSource, /\.cpw-prompt-card-library__panel-add\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-delete\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*right:\s*3px;[^}]*transform:\s*translateY\(-50%\);/s);
-    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);[^}]*border-radius:\s*5px;/s);
-    assert.match(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-title-line,\s*\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-preview\s*\{[^}]*padding-right:\s*68\.5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__favorite-overwrite,\s*\.cpw-prompt-card-library__favorite-edit\s*\{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);[^}]*border-radius:\s*5px;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__favorite-title-line,[\s\S]*\.cpw-prompt-card-library--manage \.cpw-prompt-card-library__favorite-preview\s*\{[^}]*padding-right:\s*68\.5px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__favorite-rename-editor\s*\{[^}]*grid-template-columns:\s*minmax\(42px, 1fr\) auto auto;[^}]*align-items:\s*center;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__row-wrap--insert-before::before/);
     assert.match(cssSource, /\.cpw-prompt-card-library__row--dragging\s*\{[^}]*opacity:\s*0\.52;/s);

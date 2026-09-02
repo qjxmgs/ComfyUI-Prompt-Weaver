@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260902-window-modes-v1";
+} from "./prompt_card_library.js?v=20260902-favorite-card-edit-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
+} from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -706,7 +706,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260902-editor-selection-palette-v3", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260902-favorite-card-edit-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2597,6 +2597,24 @@ function createPromptGridWidget(node, inputName, inputData) {
             anchor: manageFavoritesButton,
             mode: "manage",
             resolvePromptTip: resolveFavoriteCardPromptTip,
+            onEditCard: (favorite, editButton) => {
+                controller?.setSuspended?.(true);
+                openPromptEditor(null, null, editButton, {
+                    mode: "favorite-update",
+                    item: favorite,
+                    onSubmit: (snapshot) => promptCardLibraryService.mutate(
+                        (client) => client.updateCard(favorite.id, { snapshot }),
+                    ),
+                    onClose: () => controller?.setSuspended?.(false),
+                    restoreFocus: () => {
+                        const nextEditButton = controller?.root?.querySelector?.(
+                            `[data-favorite-card-id="${favorite.id}"] .cpw-prompt-card-library__favorite-edit`,
+                        );
+                        nextEditButton?.focus?.();
+                        return Boolean(nextEditButton);
+                    },
+                });
+            },
             onClose: () => {
                 if (activePromptCardLibraryMenu === controller) {
                     activePromptCardLibraryMenu = null;
@@ -3317,21 +3335,28 @@ function createPromptGridWidget(node, inputName, inputData) {
     function closePromptEditor(restoreFocus = true) {
         const editor = activePromptEditor;
         if (!editor) return;
-        closePromptCardLibraryMenu(false);
+        if (!editor.preserveFavoriteLibrary) closePromptCardLibraryMenu(false);
         editor.cancelPendingAdd?.();
         activePromptEditor = null;
         editor.overlay.remove();
+        editor.onClose?.();
         if (restoreFocus) {
             queueMicrotask(() => {
-                if (editor.opener.isConnected) editor.opener.focus();
+                if (editor.restoreFocus?.()) return;
+                if (editor.opener?.isConnected) editor.opener.focus();
             });
         }
     }
 
-    function openPromptEditor(promptInput, itemId, opener) {
+    function openPromptEditor(promptInput, itemId, opener, options = {}) {
         closePromptEditor(false);
-        const currentItem = state?.items.find((item) => item.id === itemId) ?? null;
-        const originalPrompt = promptInput.value;
+        const favoriteUpdateMode = options.mode === "favorite-update";
+        const currentItem = favoriteUpdateMode
+            ? options.item ?? null
+            : state?.items.find((item) => item.id === itemId) ?? null;
+        const originalPrompt = favoriteUpdateMode
+            ? currentItem?.prompt ?? ""
+            : promptInput.value;
         const parsedTokens = splitPromptTokens(originalPrompt);
         const initialTokenState = reconcilePromptTokenStates(
             originalPrompt,
@@ -3365,10 +3390,12 @@ function createPromptGridWidget(node, inputName, inputData) {
         let promptRequiresRebuild = false;
         let promptFontSize = readPromptEditorFontSize();
         let editorFavoriteId = normalizePromptCardFavoriteId(currentItem?.favorite_id);
+        let submitting = false;
         const editorHistory = new PromptEditorHistory();
         let pendingTextHistory = null;
 
         const overlay = element("div", "cpw-prompt-editor__overlay");
+        overlay.classList.toggle("cpw-prompt-editor__overlay--favorite-update", favoriteUpdateMode);
         const dialog = element("section", "cpw-prompt-editor");
         dialog.setAttribute("role", "dialog");
         dialog.setAttribute("aria-modal", "true");
@@ -3499,7 +3526,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const confirmButton = element(
             "button",
             "cpw-prompt-editor__action cpw-prompt-editor__action--primary",
-            t("Confirm"),
+            t(favoriteUpdateMode ? "Update" : "Confirm"),
         );
         const copyButton = element(
             "button",
@@ -3527,7 +3554,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteActions.append(favoriteCardsButton);
         const commitActions = element("div", "cpw-prompt-editor__commit-actions");
         commitActions.append(copyButton, confirmButton);
-        footer.append(modeActions, favoriteActions, commitActions);
+        footer.append(modeActions);
+        if (!favoriteUpdateMode) footer.append(favoriteActions);
+        footer.append(commitActions);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
         resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
@@ -4131,6 +4160,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                         },
                     },
                 );
+                editorAutocompleteController.popup?.classList.toggle(
+                    "cpw-tag-autocomplete--favorite-update",
+                    favoriteUpdateMode,
+                );
                 if (focusFreeText) {
                     queueMicrotask(() => {
                         freeTextArea?.focus();
@@ -4243,6 +4276,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                             recordPromptContentChange(historySnapshot);
                         },
                     },
+                );
+                editorAutocompleteController.popup?.classList.toggle(
+                    "cpw-tag-autocomplete--favorite-update",
+                    favoriteUpdateMode,
                 );
                 addInput.addEventListener("keydown", (event) => {
                     if (event.isComposing || event.defaultPrevented) return;
@@ -4452,7 +4489,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             return restorePromptContentSnapshot(snapshot, { focusContent });
         };
         const cancelPromptEditorTransientAction = () => {
-            if (activePromptCardLibraryMenu) {
+            if (activePromptCardLibraryMenu && !favoriteUpdateMode) {
                 closePromptCardLibraryMenu(true);
                 return true;
             }
@@ -4603,11 +4640,13 @@ function createPromptGridWidget(node, inputName, inputData) {
             fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
             closeButton.title = t("Close without saving");
             closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
-            favoriteCardsText.textContent = t("Favorites");
-            favoriteCardsButton.title = t("Save or manage this card's favorite");
-            favoriteCardsButton.setAttribute("aria-label", t("Save or manage this card's favorite"));
+            if (!favoriteUpdateMode) {
+                favoriteCardsText.textContent = t("Favorites");
+                favoriteCardsButton.title = t("Save or manage this card's favorite");
+                favoriteCardsButton.setAttribute("aria-label", t("Save or manage this card's favorite"));
+            }
             renderCopyButton();
-            confirmButton.textContent = t("Confirm");
+            confirmButton.textContent = t(favoriteUpdateMode ? "Update" : "Confirm");
             resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
             tokenList.setAttribute(
                 "aria-label",
@@ -4630,6 +4669,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         activePromptEditor = {
             overlay,
             opener,
+            preserveFavoriteLibrary: favoriteUpdateMode,
+            restoreFocus: options.restoreFocus,
+            onClose: options.onClose,
             cancelPendingAdd: cleanupPromptEditor,
             refreshLocale: refreshPromptEditorLocale,
         };
@@ -4659,7 +4701,9 @@ function createPromptGridWidget(node, inputName, inputData) {
                 count: parsedTokens.length - initialTokens.length,
             }));
         }
-        closeButton.addEventListener("click", () => closePromptEditor());
+        closeButton.addEventListener("click", () => {
+            if (!submitting) closePromptEditor();
+        });
         undoButton.addEventListener("click", () => undoPromptContent());
         redoButton.addEventListener("click", () => redoPromptContent());
         bulkSelectionButton.addEventListener("click", () => {
@@ -4671,7 +4715,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         retainUnselectedInput.addEventListener("change", () => (
             setRetainUnselectedEnabled(retainUnselectedInput.checked)
         ));
-        favoriteCardsButton.addEventListener("click", openEditorFavoriteMenu);
+        if (!favoriteUpdateMode) {
+            favoriteCardsButton.addEventListener("click", openEditorFavoriteMenu);
+        }
         copyButton.addEventListener("click", async () => {
             try {
                 await copyTextToClipboard(currentPromptDraft());
@@ -4681,7 +4727,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 showCopyFeedback("Copy failed");
             }
         });
-        confirmButton.addEventListener("click", () => {
+        confirmButton.addEventListener("click", async () => {
             clearAddBlurTimer();
             const nextTitle = cardTitleInput.value;
             const nextPrompt = currentPromptDraft();
@@ -4689,6 +4735,33 @@ function createPromptGridWidget(node, inputName, inputData) {
             const promptTokens = retainUnselected
                 ? promptTokenStatesForStorage(storedDraft.tokens, storedDraft.selected)
                 : null;
+            if (favoriteUpdateMode) {
+                if (submitting) return;
+                submitting = true;
+                confirmButton.disabled = true;
+                closeButton.disabled = true;
+                dialog.setAttribute("aria-busy", "true");
+                setAddStatus(t("Saving…"));
+                try {
+                    await options.onSubmit?.(promptCardFavoriteSnapshot({
+                        title: nextTitle,
+                        prompt: nextPrompt,
+                        color: currentItem?.color,
+                        retain_unselected: retainUnselected,
+                        prompt_tokens: promptTokens,
+                    }));
+                    if (activePromptEditor?.overlay === overlay) closePromptEditor();
+                } catch (error) {
+                    if (activePromptEditor?.overlay !== overlay) return;
+                    setAddStatus(error instanceof Error ? error.message : String(error));
+                    submitting = false;
+                    confirmButton.disabled = false;
+                    closeButton.disabled = false;
+                    dialog.setAttribute("aria-busy", "false");
+                    confirmButton.focus();
+                }
+                return;
+            }
             closePromptEditor();
             const gridTitleInput = promptInput
                 .closest(".cpw-prompt-grid__card")
@@ -4721,6 +4794,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (event.key === "Escape" && !event.isComposing) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
+                if (submitting) return;
                 if (!cancelPromptEditorTransientAction()) closePromptEditor();
                 return;
             }

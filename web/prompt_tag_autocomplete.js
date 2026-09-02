@@ -1,4 +1,4 @@
-import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
+import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,

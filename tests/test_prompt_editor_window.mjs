@@ -79,6 +79,18 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /titleControls\.append\(cardTitleInput, bulkSelectionButton\)/);
     assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);
     assert.match(uiSource, /modeActions\.append\(retainUnselectedLabel, freeModeLabel\)/);
+    assert.match(uiSource, /const favoriteUpdateMode = options\.mode === "favorite-update"/);
+    assert.match(uiSource, /t\(favoriteUpdateMode \? "Update" : "Confirm"\)/);
+    assert.match(uiSource, /if \(!favoriteUpdateMode\) footer\.append\(favoriteActions\)/);
+    assert.match(uiSource, /client\.updateCard\(favorite\.id, \{ snapshot \}\)/);
+    assert.match(uiSource, /controller\?\.setSuspended\?\.\(true\)/);
+    assert.match(uiSource, /preserveFavoriteLibrary: favoriteUpdateMode/);
+    assert.match(uiSource, /await options\.onSubmit\?\.\(promptCardFavoriteSnapshot/);
+    assert.match(uiSource, /if \(activePromptEditor\?\.overlay === overlay\) closePromptEditor\(\)/);
+    assert.match(uiSource, /if \(submitting\) return;[\s\S]*cancelPromptEditorTransientAction/);
+    assert.match(styleSource, /\.cpw-prompt-editor__overlay--favorite-update\s*\{[^}]*z-index:\s*2147483700;/s);
+    assert.match(uiSource, /cpw-tag-autocomplete--favorite-update/);
+    assert.match(styleSource, /\.cpw-tag-autocomplete--favorite-update\s*\{[^}]*z-index:\s*2147483800;/s);
     assert.match(uiSource, /header\.append\(titleBar, toolbar\)/);
     assert.match(uiSource, /title: cardTitleInput\.value,[\s\S]*prompt: currentPromptDraft\(\)/);
     assert.match(uiSource, /const nextTitle = cardTitleInput\.value/);

@@ -38,6 +38,8 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Unselected prompts will be removed"), "Unselected prompts will be removed");
     assert.equal(t("Edit Card ("), "Edit Card (");
     assert.equal(t("Card title"), "Card title");
+    assert.equal(t("Update"), "Update");
+    assert.equal(t("Edit"), "Edit");
     assert.equal(t("Favorite Cards"), "Favorite Cards");
     assert.equal(t("Favorite Cards Manager"), "Favorite Cards Manager");
     assert.equal(t("Add Favorite Card"), "Add Favorite Card");
@@ -71,6 +73,8 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Unselected prompts will be removed"), "未点亮的提示词将被移除");
     assert.equal(t("Edit Card ("), "编辑卡片（");
     assert.equal(t("Card title"), "卡片标题");
+    assert.equal(t("Update"), "更新");
+    assert.equal(t("Edit"), "编辑");
     assert.equal(t("Favorite Cards"), "收藏卡片");
     assert.equal(t("Favorite Cards Manager"), "收藏卡片管理");
     assert.equal(t("Add Favorite Card"), "收藏卡片添加");
