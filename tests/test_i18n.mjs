@@ -43,6 +43,10 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Category moved to {name}.", { name: "People" }), "Category moved to People.");
     assert.equal(t("Enable all cards"), "Enable all cards");
     assert.equal(t("Disable all cards"), "Disable all cards");
+    assert.equal(t("All Enabled"), "All Enabled");
+    assert.equal(t("All Disabled"), "All Disabled");
+    assert.equal(t("Partially Enabled"), "Partially Enabled");
+    assert.equal(t("No Prompts"), "No Prompts");
     assert.equal(tp("{count} column", "{count} columns", 1), "1 column");
     assert.equal(tp("{count} column", "{count} columns", 6), "6 columns");
     assert.equal(
@@ -69,6 +73,10 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Category moved to {name}.", { name: "人物" }), "分类已移动到人物。");
     assert.equal(t("Enable all cards"), "全部开启卡片");
     assert.equal(t("Disable all cards"), "全部关闭卡片");
+    assert.equal(t("All Enabled"), "已全开");
+    assert.equal(t("All Disabled"), "已全关");
+    assert.equal(t("Partially Enabled"), "部分开启");
+    assert.equal(t("No Prompts"), "无提示词");
     assert.equal(tp("{count} column", "{count} columns", 1), "1 列");
     assert.equal(tp("{count} column", "{count} columns", 6), "6 列");
     assert.equal(t("Some cards are enabled. Activate to enable all cards"), "部分卡片已开启，点击后将全部开启");

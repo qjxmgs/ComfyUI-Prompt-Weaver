@@ -2,7 +2,7 @@ import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
-import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
+import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
 import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";

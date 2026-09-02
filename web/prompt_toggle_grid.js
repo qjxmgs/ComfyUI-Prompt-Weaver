@@ -46,13 +46,14 @@ import {
     dedupePromptTokens,
     mergePromptTokenInput,
     promptSelectionFromFreeText,
+    promptTokenSelectionState,
     promptTokenStatesForStorage,
     reconcilePromptTokenStates,
     removePromptToken,
     setAllPromptTokenSelection,
     splitPromptTokens,
     togglePromptTokenOnce,
-} from "./prompt_editor_tokens.js?v=20260830-retain-unselected-v1";
+} from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
 import {
     clampPromptEditorPosition,
     countActivePromptTokens,
@@ -705,7 +706,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260902-footer-mode-controls-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260902-editor-selection-palette-v3", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -3387,6 +3388,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         cardTitleInput.value = currentItem?.title ?? "";
         cardTitleInput.placeholder = t("Prompt title");
         cardTitleInput.setAttribute("aria-label", t("Prompt title"));
+        const bulkSelectionButton = element(
+            "button",
+            "cpw-prompt-editor__action cpw-prompt-editor__bulk-selection",
+        );
+        bulkSelectionButton.type = "button";
+        bulkSelectionButton.setAttribute("role", "checkbox");
+        const titleControls = element("div", "cpw-prompt-editor__title-controls");
+        titleControls.append(cardTitleInput, bulkSelectionButton);
         const freeModeLabel = element("label", "cpw-prompt-editor__free-mode");
         const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
         freeModeInput.type = "checkbox";
@@ -3472,7 +3481,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         closeButton.title = t("Close without saving");
         closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
         titleBar.append(title, closeButton);
-        toolbar.append(cardTitleInput, historyActions, fontSizeControl);
+        toolbar.append(titleControls, historyActions, fontSizeControl);
         header.append(titleBar, toolbar);
 
         const content = element("div", "cpw-prompt-editor__content");
@@ -3487,9 +3496,6 @@ function createPromptGridWidget(node, inputName, inputData) {
         const footer = element("footer", "cpw-prompt-editor__footer");
         const modeActions = element("div", "cpw-prompt-editor__mode-actions");
         modeActions.append(retainUnselectedLabel, freeModeLabel);
-        const selectionActions = element("div", "cpw-prompt-editor__selection-actions");
-        const enableAllButton = element("button", "cpw-prompt-editor__action", t("Enable All"));
-        const disableAllButton = element("button", "cpw-prompt-editor__action", t("Disable All"));
         const confirmButton = element(
             "button",
             "cpw-prompt-editor__action cpw-prompt-editor__action--primary",
@@ -3500,16 +3506,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             "cpw-prompt-editor__action cpw-prompt-editor__action--copy",
             t("Copy"),
         );
-        enableAllButton.type = "button";
-        enableAllButton.title = t("Enable all prompts");
-        disableAllButton.type = "button";
-        disableAllButton.title = t("Disable all prompts");
         copyButton.type = "button";
         copyButton.title = t("Copy current prompt");
         copyButton.setAttribute("aria-label", t("Copy current prompt"));
         copyButton.setAttribute("aria-live", "polite");
         confirmButton.type = "button";
-        selectionActions.append(enableAllButton, disableAllButton);
         const favoriteActions = element("div", "cpw-prompt-editor__favorite-actions");
         const favoriteCardsButton = element(
             "button",
@@ -3526,7 +3527,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteActions.append(favoriteCardsButton);
         const commitActions = element("div", "cpw-prompt-editor__commit-actions");
         commitActions.append(copyButton, confirmButton);
-        footer.append(modeActions, selectionActions, favoriteActions, commitActions);
+        footer.append(modeActions, favoriteActions, commitActions);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
         resizeHandle.setAttribute("aria-label", t("Resize the prompt editor"));
@@ -3549,7 +3550,36 @@ function createPromptGridWidget(node, inputName, inputData) {
         };
         const setAddStatus = (message) => {
             addStatus.textContent = message || "";
+            addStatus.title = message || "";
             addStatus.hidden = !message;
+        };
+        const syncBulkSelectionButton = () => {
+            const selectionState = promptTokenSelectionState(selected);
+            const stateLabel = selectionState === "on"
+                ? t("All Enabled")
+                : selectionState === "off"
+                    ? t("All Disabled")
+                    : selectionState === "mixed"
+                        ? t("Partially Enabled")
+                        : t("No Prompts");
+            const actionLabel = freeMode
+                ? t("Bulk selection is unavailable in Text Mode")
+                : selectionState === "on"
+                    ? t("Disable all prompts")
+                    : selectionState === "empty"
+                        ? t("No prompts to toggle")
+                        : selectionState === "mixed"
+                            ? t("Some prompts are enabled. Activate to enable all prompts")
+                            : t("Enable all prompts");
+            bulkSelectionButton.disabled = freeMode || selectionState === "empty";
+            bulkSelectionButton.dataset.state = selectionState;
+            bulkSelectionButton.textContent = stateLabel;
+            bulkSelectionButton.title = actionLabel;
+            bulkSelectionButton.setAttribute("aria-label", stateLabel);
+            bulkSelectionButton.setAttribute(
+                "aria-checked",
+                selectionState === "mixed" ? "mixed" : String(selectionState === "on"),
+            );
         };
         const clearCopyFeedbackTimer = () => {
             if (!copyFeedbackTimer) return;
@@ -3774,6 +3804,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 "aria-label",
                 tp("{count} prompt active", "{count} prompts active", count),
             );
+            syncBulkSelectionButton();
         };
         const currentPromptTokenStates = () => tokens.map((text, index) => ({
             text,
@@ -3996,8 +4027,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             addInput = null;
             addButton = null;
             freeTextArea = null;
-            enableAllButton.disabled = freeMode;
-            disableAllButton.disabled = freeMode;
             tokenList.classList.toggle("cpw-prompt-editor__tokens--free", freeMode);
             tokenList.setAttribute(
                 "aria-label",
@@ -4574,10 +4603,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
             closeButton.title = t("Close without saving");
             closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
-            enableAllButton.textContent = t("Enable All");
-            disableAllButton.textContent = t("Disable All");
-            enableAllButton.title = t("Enable all prompts");
-            disableAllButton.title = t("Disable all prompts");
             favoriteCardsText.textContent = t("Favorites");
             favoriteCardsButton.title = t("Save or manage this card's favorite");
             favoriteCardsButton.setAttribute("aria-label", t("Save or manage this card's favorite"));
@@ -4637,8 +4662,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         closeButton.addEventListener("click", () => closePromptEditor());
         undoButton.addEventListener("click", () => undoPromptContent());
         redoButton.addEventListener("click", () => redoPromptContent());
-        enableAllButton.addEventListener("click", () => setAllPromptTokensActive(true));
-        disableAllButton.addEventListener("click", () => setAllPromptTokensActive(false));
+        bulkSelectionButton.addEventListener("click", () => {
+            const selectionState = promptTokenSelectionState(selected);
+            if (freeMode || selectionState === "empty") return;
+            setAllPromptTokensActive(selectionState !== "on");
+        });
         freeModeInput.addEventListener("change", () => setFreeModeEnabled(freeModeInput.checked));
         retainUnselectedInput.addEventListener("change", () => (
             setRetainUnselectedEnabled(retainUnselectedInput.checked)

@@ -74,7 +74,8 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /const cardTitleInput = element\("input", "cpw-prompt-editor__card-title"\)/);
     assert.match(uiSource, /cardTitleInput\.value = currentItem\?\.title \?\? ""/);
     assert.match(uiSource, /titleBar\.append\(title, closeButton\)/);
-    assert.match(uiSource, /toolbar\.append\(cardTitleInput, historyActions, fontSizeControl\)/);
+    assert.match(uiSource, /titleControls\.append\(cardTitleInput, bulkSelectionButton\)/);
+    assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);
     assert.match(uiSource, /modeActions\.append\(retainUnselectedLabel, freeModeLabel\)/);
     assert.match(uiSource, /header\.append\(titleBar, toolbar\)/);
     assert.match(uiSource, /title: cardTitleInput\.value,[\s\S]*prompt: currentPromptDraft\(\)/);
@@ -95,7 +96,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /fontSizeLabel\.textContent = t\("Font Size"\)/);
     assert.match(
         uiSource,
-        /toolbar\.append\(cardTitleInput, historyActions, fontSizeControl\)/,
+        /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/,
     );
     assert.match(uiSource, /historyActions\.append\(undoButton, redoButton\)/);
     assert.match(uiSource, /cpw-prompt-editor__history-action--undo/);

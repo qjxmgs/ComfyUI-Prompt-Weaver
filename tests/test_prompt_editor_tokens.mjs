@@ -14,6 +14,7 @@ const {
     mergePromptTokenInput,
     normalizePromptTokenStates,
     promptSelectionFromFreeText,
+    promptTokenSelectionState,
     promptTokenStatesForStorage,
     reconcilePromptTokenStates,
     removePromptToken,
@@ -192,12 +193,40 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
         new URL("../web/prompt_toggle_grid.css", import.meta.url),
         "utf8",
     );
-    assert.match(uiSource, /cpw-prompt-editor__action", t\("Enable All"\)/);
-    assert.match(uiSource, /cpw-prompt-editor__action", t\("Disable All"\)/);
+    assert.match(uiSource, /cpw-prompt-editor__action cpw-prompt-editor__bulk-selection/);
+    assert.match(uiSource, /bulkSelectionButton\.setAttribute\("role", "checkbox"\)/);
+    assert.match(
+        uiSource,
+        /titleControls\.append\(cardTitleInput, bulkSelectionButton\)/,
+    );
+    assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);
+    assert.match(uiSource, /content\.append\(tokenList, addStatus\)/);
+    assert.doesNotMatch(uiSource, /cpw-prompt-editor__status-row/);
+    assert.match(uiSource, /const selectionState = promptTokenSelectionState\(selected\)/);
+    assert.match(uiSource, /selectionState === "mixed" \? "mixed" : String\(selectionState === "on"\)/);
+    assert.match(uiSource, /setAllPromptTokensActive\(selectionState !== "on"\)/);
+    assert.doesNotMatch(uiSource, /const enableAllButton =/);
+    assert.doesNotMatch(uiSource, /const disableAllButton =/);
+    assert.doesNotMatch(uiSource, /cpw-prompt-editor__selection-actions/);
     assert.doesNotMatch(uiSource, /resetSelectionButton/);
     assert.match(uiSource, /tokenList\.setPointerCapture\(event\.pointerId\)/);
     assert.match(uiSource, /tokenList\.addEventListener\("pointermove", movePromptTokenToggleGesture\)/);
     assert.match(uiSource, /suppressTokenClick = true/);
+    assert.match(styleSource, /\.cpw-prompt-editor__bulk-selection/);
+    assert.match(styleSource, /\.cpw-prompt-editor__title-controls/);
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__bulk-selection\[data-state="on"\]\s*\{[\s\S]*?#45b978/,
+    );
+    assert.match(
+        styleSource,
+        /\.cpw-prompt-editor__bulk-selection\[data-state="mixed"\]\s*\{[\s\S]*?#d6a84b/,
+    );
+    assert.match(styleSource, /\.cpw-prompt-editor__bulk-selection\[data-state="off"\]/);
+    assert.match(styleSource, /data-state="on"\]:hover:not\(:disabled\)/);
+    assert.match(styleSource, /data-state="mixed"\]:active:not\(:disabled\)/);
+    assert.match(styleSource, /data-state="off"\]:focus-visible/);
+    assert.match(styleSource, /\.cpw-prompt-editor__bulk-selection:disabled/);
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--toggling/);
 });
 
@@ -213,8 +242,10 @@ test("prompt editor UI exposes non-persistent text mode with raw confirmation", 
     assert.match(uiSource, /freeModeInput\.checked = false/);
     assert.match(uiSource, /cpw-prompt-editor__free-mode-text", t\("Text Mode"\)/);
     assert.match(uiSource, /cpw-prompt-editor__free-text/);
-    assert.match(uiSource, /enableAllButton\.disabled = freeMode/);
-    assert.match(uiSource, /disableAllButton\.disabled = freeMode/);
+    assert.match(
+        uiSource,
+        /bulkSelectionButton\.disabled = freeMode \|\| selectionState === "empty"/,
+    );
     assert.match(uiSource, /freeModeInput\.addEventListener\("change"/);
     assert.match(uiSource, /const currentPromptDraft = \(\) => \(\s*freeMode\s*\? \(freeTextArea\?\.value \?\? freePromptText\)/);
     assert.match(uiSource, /const nextPrompt = currentPromptDraft\(\)/);
@@ -228,6 +259,14 @@ test("prompt editor UI exposes non-persistent text mode with raw confirmation", 
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--free/);
     assert.match(styleSource, /\.cpw-prompt-editor__free-text/);
     assert.match(styleSource, /\.cpw-prompt-editor__action:disabled/);
+});
+
+test("bulk selection state distinguishes empty, disabled, mixed, and enabled tokens", () => {
+    assert.equal(promptTokenSelectionState([]), "empty");
+    assert.equal(promptTokenSelectionState(null), "empty");
+    assert.equal(promptTokenSelectionState([false, false]), "off");
+    assert.equal(promptTokenSelectionState([true, false]), "mixed");
+    assert.equal(promptTokenSelectionState([true, true]), "on");
 });
 
 test("text mode and retention expose stateful hints with Tab mode switching", async () => {

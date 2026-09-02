@@ -208,6 +208,14 @@ export function setAllPromptTokenSelection(selected, active) {
     return selected.map(() => Boolean(active));
 }
 
+export function promptTokenSelectionState(selected) {
+    if (!Array.isArray(selected) || selected.length === 0) return "empty";
+    const activeCount = selected.reduce((count, active) => count + (active ? 1 : 0), 0);
+    if (activeCount === 0) return "off";
+    if (activeCount === selected.length) return "on";
+    return "mixed";
+}
+
 export function togglePromptTokenOnce(selected, index, visitedIndexes) {
     if (
         !Array.isArray(selected)

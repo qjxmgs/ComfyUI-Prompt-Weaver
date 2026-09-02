@@ -135,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260902-footer-mode-controls-v1",
+        "./prompt_toggle_grid.css?v=20260902-editor-selection-palette-v3",
         import.meta.url,
     ).href;
     document.head.append(link);

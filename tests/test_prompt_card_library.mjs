@@ -23,7 +23,7 @@ const favoriteSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
-    .replace("./prompt_editor_tokens.js?v=20260830-retain-unselected-v1", tokenUrl)
+    .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
     .replace("./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
@@ -500,11 +500,12 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
     assert.match(gridSource, /prompt_card_library\.js\?v=20260902-editor-keyboard-layers-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-footer-mode-controls-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-editor-selection-palette-v3/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
-    assert.match(gridSource, /footer\.append\(modeActions, selectionActions, favoriteActions, commitActions\)/);
+    assert.match(gridSource, /footer\.append\(modeActions, favoriteActions, commitActions\)/);
+    assert.doesNotMatch(gridSource, /const selectionActions = element/);
     assert.match(gridSource, /const currentEditorFavoriteSnapshot = \(\) => \{/);
     assert.match(gridSource, /mode: "assign",[\s\S]*getSnapshot: currentEditorFavoriteSnapshot,[\s\S]*resolvePromptTip: resolveFavoriteCardPromptTip/);
     assert.doesNotMatch(gridSource, /const appendFavoriteCard = \(favorite\) =>/);

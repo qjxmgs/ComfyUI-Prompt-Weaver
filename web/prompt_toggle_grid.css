@@ -1422,6 +1422,14 @@
     user-select: text;
 }
 
+.cpw-prompt-editor__title-controls {
+    min-width: 230px;
+    display: flex;
+    flex: 1 1 300px;
+    align-items: center;
+    gap: 8px;
+}
+
 .cpw-prompt-editor__card-title:hover {
     border-color: color-mix(in srgb, var(--p-primary-color, #7c6df2) 58%, var(--border-color, #4b4d52));
 }
@@ -1935,10 +1943,14 @@
 }
 
 .cpw-prompt-editor__add-status {
-    flex: 0 0 auto;
+    min-width: 0;
     min-height: 18px;
+    flex: 0 0 auto;
+    overflow: hidden;
     color: var(--descrip-text, #aaa);
     font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .cpw-prompt-editor__add-status[hidden] {
@@ -2086,14 +2098,6 @@
     gap: 10px;
     padding-right: 30px;
     border-top: 1px solid var(--border-color, #4b4d52);
-}
-
-.cpw-prompt-editor__selection-actions {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
 }
 
 .cpw-prompt-editor__mode-actions {
@@ -2533,6 +2537,87 @@
     background: var(--comfy-input-bg, #303136);
     font: 500 12px/1.35 Inter, system-ui, sans-serif;
     cursor: pointer;
+}
+
+.cpw-prompt-editor__bulk-selection {
+    min-width: 96px;
+    height: 30px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="on"] {
+    border-color: color-mix(in srgb, #45b978 78%, var(--border-color, #4b4d52));
+    color: color-mix(in srgb, #45b978 76%, var(--input-text, #e8e8ea));
+    background: color-mix(in srgb, #45b978 18%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="mixed"] {
+    border-style: dashed;
+    border-color: color-mix(in srgb, #d6a84b 78%, var(--border-color, #4b4d52));
+    color: color-mix(in srgb, #d6a84b 78%, var(--input-text, #e8e8ea));
+    background: color-mix(in srgb, #d6a84b 16%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="off"] {
+    border-color: var(--border-color, #4b4d52);
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-input-bg, #17181a);
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="on"]:hover:not(:disabled),
+.cpw-prompt-editor__bulk-selection[data-state="on"]:focus-visible:not(:disabled) {
+    border-color: #45b978;
+    background: color-mix(in srgb, #45b978 27%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="on"]:active:not(:disabled) {
+    border-color: color-mix(in srgb, #45b978 88%, #fff);
+    background: color-mix(in srgb, #45b978 36%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="mixed"]:hover:not(:disabled),
+.cpw-prompt-editor__bulk-selection[data-state="mixed"]:focus-visible:not(:disabled) {
+    border-color: #d6a84b;
+    background: color-mix(in srgb, #d6a84b 25%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="mixed"]:active:not(:disabled) {
+    border-color: color-mix(in srgb, #d6a84b 88%, #fff);
+    background: color-mix(in srgb, #d6a84b 34%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="off"]:hover:not(:disabled),
+.cpw-prompt-editor__bulk-selection[data-state="off"]:focus-visible:not(:disabled) {
+    border-color: color-mix(in srgb, var(--input-text, #e8e8ea) 38%, var(--border-color, #4b4d52));
+    background: color-mix(in srgb, var(--input-text, #e8e8ea) 7%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="off"]:active:not(:disabled) {
+    border-color: color-mix(in srgb, var(--input-text, #e8e8ea) 52%, var(--border-color, #4b4d52));
+    background: color-mix(in srgb, var(--input-text, #e8e8ea) 12%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="on"]:focus-visible {
+    outline-color: color-mix(in srgb, #45b978 82%, transparent);
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="mixed"]:focus-visible {
+    outline-color: color-mix(in srgb, #d6a84b 82%, transparent);
+}
+
+.cpw-prompt-editor__bulk-selection[data-state="off"]:focus-visible {
+    outline-color: color-mix(in srgb, var(--input-text, #e8e8ea) 58%, transparent);
+}
+
+.cpw-prompt-editor__bulk-selection:disabled,
+.cpw-prompt-editor__bulk-selection:disabled:hover,
+.cpw-prompt-editor__bulk-selection:disabled:active {
+    border-style: solid;
+    border-color: var(--border-color, #4b4d52);
+    color: var(--descrip-text, #999);
+    background: var(--comfy-input-bg, #17181a);
+    box-shadow: none;
 }
 
 .cpw-translation-manager-setting-button:hover {
