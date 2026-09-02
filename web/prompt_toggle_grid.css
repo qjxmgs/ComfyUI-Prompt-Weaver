@@ -1403,6 +1403,32 @@
     white-space: nowrap;
 }
 
+.cpw-prompt-editor__card-title {
+    width: clamp(120px, 18vw, 240px);
+    min-width: 100px;
+    height: 30px;
+    box-sizing: border-box;
+    flex: 1 1 180px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color, #4b4d52);
+    border-radius: 5px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: var(--comfy-input-bg, #222);
+    font: 400 13px/1.4 Inter, system-ui, sans-serif;
+    cursor: text;
+    user-select: text;
+}
+
+.cpw-prompt-editor__card-title:hover {
+    border-color: color-mix(in srgb, var(--p-primary-color, #7c6df2) 58%, var(--border-color, #4b4d52));
+}
+
+.cpw-prompt-editor__card-title:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--p-primary-color, #7c6df2) 70%, transparent);
+    outline-offset: 1px;
+    border-color: var(--p-primary-color, #7c6df2);
+}
+
 .cpw-prompt-editor__free-mode {
     position: relative;
     display: inline-flex;
@@ -2531,6 +2557,7 @@
     grid-template-columns: 30px minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
     padding: 8px 12px 8px 8px;
     color: var(--input-text, var(--fg-color, #e8e8ea));
     background: color-mix(in srgb, var(--comfy-menu-bg, #18191b) 82%, var(--comfy-input-bg, #242529));
@@ -3288,6 +3315,17 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     user-select: text;
+}
+
+.cpw-prompt-card-cascade__tooltip-title {
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color, #4b4d52) 36%, transparent);
+    color: color-mix(in srgb, var(--p-primary-color, #7c6df2) 62%, var(--input-text, #fff));
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .cpw-prompt-card-cascade__tooltip-line--zh {

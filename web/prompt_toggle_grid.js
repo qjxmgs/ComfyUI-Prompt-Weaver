@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260901-text-input-key-routing-v1";
+} from "./prompt_card_library.js?v=20260902-card-title-edit-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -705,7 +705,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260901-category-navigation-lock-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260902-card-title-edit-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -2647,6 +2647,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function updatePromptEditorItem(id, {
+        title,
         prompt,
         retainUnselected,
         promptTokens,
@@ -2663,7 +2664,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         const currentFavoriteId = normalizePromptCardFavoriteId(currentItem.favorite_id);
         const nextFavoriteId = normalizePromptCardFavoriteId(favoriteId);
         if (
-            currentItem.prompt === prompt
+            currentItem.title === title
+            && currentItem.prompt === prompt
             && currentRetainUnselected === retainUnselected
             && JSON.stringify(currentPromptTokens) === JSON.stringify(promptTokens)
             && currentFavoriteId === nextFavoriteId
@@ -2676,6 +2678,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         } = currentItem;
         const nextItem = {
             ...baseItem,
+            title,
             prompt,
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && promptTokens?.length ? { prompt_tokens: promptTokens } : {}),
@@ -3378,6 +3381,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         title.id = `cpw-prompt-editor-${createId()}`;
         dialog.setAttribute("aria-labelledby", title.id);
         const headerMain = element("div", "cpw-prompt-editor__header-main");
+        const cardTitleInput = element("input", "cpw-prompt-editor__card-title");
+        cardTitleInput.type = "text";
+        cardTitleInput.value = currentItem?.title ?? "";
+        cardTitleInput.placeholder = t("Prompt title");
+        cardTitleInput.setAttribute("aria-label", t("Prompt title"));
         const freeModeLabel = element("label", "cpw-prompt-editor__free-mode");
         const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
         freeModeInput.type = "checkbox";
@@ -3458,7 +3466,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         );
         fontSizeValue.setAttribute("for", fontSizeInput.id);
         fontSizeControl.append(fontSizeLabel, fontSizeInput, fontSizeValue);
-        headerMain.append(title, freeModeLabel, retainUnselectedLabel, historyActions);
+        headerMain.append(title, cardTitleInput, freeModeLabel, retainUnselectedLabel, historyActions);
         const headerActions = element("div", "cpw-prompt-editor__header-actions");
         const closeButton = element("button", "cpw-prompt-editor__close", "×");
         closeButton.type = "button";
@@ -4390,7 +4398,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 ? promptTokenStatesForStorage(storedDraft.tokens, storedDraft.selected)
                 : null;
             return promptCardFavoriteSnapshot({
-                title: currentItem?.title ?? "",
+                title: cardTitleInput.value,
                 prompt: currentPromptDraft(),
                 color: currentItem?.color,
                 retain_unselected: retainUnselected,
@@ -4501,6 +4509,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             title.childNodes[0].textContent = t("Edit Card (");
             title.childNodes[2].textContent = t(")");
             renderActivePromptCount();
+            cardTitleInput.placeholder = t("Prompt title");
+            cardTitleInput.setAttribute("aria-label", t("Prompt title"));
             freeModeInput.setAttribute("aria-label", t("Text Mode"));
             freeModeText.textContent = t("Text Mode");
             retainUnselectedInput.setAttribute("aria-label", t("Retain unselected prompts"));
@@ -4593,14 +4603,20 @@ function createPromptGridWidget(node, inputName, inputData) {
         });
         confirmButton.addEventListener("click", () => {
             clearAddBlurTimer();
+            const nextTitle = cardTitleInput.value;
             const nextPrompt = currentPromptDraft();
             const storedDraft = currentStoredTokenDraft();
             const promptTokens = retainUnselected
                 ? promptTokenStatesForStorage(storedDraft.tokens, storedDraft.selected)
                 : null;
             closePromptEditor();
+            const gridTitleInput = promptInput
+                .closest(".cpw-prompt-grid__card")
+                ?.querySelector(".cpw-prompt-grid__title");
+            if (gridTitleInput) gridTitleInput.value = nextTitle;
             promptInput.value = nextPrompt;
             updatePromptEditorItem(itemId, {
+                title: nextTitle,
                 prompt: nextPrompt,
                 retainUnselected,
                 promptTokens,
@@ -4621,9 +4637,12 @@ function createPromptGridWidget(node, inputName, inputData) {
                     || (!event.metaKey && !event.shiftKey && shortcutKey === "y")
                 );
             if ((undoShortcut || redoShortcut) && !event.isComposing) {
-                const nativeTextHistory = pendingTextHistory?.dirty === true
-                    && pendingTextHistory.element === event.target
-                    && (event.target === freeTextArea || event.target === addInput);
+                const nativeTextHistory = event.target === cardTitleInput
+                    || (
+                        pendingTextHistory?.dirty === true
+                        && pendingTextHistory.element === event.target
+                        && (event.target === freeTextArea || event.target === addInput)
+                    );
                 if (nativeTextHistory) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -4636,7 +4655,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 closePromptEditor();
                 return;
             }
-            if (event.key !== "Tab" || event.isComposing) return;
+            if (event.key !== "Tab" || event.isComposing || event.target === cardTitleInput) return;
             if (!event.shiftKey) {
                 if (event.defaultPrevented) return;
                 event.preventDefault();

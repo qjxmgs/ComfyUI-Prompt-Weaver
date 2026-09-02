@@ -490,8 +490,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260901-text-input-key-routing-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260901-category-navigation-lock-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-card-title-edit-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-card-title-edit-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -628,6 +628,11 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip\s*\{[^}]*position:\s*fixed;[^}]*max-width:\s*min\(420px,[^}]*pointer-events:\s*none;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip\s*\{[^}]*border:[^}]*48%[^}]*background:[^}]*82%[^}]*box-shadow:[^}]*24%[^}]*font-size:\s*11px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip-line\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere;/s);
+    assert.equal(
+        (favoriteSource.match(/element\("div", "cpw-prompt-card-cascade__tooltip-title", cardName\)/g) ?? []).length,
+        2,
+    );
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip-title\s*\{[^}]*color:\s*color-mix\([^}]*var\(--p-primary-color,[^}]*font-weight:\s*600;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__tooltip-line--zh\s*\{[^}]*border-top:[^}]*36%[^}]*color:[^}]*84%/s);
     assert.match(cssSource, /@keyframes cpw-prompt-grid-favorite-shine/);
     assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed \.cpw-prompt-grid__title-shell::after/);

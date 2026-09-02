@@ -249,7 +249,7 @@ test("text mode and retention expose stateful hints with Tab mode switching", as
     assert.match(uiSource, /"Unselected prompts will be removed"/);
     assert.match(
         uiSource,
-        /if \(event\.key !== "Tab" \|\| event\.isComposing\) return;[\s\S]*if \(!event\.shiftKey\)[\s\S]*setFreeModeEnabled\(!freeMode\)/,
+        /if \(event\.key !== "Tab" \|\| event\.isComposing \|\| event\.target === cardTitleInput\) return;[\s\S]*if \(!event\.shiftKey\)[\s\S]*setFreeModeEnabled\(!freeMode\)/,
     );
     assert.match(uiSource, /renderTokens\(\{ focusFreeText: true \}\)/);
     assert.match(uiSource, /renderTokens\(\{ focusTagMode: true \}\)/);

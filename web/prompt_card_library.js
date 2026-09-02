@@ -799,6 +799,7 @@ export function openPromptCardFavoriteCascade({
         if (closed || !button?.isConnected) return;
         hideFavoriteTooltip();
         const fallback = favoriteCardBilingualPrompt(card);
+        const cardName = card.title.trim() || t("Untitled Card");
         const tooltip = element(
             "div",
             "cpw-prompt-card-cascade__tooltip cpw-prompt-card-library__tooltip",
@@ -806,6 +807,7 @@ export function openPromptCardFavoriteCascade({
         tooltip.id = `cpw-prompt-card-cascade-tooltip-${++favoriteTooltipSequence}`;
         tooltip.setAttribute("role", "tooltip");
         tooltip.append(
+            element("div", "cpw-prompt-card-cascade__tooltip-title", cardName),
             element("div", "cpw-prompt-card-cascade__tooltip-line cpw-prompt-card-cascade__tooltip-line--en", fallback.english),
             element("div", "cpw-prompt-card-cascade__tooltip-line cpw-prompt-card-cascade__tooltip-line--zh", fallback.chinese),
         );
@@ -1403,6 +1405,7 @@ export function openPromptCardLibraryMenu({
         if (closed || !button?.isConnected) return;
         hideFavoriteTooltip();
         const fallback = favoriteCardBilingualPrompt(card);
+        const cardName = card.title.trim() || t("Untitled Card");
         const tooltip = element(
             "div",
             "cpw-prompt-card-cascade__tooltip cpw-prompt-card-library__tooltip",
@@ -1410,6 +1413,7 @@ export function openPromptCardLibraryMenu({
         tooltip.id = `cpw-prompt-card-library-tooltip-${++favoriteTooltipSequence}`;
         tooltip.setAttribute("role", "tooltip");
         tooltip.append(
+            element("div", "cpw-prompt-card-cascade__tooltip-title", cardName),
             element("div", "cpw-prompt-card-cascade__tooltip-line cpw-prompt-card-cascade__tooltip-line--en", fallback.english),
             element("div", "cpw-prompt-card-cascade__tooltip-line cpw-prompt-card-cascade__tooltip-line--zh", fallback.chinese),
         );

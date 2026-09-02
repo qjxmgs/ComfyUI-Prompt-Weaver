@@ -71,6 +71,12 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
         "utf8",
     );
     assert.match(uiSource, /title\.append\(t\("Edit Card \("\), activeCount, t\("\)"\)\)/);
+    assert.match(uiSource, /const cardTitleInput = element\("input", "cpw-prompt-editor__card-title"\)/);
+    assert.match(uiSource, /cardTitleInput\.value = currentItem\?\.title \?\? ""/);
+    assert.match(uiSource, /headerMain\.append\(title, cardTitleInput, freeModeLabel, retainUnselectedLabel, historyActions\)/);
+    assert.match(uiSource, /title: cardTitleInput\.value,[\s\S]*prompt: currentPromptDraft\(\)/);
+    assert.match(uiSource, /const nextTitle = cardTitleInput\.value/);
+    assert.match(uiSource, /updatePromptEditorItem\(itemId, \{[\s\S]*title: nextTitle,[\s\S]*prompt: nextPrompt/);
     assert.match(uiSource, /header\.addEventListener\("pointerdown", beginPromptEditorDrag\)/);
     assert.match(uiSource, /resizeHandle\.addEventListener\("pointerdown", beginPromptEditorResize\)/);
     assert.match(uiSource, /localStorage\?\.setItem\([\s\S]*?PROMPT_EDITOR_SIZE_STORAGE_KEY/);
@@ -84,7 +90,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /fontSizeLabel\.textContent = t\("Font Size"\)/);
     assert.match(
         uiSource,
-        /headerMain\.append\(title, freeModeLabel, retainUnselectedLabel, historyActions\)/,
+        /headerMain\.append\(title, cardTitleInput, freeModeLabel, retainUnselectedLabel, historyActions\)/,
     );
     assert.match(uiSource, /historyActions\.append\(undoButton, redoButton\)/);
     assert.match(uiSource, /cpw-prompt-editor__history-action--undo/);
@@ -109,6 +115,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(styleSource, /\.cpw-prompt-editor__resize-handle\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-control\s*\{/);
     assert.match(styleSource, /\.cpw-prompt-editor__header-actions\s*\{/);
+    assert.match(styleSource, /\.cpw-prompt-editor__card-title\s*\{[\s\S]*cursor:\s*text;[\s\S]*user-select:\s*text;/);
     assert.match(styleSource, /\.cpw-prompt-editor__font-size-label\s*\{/);
     assert.match(
         styleSource,
