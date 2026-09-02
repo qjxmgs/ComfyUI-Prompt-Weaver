@@ -73,6 +73,8 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /title\.append\(t\("Edit Card \("\), activeCount, t\("\)"\)\)/);
     assert.match(uiSource, /const cardTitleInput = element\("input", "cpw-prompt-editor__card-title"\)/);
     assert.match(uiSource, /cardTitleInput\.value = currentItem\?\.title \?\? ""/);
+    assert.match(uiSource, /cardTitleInput\.placeholder = t\("Card title"\)/);
+    assert.doesNotMatch(uiSource, /t\("Prompt title"\)/);
     assert.match(uiSource, /titleBar\.append\(title, closeButton\)/);
     assert.match(uiSource, /titleControls\.append\(cardTitleInput, bulkSelectionButton\)/);
     assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);

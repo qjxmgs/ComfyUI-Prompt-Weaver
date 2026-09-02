@@ -37,7 +37,10 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Press Tab to switch to Tag Mode"), "Press Tab to switch to Tag Mode");
     assert.equal(t("Unselected prompts will be removed"), "Unselected prompts will be removed");
     assert.equal(t("Edit Card ("), "Edit Card (");
+    assert.equal(t("Card title"), "Card title");
     assert.equal(t("Favorite Cards"), "Favorite Cards");
+    assert.equal(t("Favorite Cards Manager"), "Favorite Cards Manager");
+    assert.equal(t("Add Favorite Card"), "Add Favorite Card");
     assert.equal(t("Close favorite cards"), "Close favorite cards");
     assert.equal(t("Category order updated."), "Category order updated.");
     assert.equal(t("Category moved to {name}.", { name: "People" }), "Category moved to People.");
@@ -67,7 +70,10 @@ test("translations interpolate values, format quantities and dates, and preserve
     assert.equal(t("Press Tab to switch to Tag Mode"), "按 Tab 键切换到标签模式");
     assert.equal(t("Unselected prompts will be removed"), "未点亮的提示词将被移除");
     assert.equal(t("Edit Card ("), "编辑卡片（");
+    assert.equal(t("Card title"), "卡片标题");
     assert.equal(t("Favorite Cards"), "收藏卡片");
+    assert.equal(t("Favorite Cards Manager"), "收藏卡片管理");
+    assert.equal(t("Add Favorite Card"), "收藏卡片添加");
     assert.equal(t("Close favorite cards"), "关闭收藏卡片");
     assert.equal(t("Category order updated."), "分类顺序已更新。");
     assert.equal(t("Category moved to {name}.", { name: "人物" }), "分类已移动到人物。");

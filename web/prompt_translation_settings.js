@@ -6,7 +6,7 @@ import {
     getLocale,
     subscribeLocale,
     t,
-} from "./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1";
+} from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,

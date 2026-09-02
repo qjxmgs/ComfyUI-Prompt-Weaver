@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -17,7 +17,12 @@ const MAX_FAVORITE_IMPORT_BYTES = 512 * 1024;
 const FAVORITE_DELETE_CONFIRM_MS = 3_000;
 const FAVORITE_STATUS_VISIBLE_MS = 3_000;
 const FAVORITE_STATUS_TRANSITION_MS = 180;
-const FAVORITE_GEOMETRY_STORAGE_KEY = "prompt-weaver-prompt-card-library-geometry-v1";
+const FAVORITE_GEOMETRY_LEGACY_STORAGE_KEY = "prompt-weaver-prompt-card-library-geometry-v1";
+const FAVORITE_GEOMETRY_STORAGE_KEYS = Object.freeze({
+    assign: "prompt-weaver-prompt-card-library-geometry-assign-v1",
+    manage: "prompt-weaver-prompt-card-library-geometry-manage-v1",
+    browse: "prompt-weaver-prompt-card-library-geometry-browse-v1",
+});
 const FAVORITE_WINDOW_MARGIN = 8;
 const FAVORITE_WINDOW_MIN_WIDTH = 340;
 const FAVORITE_WINDOW_MIN_HEIGHT = 240;
@@ -1290,14 +1295,21 @@ export function openPromptCardLibraryMenu({
     onFavoriteLinked = null,
     onClose = null,
 }) {
+    const windowTitle = mode === "manage"
+        ? t("Favorite Cards Manager")
+        : mode === "assign"
+            ? t("Add Favorite Card")
+            : t("Favorite Cards");
+    const geometryStorageKey = FAVORITE_GEOMETRY_STORAGE_KEYS[mode]
+        ?? FAVORITE_GEOMETRY_STORAGE_KEYS.browse;
     const root = element("section", "cpw-prompt-card-library");
     root.classList.toggle("cpw-prompt-card-library--assign", mode === "assign");
     root.classList.toggle("cpw-prompt-card-library--manage", mode === "manage");
     root.setAttribute("role", "dialog");
-    root.setAttribute("aria-label", t("Favorite Cards"));
+    root.setAttribute("aria-label", windowTitle);
     root.tabIndex = -1;
     const header = element("header", "cpw-prompt-card-library__header");
-    const heading = element("strong", "cpw-prompt-card-library__heading", t("Favorite Cards"));
+    const heading = element("strong", "cpw-prompt-card-library__heading", windowTitle);
     const importButton = element("button", "cpw-prompt-card-library__import", t("Import"));
     importButton.type = "button";
     importButton.title = t("Import favorite cards from text");
@@ -1659,7 +1671,8 @@ export function openPromptCardLibraryMenu({
 
     const readStoredGeometry = () => {
         try {
-            const raw = localStorage.getItem(FAVORITE_GEOMETRY_STORAGE_KEY);
+            const raw = localStorage.getItem(geometryStorageKey)
+                ?? localStorage.getItem(FAVORITE_GEOMETRY_LEGACY_STORAGE_KEY);
             return raw ? JSON.parse(raw) : null;
         } catch {
             return null;
@@ -1684,7 +1697,7 @@ export function openPromptCardLibraryMenu({
         const geometry = currentGeometry();
         if (!geometry) return;
         try {
-            localStorage.setItem(FAVORITE_GEOMETRY_STORAGE_KEY, JSON.stringify(geometry));
+            localStorage.setItem(geometryStorageKey, JSON.stringify(geometry));
         } catch {
             // Geometry persistence is optional and must never block favorites.
         }

@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
 
 export const ARCHIVE_EXPORT_FORMAT = "prompt-weaver-prompt-grid-archives";
 export const ARCHIVE_FORMAT_VERSION = 1;

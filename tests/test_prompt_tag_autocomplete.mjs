@@ -10,13 +10,13 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const assistantSource = (await readFile(
     new URL("../web/prompt_assistant_tags.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2", i18nUrl);
 const assistantUrl = `data:text/javascript;base64,${Buffer.from(assistantSource).toString("base64")}`;
 const moduleSource = (await readFile(
     new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1", i18nUrl)
+    .replace("./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2", i18nUrl)
     .replace("./prompt_assistant_tags.js?v=20260825-matched-alias-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {

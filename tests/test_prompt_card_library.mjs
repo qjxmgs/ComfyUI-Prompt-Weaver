@@ -16,7 +16,7 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
@@ -24,7 +24,7 @@ const favoriteSource = (await readFile(
 ))
     .replace("./prompt_grid_archives.js?v=20260830-prompt-card-library-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -499,7 +499,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-editor-keyboard-layers-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-window-modes-v1/);
     assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-editor-selection-palette-v3/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
@@ -543,8 +543,10 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /service\.mutate\(\(client\) => client\.deleteCard\(card\.id\)\)/);
     assert.match(favoriteSource, /event\.stopPropagation\(\)/);
     assert.match(favoriteSource, /renderOpenBranch\(\)/);
-    assert.match(favoriteSource, /root\.setAttribute\("aria-label", t\("Favorite Cards"\)\)/);
-    assert.match(favoriteSource, /__heading", t\("Favorite Cards"\)\)/);
+    assert.match(favoriteSource, /mode === "manage"[\s\S]*t\("Favorite Cards Manager"\)/);
+    assert.match(favoriteSource, /mode === "assign"[\s\S]*t\("Add Favorite Card"\)/);
+    assert.match(favoriteSource, /root\.setAttribute\("aria-label", windowTitle\)/);
+    assert.match(favoriteSource, /__heading", windowTitle\)/);
     assert.match(favoriteSource, /root\.classList\.toggle\("cpw-prompt-card-library--manage", mode === "manage"\)/);
     assert.match(favoriteSource, /const canManageOrder = mode === "assign" \|\| mode === "manage";/);
     assert.match(favoriteSource, /if \(mode === "browse"\) \{[\s\S]*onChooseCard\?\.\(card\);/);
@@ -615,8 +617,12 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(favoriteSource, /cpw-prompt-card-library__favorite-rename-label/);
     assert.match(favoriteSource, /editor\.append\(input, cancel, confirm\)/);
     assert.match(favoriteSource, /client\.updateCard\(card\.id, \{ snapshot \}\)[\s\S]*t\("Favorite renamed\."\)/);
-    assert.match(favoriteSource, /FAVORITE_GEOMETRY_STORAGE_KEY/);
-    assert.match(favoriteSource, /localStorage\.setItem\(FAVORITE_GEOMETRY_STORAGE_KEY/);
+    assert.match(favoriteSource, /FAVORITE_GEOMETRY_STORAGE_KEYS = Object\.freeze\(\{/);
+    assert.match(favoriteSource, /geometry-assign-v1/);
+    assert.match(favoriteSource, /geometry-manage-v1/);
+    assert.match(favoriteSource, /localStorage\.getItem\(geometryStorageKey\)/);
+    assert.match(favoriteSource, /localStorage\.setItem\(geometryStorageKey/);
+    assert.match(favoriteSource, /FAVORITE_GEOMETRY_LEGACY_STORAGE_KEY/);
     assert.match(favoriteSource, /const position = \(\) => \{\s*if \(closed \|\| geometryInitialized\) return;/);
     assert.match(favoriteSource, /const onViewportResize = \(\) => \{[\s\S]*if \(geometryInitialized\) applyGeometry\(currentGeometry\(\)\);[\s\S]*else position\(\);/);
     assert.match(favoriteSource, /cpw-prompt-card-library__resize-handle/);

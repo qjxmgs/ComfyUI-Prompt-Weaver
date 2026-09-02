@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260902-editor-keyboard-layers-v1";
+} from "./prompt_card_library.js?v=20260902-window-modes-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260901-favorite-text-import-v1";
+} from "./prompt_weaver_i18n.js?v=20260902-favorite-window-modes-v2";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -938,8 +938,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             );
             const titleInput = card.querySelector(".cpw-prompt-grid__title");
             if (titleInput) {
-                titleInput.placeholder = t("Prompt title");
-                titleInput.setAttribute("aria-label", t("Prompt title"));
+                titleInput.placeholder = t("Card title");
+                titleInput.setAttribute("aria-label", t("Card title"));
             }
             const promptInput = card.querySelector(".cpw-prompt-grid__prompt");
             if (promptInput) {
@@ -3386,8 +3386,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         const cardTitleInput = element("input", "cpw-prompt-editor__card-title");
         cardTitleInput.type = "text";
         cardTitleInput.value = currentItem?.title ?? "";
-        cardTitleInput.placeholder = t("Prompt title");
-        cardTitleInput.setAttribute("aria-label", t("Prompt title"));
+        cardTitleInput.placeholder = t("Card title");
+        cardTitleInput.setAttribute("aria-label", t("Card title"));
         const bulkSelectionButton = element(
             "button",
             "cpw-prompt-editor__action cpw-prompt-editor__bulk-selection",
@@ -4590,8 +4590,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             title.childNodes[0].textContent = t("Edit Card (");
             title.childNodes[2].textContent = t(")");
             renderActivePromptCount();
-            cardTitleInput.placeholder = t("Prompt title");
-            cardTitleInput.setAttribute("aria-label", t("Prompt title"));
+            cardTitleInput.placeholder = t("Card title");
+            cardTitleInput.setAttribute("aria-label", t("Card title"));
             freeModeInput.setAttribute("aria-label", t("Text Mode"));
             freeModeText.textContent = t("Text Mode");
             retainUnselectedInput.setAttribute("aria-label", t("Retain unselected prompts"));
@@ -4789,8 +4789,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         const title = element("input", "cpw-prompt-grid__title");
         title.type = "text";
         title.value = item.title;
-        title.placeholder = t("Prompt title");
-        title.setAttribute("aria-label", t("Prompt title"));
+        title.placeholder = t("Card title");
+        title.setAttribute("aria-label", t("Card title"));
 
         const titleShell = element("div", "cpw-prompt-grid__title-shell");
         const favoriteSwitchButton = element("button", "cpw-prompt-grid__favorite-switch");
