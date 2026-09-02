@@ -1192,7 +1192,7 @@ export class PromptAutocompleteController {
             ) return;
             event.preventDefault();
             event.stopImmediatePropagation();
-            this.handleCloseClick(event);
+            this.dismiss();
         };
         this.handleResizePointerDown = (event) => {
             if (event.button !== 0 || this.resizeSession || this.popup.hidden) return;
@@ -1609,6 +1609,19 @@ export class PromptAutocompleteController {
         this.resultsContainer.replaceChildren();
         this.input.setAttribute("aria-expanded", "false");
         this.input.removeAttribute("aria-activedescendant");
+    }
+
+    dismiss({ restoreFocus = true } = {}) {
+        if (this.destroyed || this.popup.hidden) return false;
+        const focusInput = restoreFocus && this.popup.contains(document.activeElement);
+        this.cancelPending();
+        this.sequence += 1;
+        this.close();
+        if (focusInput && this.input.isConnected) {
+            this.suppressNextFocusSearch = true;
+            this.input.focus({ preventScroll: true });
+        }
+        return true;
     }
 
     destroy() {

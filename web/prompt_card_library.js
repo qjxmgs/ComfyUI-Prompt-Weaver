@@ -335,16 +335,22 @@ export function replacePromptGridItemWithFavorite(item, favorite) {
     const {
         title: _discardedTitle,
         prompt: _discardedPrompt,
-        color: _discardedColor,
+        color: currentColorValue,
         retain_unselected: _discardedRetainUnselected,
         prompt_tokens: _discardedPromptTokens,
         favorite_id: _discardedFavoriteId,
         ...preserved
     } = item && typeof item === "object" ? item : {};
     const favoriteId = normalizePromptCardFavoriteId(favorite?.id);
+    const currentColor = normalizePromptGridItemColor(currentColorValue);
+    const {
+        color: _discardedFavoriteColor,
+        ...favoriteSnapshot
+    } = promptCardFavoriteSnapshot(favorite);
     return {
         ...preserved,
-        ...promptCardFavoriteSnapshot(favorite),
+        ...favoriteSnapshot,
+        ...(currentColor ? { color: currentColor } : {}),
         ...(favoriteId ? { favorite_id: favoriteId } : {}),
     };
 }
@@ -1190,6 +1196,7 @@ export function openPromptCardFavoriteCascade({
             return;
         }
         event.preventDefault();
+        event.stopImmediatePropagation();
         close();
     };
 

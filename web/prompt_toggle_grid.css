@@ -1733,7 +1733,7 @@
     gap: 8px;
     overflow: auto;
     overscroll-behavior: contain;
-    padding: 2px;
+    padding: 4px;
 }
 
 .cpw-prompt-editor__tokens--free {
@@ -1836,14 +1836,20 @@
 .cpw-prompt-editor__add {
     flex: 0 0 44px;
     width: 44px;
-    height: 44px;
-    aspect-ratio: 1;
+    min-height: 44px;
+    height: auto;
+    align-self: stretch;
+    display: grid;
+    place-items: center;
     padding: 0;
     border: 1px dashed color-mix(in srgb, var(--p-primary-color, #7c6df2) 70%, var(--border-color, #4b4d52));
     border-radius: 7px;
     color: var(--p-primary-color, #87a9ff);
     background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 10%, var(--comfy-input-bg, #17181a));
-    font: 600 18px/1 Inter, system-ui, sans-serif;
+    font-family: Inter, system-ui, sans-serif;
+    font-size: calc(var(--cpw-prompt-editor-font-size, 15px) * 1.2);
+    font-weight: 600;
+    line-height: 1;
     cursor: pointer;
 }
 

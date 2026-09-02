@@ -163,7 +163,7 @@ test("favorite snapshots are independent from ids and timestamps", () => {
     }));
 });
 
-test("favorite switching replaces snapshot fields while preserving grid identity and state", () => {
+test("favorite switching replaces prompt fields while preserving grid identity, state, and color", () => {
     const current = {
         id: "grid-card-1",
         enabled: false,
@@ -174,12 +174,13 @@ test("favorite switching replaces snapshot fields while preserving grid identity
         favorite_id: "44444444-4444-4444-8444-444444444444",
         custom_editor_state: "preserved",
     };
-    const favorite = libraryPayload().cards[0];
+    const favorite = { ...libraryPayload().cards[0], color: "purple" };
     const switched = replacePromptGridItemWithFavorite(current, favorite);
     assert.deepEqual(switched, {
         id: "grid-card-1",
         enabled: false,
         custom_editor_state: "preserved",
+        color: "red",
         title: "主角",
         prompt: "1girl",
         prompt_tokens: [
@@ -188,7 +189,15 @@ test("favorite switching replaces snapshot fields while preserving grid identity
         ],
         favorite_id: CARD_ID,
     });
-    assert.equal(promptCardFavoriteFingerprint(switched), promptCardFavoriteFingerprint(favorite));
+    assert.deepEqual(
+        promptCardFavoriteSnapshot({ ...switched, color: favorite.color }),
+        promptCardFavoriteSnapshot(favorite),
+    );
+    const colorless = replacePromptGridItemWithFavorite(
+        { id: "grid-card-2", enabled: true, title: "No color", prompt: "old" },
+        favorite,
+    );
+    assert.equal(Object.hasOwn(colorless, "color"), false);
 });
 
 test("favorite moves accept only changed secondary-category targets", () => {
@@ -490,8 +499,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-card-title-edit-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-card-title-edit-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260902-editor-keyboard-layers-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260902-add-frame-stretch-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
@@ -526,6 +535,10 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /panel\.addEventListener\("pointerenter", \(\) => \{\s*if \(level < 2\) hideFavoriteTooltip\(\);/s);
     assert.match(favoriteSource, /deleteController\.handlePointerDown\(event\)/);
     assert.match(favoriteSource, /if \(deleteController\.disarm\(\)\)[\s\S]*event\.stopImmediatePropagation\(\)/);
+    assert.match(
+        favoriteSource,
+        /event\.preventDefault\(\);\s*event\.stopImmediatePropagation\(\);\s*close\(\);/,
+    );
     assert.match(favoriteSource, /service\.mutate\(\(client\) => client\.deleteCard\(card\.id\)\)/);
     assert.match(favoriteSource, /event\.stopPropagation\(\)/);
     assert.match(favoriteSource, /renderOpenBranch\(\)/);

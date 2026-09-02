@@ -21,7 +21,7 @@ import {
     DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
     PROMPT_ASSISTANT_SETTING_ID,
     normalizeAutocompleteSourceOrder,
-} from "./prompt_tag_autocomplete.js?v=20260825-source-order-v1";
+} from "./prompt_tag_autocomplete.js?v=20260902-editor-keyboard-layers-v1";
 
 const TRANSLATION_MANAGER_SETTING_ID = "PromptWeaver.Autocomplete.TranslationManager";
 const TRANSLATION_MANAGER_COMMAND_ID = "PromptWeaver.Autocomplete.UpdateDictionary";
@@ -135,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260902-card-title-edit-v1",
+        "./prompt_toggle_grid.css?v=20260902-add-frame-stretch-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

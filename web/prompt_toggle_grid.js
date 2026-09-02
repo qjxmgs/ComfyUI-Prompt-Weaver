@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260902-card-title-edit-v1";
+} from "./prompt_card_library.js?v=20260902-editor-keyboard-layers-v1";
 import {
     connectLocale,
     formatDateTime,
@@ -76,7 +76,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260825-source-order-v1";
+} from "./prompt_tag_autocomplete.js?v=20260902-editor-keyboard-layers-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -705,7 +705,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260902-card-title-edit-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260902-add-frame-stretch-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -3662,6 +3662,8 @@ function createPromptGridWidget(node, inputName, inputData) {
                 pointerId: event.pointerId,
                 offsetX: event.clientX - rect.left,
                 offsetY: event.clientY - rect.top,
+                startLeft: rect.left,
+                startTop: rect.top,
                 width: rect.width,
                 height: rect.height,
             };
@@ -3688,6 +3690,18 @@ function createPromptGridWidget(node, inputName, inputData) {
             dialog.classList.remove("cpw-prompt-editor--dragging");
             if (header.hasPointerCapture(pointerId)) header.releasePointerCapture(pointerId);
             event.preventDefault();
+        };
+        const cancelPromptEditorDrag = () => {
+            const session = editorDragSession;
+            if (!session) return false;
+            editorDragSession = null;
+            dialog.classList.remove("cpw-prompt-editor--dragging");
+            if (header.hasPointerCapture(session.pointerId)) {
+                header.releasePointerCapture(session.pointerId);
+            }
+            applyPromptEditorPosition({ left: session.startLeft, top: session.startTop });
+            handleSuggestionAnchorChange();
+            return true;
         };
         const beginPromptEditorResize = (event) => {
             if (event.button !== 0 || editorDragSession || editorResizeSession) return;
@@ -3733,6 +3747,21 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (resizeHandle.hasPointerCapture(pointerId)) resizeHandle.releasePointerCapture(pointerId);
             persistPromptEditorSize(dialog.getBoundingClientRect());
             event.preventDefault();
+        };
+        const cancelPromptEditorResize = () => {
+            const session = editorResizeSession;
+            if (!session) return false;
+            editorResizeSession = null;
+            dialog.classList.remove("cpw-prompt-editor--resizing");
+            if (resizeHandle.hasPointerCapture(session.pointerId)) {
+                resizeHandle.releasePointerCapture(session.pointerId);
+            }
+            applyPromptEditorSize({
+                width: session.startWidth,
+                height: session.startHeight,
+            });
+            handleSuggestionAnchorChange();
+            return true;
         };
         const renderActivePromptCount = () => {
             const count = freeMode
@@ -4225,8 +4254,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (focusAddButton) queueMicrotask(() => addButton?.focus());
             if (focusTagMode) {
                 queueMicrotask(() => (
-                    tokenList.querySelector(".cpw-prompt-editor__token")
-                    ?? addButton
+                    addButton
+                    ?? tokenList.querySelector(".cpw-prompt-editor__token")
                     ?? confirmButton
                 ).focus());
             }
@@ -4391,6 +4420,26 @@ function createPromptGridWidget(node, inputName, inputData) {
             syncHistoryActions();
             return restorePromptContentSnapshot(snapshot, { focusContent });
         };
+        const cancelPromptEditorTransientAction = () => {
+            if (activePromptCardLibraryMenu) {
+                closePromptCardLibraryMenu(true);
+                return true;
+            }
+            if (editorAutocompleteController?.dismiss?.()) return true;
+            if (cancelPromptEditorResize()) return true;
+            if (cancelPromptEditorDrag()) return true;
+            const gesture = cleanupPromptTokenToggleGesture();
+            if (gesture) {
+                restorePromptContentSnapshot(gesture.historySnapshot, { focusContent: true });
+                scheduleTokenClickSuppressionEnd();
+                return true;
+            }
+            if (adding) {
+                cancelAddInput();
+                return true;
+            }
+            return false;
+        };
 
         const currentEditorFavoriteSnapshot = () => {
             const storedDraft = currentStoredTokenDraft();
@@ -4502,6 +4551,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 handlePromptTokenTranslationSettings,
             );
             window.removeEventListener("resize", handlePromptEditorViewportResize);
+            window.removeEventListener("keydown", handlePromptEditorKeyDown, true);
             editorHistory.clear();
             syncHistoryActions();
         };
@@ -4623,7 +4673,27 @@ function createPromptGridWidget(node, inputName, inputData) {
                 favoriteId: editorFavoriteId,
             });
         });
-        dialog.addEventListener("keydown", (event) => {
+        const handlePromptEditorKeyDown = (event) => {
+            if (activePromptEditor?.overlay !== overlay) return;
+            if (activePromptCardLibraryMenu?.root?.contains?.(event.target)) return;
+            if (
+                event.key === "Tab"
+                && !event.isComposing
+                && !event.ctrlKey
+                && !event.altKey
+                && !event.metaKey
+            ) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                setFreeModeEnabled(!freeMode);
+                return;
+            }
+            if (event.key === "Escape" && !event.isComposing) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                if (!cancelPromptEditorTransientAction()) closePromptEditor();
+                return;
+            }
             const shortcutModifier = event.ctrlKey || event.metaKey;
             const shortcutKey = event.key.toLowerCase();
             const undoShortcut = shortcutModifier
@@ -4650,30 +4720,8 @@ function createPromptGridWidget(node, inputName, inputData) {
                 else undoPromptContent({ focusContent: true });
                 return;
             }
-            if (event.key === "Escape") {
-                event.preventDefault();
-                closePromptEditor();
-                return;
-            }
-            if (event.key !== "Tab" || event.isComposing || event.target === cardTitleInput) return;
-            if (!event.shiftKey) {
-                if (event.defaultPrevented) return;
-                event.preventDefault();
-                event.stopPropagation();
-                setFreeModeEnabled(!freeMode);
-                return;
-            }
-            const focusable = [...dialog.querySelectorAll(
-                "button:not([disabled]), input:not([disabled]), textarea:not([disabled])",
-            )].filter((candidate) => candidate.tabIndex >= 0 && !candidate.hidden);
-            if (!focusable.length) return;
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-            }
-        });
+        };
+        window.addEventListener("keydown", handlePromptEditorKeyDown, true);
         for (const eventName of [
             "pointerdown", "pointermove", "pointerup", "pointercancel", "mousedown", "click", "dblclick",
             "keydown", "keyup", "input", "change", "contextmenu",

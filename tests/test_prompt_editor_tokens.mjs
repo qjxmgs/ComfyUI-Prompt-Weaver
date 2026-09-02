@@ -249,14 +249,40 @@ test("text mode and retention expose stateful hints with Tab mode switching", as
     assert.match(uiSource, /"Unselected prompts will be removed"/);
     assert.match(
         uiSource,
-        /if \(event\.key !== "Tab" \|\| event\.isComposing \|\| event\.target === cardTitleInput\) return;[\s\S]*if \(!event\.shiftKey\)[\s\S]*setFreeModeEnabled\(!freeMode\)/,
+        /event\.key === "Tab"[\s\S]*!event\.isComposing[\s\S]*event\.preventDefault\(\);[\s\S]*event\.stopImmediatePropagation\(\);[\s\S]*setFreeModeEnabled\(!freeMode\)/,
     );
+    assert.doesNotMatch(uiSource, /const focusable = \[\.\.\.dialog\.querySelectorAll/);
+    assert.match(uiSource, /window\.addEventListener\("keydown", handlePromptEditorKeyDown, true\)/);
+    assert.match(uiSource, /window\.removeEventListener\("keydown", handlePromptEditorKeyDown, true\)/);
     assert.match(uiSource, /renderTokens\(\{ focusFreeText: true \}\)/);
     assert.match(uiSource, /renderTokens\(\{ focusTagMode: true \}\)/);
     assert.match(
         uiSource,
-        /tokenList\.querySelector\("\.cpw-prompt-editor__token"\)[\s\S]*\?\? addButton[\s\S]*\?\? confirmButton/,
+        /if \(focusTagMode\)[\s\S]*addButton[\s\S]*\?\? tokenList\.querySelector\("\.cpw-prompt-editor__token"\)[\s\S]*\?\? confirmButton/,
     );
+});
+
+test("Escape cancels one prompt editor interaction layer before closing", async () => {
+    const uiSource = await readFile(
+        new URL("../web/prompt_toggle_grid.js", import.meta.url),
+        "utf8",
+    );
+    assert.match(uiSource, /const cancelPromptEditorTransientAction = \(\) => \{/);
+    assert.match(
+        uiSource,
+        /activePromptCardLibraryMenu[\s\S]*editorAutocompleteController\?\.dismiss\?\.\(\)[\s\S]*cancelPromptEditorResize\(\)[\s\S]*cancelPromptEditorDrag\(\)[\s\S]*cleanupPromptTokenToggleGesture\(\)[\s\S]*if \(adding\)/,
+    );
+    assert.match(
+        uiSource,
+        /event\.key === "Escape"[\s\S]*if \(!cancelPromptEditorTransientAction\(\)\) closePromptEditor\(\)/,
+    );
+    assert.match(uiSource, /applyPromptEditorPosition\(\{ left: session\.startLeft, top: session\.startTop \}\)/);
+    assert.match(uiSource, /width: session\.startWidth,[\s\S]*height: session\.startHeight/);
+    assert.match(
+        uiSource,
+        /activePromptCardLibraryMenu\?\.root\?\.contains\?\.\(event\.target\)\) return;/,
+    );
+    assert.doesNotMatch(uiSource, /dialog\.addEventListener\("keydown"/);
 });
 
 test("prompt editor records content-only session history and standard shortcuts", async () => {

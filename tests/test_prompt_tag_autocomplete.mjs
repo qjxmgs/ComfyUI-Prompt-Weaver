@@ -472,6 +472,9 @@ test("free mode suppresses initial search and autocomplete exposes header, close
     assert.match(controllerSource, /cpw-tag-autocomplete__result-count/);
     assert.match(controllerSource, /cpw-tag-autocomplete__close/);
     assert.match(controllerSource, /this\.closeButton\.addEventListener\("click", this\.handleCloseClick\)/);
+    assert.match(controllerSource, /dismiss\(\{ restoreFocus = true \} = \{\}\) \{/);
+    assert.match(controllerSource, /if \(this\.destroyed \|\| this\.popup\.hidden\) return false/);
+    assert.match(controllerSource, /this\.handleGlobalKeyDown[\s\S]*this\.dismiss\(\)/);
     assert.match(controllerSource, /cpw-tag-autocomplete__resize-handle/);
     assert.match(controllerSource, /this\.resizeHandle\.addEventListener\("pointerdown", this\.handleResizePointerDown\)/);
     assert.match(controllerSource, /event\.relatedTarget && this\.popup\.contains\(event\.relatedTarget\)/);
@@ -698,12 +701,12 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260825-source-order-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260902-editor-keyboard-layers-v1/);
     assert.match(source, /sourceOrder:\s*readAutocompleteSourceOrder/);
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260902-card-title-edit-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260902-add-frame-stretch-v1/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);
@@ -711,7 +714,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(cssSource, /\.cpw-autocomplete-sources__row--dragging/);
 });
 
-test("non-free editor renders every token as two rows and keeps add button square", async () => {
+test("non-free editor renders two-row tokens and stretches the add button to their row height", async () => {
     const source = await readFile(new URL("../web/prompt_toggle_grid.js", import.meta.url), "utf8");
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(source, /cpw-prompt-editor__token-prompt/);
@@ -723,7 +726,11 @@ test("non-free editor renders every token as two rows and keeps add button squar
     assert.match(cssSource, /\.cpw-prompt-editor__token-translation/);
     assert.match(
         cssSource,
-        /\.cpw-prompt-editor__add\s*\{[\s\S]*width:\s*44px;[\s\S]*height:\s*44px;[\s\S]*aspect-ratio:\s*1;/,
+        /\.cpw-prompt-editor__tokens\s*\{[\s\S]*overflow:\s*auto;[\s\S]*padding:\s*4px;/,
+    );
+    assert.match(
+        cssSource,
+        /\.cpw-prompt-editor__add\s*\{[\s\S]*width:\s*44px;[\s\S]*min-height:\s*44px;[\s\S]*height:\s*auto;[\s\S]*align-self:\s*stretch;[\s\S]*display:\s*grid;[\s\S]*place-items:\s*center;[\s\S]*font-size:\s*calc\(var\(--cpw-prompt-editor-font-size, 15px\) \* 1\.2\);/,
     );
 });
 
