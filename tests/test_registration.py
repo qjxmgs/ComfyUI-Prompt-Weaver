@@ -42,6 +42,10 @@ class PluginRegistrationTests(unittest.TestCase):
 
         server_module = types.ModuleType("server")
         server_module.PromptServer = prompt_server
+        comfy_module = types.ModuleType("comfy")
+        comfy_module.__path__ = []
+        cli_args_module = types.ModuleType("comfy.cli_args")
+        cli_args_module.args = types.SimpleNamespace(listen="127.0.0.1")
         aiohttp_module = types.ModuleType("aiohttp")
         aiohttp_module.web = types.SimpleNamespace()
 
@@ -59,6 +63,8 @@ class PluginRegistrationTests(unittest.TestCase):
                 module_name: module,
                 "server": server_module,
                 "aiohttp": aiohttp_module,
+                "comfy": comfy_module,
+                "comfy.cli_args": cli_args_module,
             },
         ):
             spec.loader.exec_module(module)

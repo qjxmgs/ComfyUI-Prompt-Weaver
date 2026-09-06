@@ -34,6 +34,10 @@ The desktop application currently installs the plugin only when the target direc
 - `web/prompt_grid_archives.js`, `web/prompt_grid_reorder.js`, and `web/prompt_card_library.js`
 - `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, `web/prompt_assistant_tags.js`, and `web/prompt_tag_autocomplete.js`
 
+## Local-only state changes
+
+Prompt Weaver enables its workflow bridge and every server-side write only when ComfyUI is configured to listen exclusively on loopback addresses such as `127.0.0.1`, `::1`, or `localhost`. Starting ComfyUI with `--listen`, `--listen 0.0.0.0`, a LAN address, or any mixed local/non-local address keeps read-only queries available but makes archive, favorite-card, and tag-dictionary changes return HTTP `403`. Restart ComfyUI with a loopback-only listener to use those operations. Proxy and forwarding headers are intentionally not trusted to relax this boundary.
+
 ## Language support
 
 The node automatically follows **Settings → Language** (`Comfy.Locale`) in ComfyUI. English and Simplified Chinese are included; every other locale falls back to English. Changing the ComfyUI language updates existing Prompt Weaver nodes without changing their serialized configuration, current selection, unsaved prompt-editor draft, or focus.

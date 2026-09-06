@@ -34,6 +34,10 @@ git pull --ff-only origin master
 - `web/prompt_grid_archives.js`、`web/prompt_grid_reorder.js` 和 `web/prompt_card_library.js`
 - `web/prompt_editor_tokens.js`、`web/prompt_editor_window.js`、`web/prompt_assistant_tags.js` 和 `web/prompt_tag_autocomplete.js`
 
+## 仅限本机的状态修改
+
+只有当 ComfyUI 被配置为仅监听 `127.0.0.1`、`::1` 或 `localhost` 等回环地址时，Prompt Weaver 才启用 Workflow 桥接及全部服务端写入操作。若通过 `--listen`、`--listen 0.0.0.0`、局域网地址或本机与非本机混合地址启动，读取查询仍可使用，但存档、收藏卡片和 Tag 词库修改会返回 HTTP `403`。如需使用这些操作，请改为仅监听回环地址并重启 ComfyUI。代理或转发请求头不会放宽这一边界。
+
 ## 语言支持
 
 节点自动跟随 ComfyUI 的“设置 → 语言”（`Comfy.Locale`）。插件内置英文和简体中文；选择其他语言时回退到英文。切换 ComfyUI 语言会更新已经创建的 Prompt Weaver 节点，但不会修改序列化配置、当前选择、尚未确认的提示词编辑草稿或焦点。

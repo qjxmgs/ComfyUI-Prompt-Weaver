@@ -21,8 +21,14 @@ class _Response:
 
 
 class _Routes:
+    def __init__(self):
+        self.registered = []
+
     def _decorator(self, _method, _path):
-        return lambda function: function
+        def register(function):
+            self.registered.append((_method, _path, function))
+            return function
+        return register
 
     def get(self, path):
         return self._decorator("GET", path)
@@ -86,7 +92,7 @@ def _snapshot(prompt="masterpiece"):
     }
 
 
-def _load_plugin(root):
+def _load_plugin(root, *, listen="127.0.0.1"):
     routes = _Routes()
     prompt_server = types.SimpleNamespace(
         instance=types.SimpleNamespace(
@@ -97,6 +103,10 @@ def _load_plugin(root):
     )
     server_module = types.ModuleType("server")
     server_module.PromptServer = prompt_server
+    comfy_module = types.ModuleType("comfy")
+    comfy_module.__path__ = []
+    cli_args_module = types.ModuleType("comfy.cli_args")
+    cli_args_module.args = types.SimpleNamespace(listen=listen)
     aiohttp_module = types.ModuleType("aiohttp")
     aiohttp_module.web = types.SimpleNamespace(
         json_response=lambda payload, status=200: _Response(payload, status)
@@ -110,7 +120,13 @@ def _load_plugin(root):
     module = importlib.util.module_from_spec(spec)
     with mock.patch.dict(
         sys.modules,
-        {module_name: module, "server": server_module, "aiohttp": aiohttp_module},
+        {
+            module_name: module,
+            "server": server_module,
+            "aiohttp": aiohttp_module,
+            "comfy": comfy_module,
+            "comfy.cli_args": cli_args_module,
+        },
     ):
         spec.loader.exec_module(module)
     return module
@@ -126,6 +142,75 @@ class ArchiveRouteTests(unittest.TestCase):
 
     def run_async(self, awaitable):
         return asyncio.run(awaitable)
+
+    def test_loopback_only_listener_detection_is_fail_closed(self):
+        for value in ("127.0.0.1", "::1", "localhost", "127.0.0.1, ::1"):
+            with self.subTest(value=value):
+                self.assertTrue(self.module._listen_is_loopback_only(value))
+        for value in (
+            None,
+            "",
+            "0.0.0.0",
+            "::",
+            "192.168.1.20",
+            "127.0.0.1, 0.0.0.0",
+            "not-a-real-host.invalid",
+        ):
+            with self.subTest(value=value):
+                self.assertFalse(self.module._listen_is_loopback_only(value))
+
+    def test_every_state_changing_route_is_local_only(self):
+        expected = {
+            ("POST", "/prompt-weaver/frontend-ready"),
+            ("POST", "/prompt-weaver/open-workflow"),
+            ("GET", "/prompt-weaver/workflow/{token}"),
+            ("POST", "/prompt-weaver/tag-autocomplete/update"),
+            ("POST", "/prompt-weaver/tag-autocomplete/supplement/import"),
+            ("POST", "/prompt-weaver/tag-autocomplete/supplement/rescan"),
+            ("POST", "/prompt-weaver/prompt-grid-archives"),
+            ("PATCH", "/prompt-weaver/prompt-grid-archives/selection"),
+            ("PATCH", "/prompt-weaver/prompt-grid-archives/order"),
+            ("DELETE", "/prompt-weaver/prompt-grid-archives"),
+            ("PATCH", "/prompt-weaver/prompt-grid-archives/{archive_id}"),
+            ("DELETE", "/prompt-weaver/prompt-grid-archives/{archive_id}"),
+            ("POST", "/prompt-weaver/prompt-grid-archives/import"),
+            ("POST", "/prompt-weaver/prompt-card-library/categories"),
+            ("PATCH", "/prompt-weaver/prompt-card-library/categories/{category_id}"),
+            ("PATCH", "/prompt-weaver/prompt-card-library/categories/{category_id}/position"),
+            ("DELETE", "/prompt-weaver/prompt-card-library/categories/{category_id}"),
+            ("POST", "/prompt-weaver/prompt-card-library/cards"),
+            ("POST", "/prompt-weaver/prompt-card-library/cards/import"),
+            ("PATCH", "/prompt-weaver/prompt-card-library/cards/order"),
+            ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}"),
+            ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}/position"),
+            ("DELETE", "/prompt-weaver/prompt-card-library/cards/{card_id}"),
+        }
+        registered = self.module.PromptServer.instance.routes.registered
+        protected = {
+            (method, path)
+            for method, path, handler in registered
+            if getattr(handler, "_prompt_weaver_local_only", False)
+        }
+        self.assertEqual(protected, expected)
+
+    def test_remote_mode_rejects_before_reading_or_mutating_request(self):
+        class UnreadableRequest:
+            async def json(self):
+                raise AssertionError("guard must run before reading the request")
+
+        self.module.args.listen = "0.0.0.0"
+        response = self.run_async(self.module.frontend_ready(UnreadableRequest()))
+        self.assertEqual(response.status, 403)
+        self.assertEqual(
+            response.payload,
+            {"error": self.module._LOCAL_ONLY_ERROR},
+        )
+        self.assertEqual(self.module._frontend_heartbeats, {})
+
+    def test_remote_mode_keeps_read_only_archive_listing_available(self):
+        self.module.args.listen = "0.0.0.0"
+        response = self.run_async(self.module.list_prompt_grid_archives(_Request()))
+        self.assertEqual(response.status, 200)
 
     def test_open_workflow_keeps_legacy_ui_workflow_payload(self):
         workflow = {"nodes": [{"id": 1, "type": "KSampler"}]}

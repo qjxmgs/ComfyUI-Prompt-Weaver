@@ -1,12 +1,16 @@
 import asyncio
+import functools
+import ipaddress
 import json
 import os
+import socket
 import tempfile
 import time
 import uuid
 from pathlib import Path
 
 from aiohttp import web
+from comfy.cli_args import args
 from server import PromptServer
 
 from .archive_store import (
@@ -62,6 +66,46 @@ _archive_stores = {}
 _prompt_card_library_stores = {}
 _tag_autocomplete_stores = {}
 _tag_source_manifest_path = Path(__file__).resolve().parent / "data" / "tag_sources.json"
+_LOCAL_ONLY_ERROR = (
+    "This operation is only available when ComfyUI listens on loopback addresses."
+)
+
+
+def _host_is_loopback(host):
+    if not isinstance(host, str) or not host.strip():
+        return False
+    host = host.strip().removeprefix("[").removesuffix("]")
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+
+    try:
+        addresses = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+    return bool(addresses) and all(
+        ipaddress.ip_address(sockaddr[0].split("%", 1)[0]).is_loopback
+        for _family, _type, _protocol, _canonical_name, sockaddr in addresses
+    )
+
+
+def _listen_is_loopback_only(value):
+    if not isinstance(value, str):
+        return False
+    hosts = [host.strip() for host in value.split(",")]
+    return bool(hosts) and all(_host_is_loopback(host) for host in hosts)
+
+
+def _local_only(handler):
+    @functools.wraps(handler)
+    async def guarded(request):
+        if not _listen_is_loopback_only(getattr(args, "listen", None)):
+            return web.json_response({"error": _LOCAL_ONLY_ERROR}, status=403)
+        return await handler(request)
+
+    guarded._prompt_weaver_local_only = True
+    return guarded
 
 
 def _archive_store(request):
@@ -220,6 +264,7 @@ def _consume_background_task(task):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/frontend-ready")
+@_local_only
 async def frontend_ready(request):
     try:
         payload = await request.json()
@@ -234,6 +279,7 @@ async def frontend_ready(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/open-workflow")
+@_local_only
 async def open_workflow(request):
     try:
         payload = await request.json()
@@ -294,6 +340,7 @@ async def open_workflow(request):
 
 
 @PromptServer.instance.routes.get("/prompt-weaver/workflow/{token}")
+@_local_only
 async def take_workflow(request):
     data = _pending_workflows.pop(request.match_info["token"], None)
     if data is None:
@@ -315,6 +362,7 @@ async def get_tag_autocomplete_status(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/tag-autocomplete/update")
+@_local_only
 async def update_tag_autocomplete(request):
     try:
         payload = await _request_json(request, 4096)
@@ -337,6 +385,7 @@ async def update_tag_autocomplete(request):
 @PromptServer.instance.routes.post(
     "/prompt-weaver/tag-autocomplete/supplement/import"
 )
+@_local_only
 async def import_tag_autocomplete_supplement(request):
     store = _tag_autocomplete_store(request)
     temporary_path = None
@@ -373,6 +422,7 @@ async def import_tag_autocomplete_supplement(request):
 @PromptServer.instance.routes.post(
     "/prompt-weaver/tag-autocomplete/supplement/rescan"
 )
+@_local_only
 async def rescan_tag_autocomplete_supplement(request):
     try:
         payload = await _request_json(request, 4096)
@@ -442,6 +492,7 @@ async def list_prompt_grid_archives(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/prompt-grid-archives")
+@_local_only
 async def create_prompt_grid_archive(request):
     try:
         payload = await _request_json(request, MAX_SNAPSHOT_BYTES + 4096)
@@ -452,6 +503,7 @@ async def create_prompt_grid_archive(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-grid-archives/selection")
+@_local_only
 async def select_prompt_grid_archive(request):
     try:
         payload = await _request_json(request, 4096)
@@ -466,6 +518,7 @@ async def select_prompt_grid_archive(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-grid-archives/order")
+@_local_only
 async def reorder_prompt_grid_archives(request):
     try:
         payload = await _request_json(request, 16 * 1024)
@@ -477,6 +530,7 @@ async def reorder_prompt_grid_archives(request):
 
 
 @PromptServer.instance.routes.delete("/prompt-weaver/prompt-grid-archives")
+@_local_only
 async def delete_prompt_grid_archives(request):
     try:
         payload = await _request_json(request, 16 * 1024)
@@ -492,6 +546,7 @@ async def delete_prompt_grid_archives(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-grid-archives/{archive_id}")
+@_local_only
 async def update_prompt_grid_archive(request):
     try:
         payload = await _request_json(request, MAX_SNAPSHOT_BYTES + 4096)
@@ -512,6 +567,7 @@ async def update_prompt_grid_archive(request):
 
 
 @PromptServer.instance.routes.delete("/prompt-weaver/prompt-grid-archives/{archive_id}")
+@_local_only
 async def delete_prompt_grid_archive(request):
     try:
         archive = _archive_store(request).delete(request.match_info["archive_id"])
@@ -521,6 +577,7 @@ async def delete_prompt_grid_archive(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/prompt-grid-archives/import")
+@_local_only
 async def import_prompt_grid_archives(request):
     try:
         payload = await _request_json(request, MAX_IMPORT_BYTES + 4096)
@@ -547,6 +604,7 @@ async def list_prompt_card_library(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/prompt-card-library/categories")
+@_local_only
 async def create_prompt_card_library_category(request):
     try:
         payload = await _request_json(
@@ -575,6 +633,7 @@ async def create_prompt_card_library_category(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/categories/{category_id}")
+@_local_only
 async def update_prompt_card_library_category(request):
     try:
         payload = await _request_json(
@@ -602,6 +661,7 @@ async def update_prompt_card_library_category(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/categories/{category_id}/position")
+@_local_only
 async def position_prompt_card_library_category(request):
     try:
         payload = await _request_json(
@@ -633,6 +693,7 @@ async def position_prompt_card_library_category(request):
 
 
 @PromptServer.instance.routes.delete("/prompt-weaver/prompt-card-library/categories/{category_id}")
+@_local_only
 async def delete_prompt_card_library_category(request):
     try:
         payload = await _request_json(
@@ -659,6 +720,7 @@ async def delete_prompt_card_library_category(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/prompt-card-library/cards")
+@_local_only
 async def create_prompt_card_library_card(request):
     try:
         payload = await _request_json(
@@ -687,6 +749,7 @@ async def create_prompt_card_library_card(request):
 
 
 @PromptServer.instance.routes.post("/prompt-weaver/prompt-card-library/cards/import")
+@_local_only
 async def import_prompt_card_library_cards(request):
     try:
         payload = await _request_json(
@@ -719,6 +782,7 @@ async def import_prompt_card_library_cards(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/order")
+@_local_only
 async def reorder_prompt_card_library_cards(request):
     try:
         payload = await _request_json(
@@ -747,6 +811,7 @@ async def reorder_prompt_card_library_cards(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/{card_id}")
+@_local_only
 async def update_prompt_card_library_card(request):
     try:
         payload = await _request_json(
@@ -775,6 +840,7 @@ async def update_prompt_card_library_card(request):
 
 
 @PromptServer.instance.routes.patch("/prompt-weaver/prompt-card-library/cards/{card_id}/position")
+@_local_only
 async def position_prompt_card_library_card(request):
     try:
         payload = await _request_json(
@@ -805,6 +871,7 @@ async def position_prompt_card_library_card(request):
 
 
 @PromptServer.instance.routes.delete("/prompt-weaver/prompt-card-library/cards/{card_id}")
+@_local_only
 async def delete_prompt_card_library_card(request):
     try:
         store = _prompt_card_library_store(request)
