@@ -1,12 +1,9 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import {
-    connectLocale,
     formatDateTime,
-    getLocale,
-    subscribeLocale,
     t,
-} from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
+} from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,
@@ -135,7 +132,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260902-favorite-card-edit-v1",
+        "./prompt_toggle_grid.css?v=20260907-english-ui-v1",
         import.meta.url,
     ).href;
     document.head.append(link);
@@ -157,7 +154,7 @@ function showAutocompleteToast(severity, summary, detail) {
 }
 
 function formatNumber(value) {
-    return new Intl.NumberFormat(getLocale()).format(Number(value) || 0);
+    return new Intl.NumberFormat("en-US").format(Number(value) || 0);
 }
 
 function translationManagerDate(value) {
@@ -1172,17 +1169,6 @@ function createAutocompleteSourceOrderControl(_name, setter, storedValue) {
     }
     return control;
 }
-
-connectLocale(app);
-subscribeLocale(() => {
-    for (const button of document.querySelectorAll("[data-cpw-translation-manager-button]")) {
-        button.textContent = t("Manage prompt translations…");
-    }
-    if (activeTranslationManager) refreshPromptTranslationManagerLocale(activeTranslationManager);
-    for (const control of document.querySelectorAll("[data-cpw-autocomplete-source-control]")) {
-        refreshAutocompleteSourceControlLocale(control);
-    }
-});
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.TranslationSettings",

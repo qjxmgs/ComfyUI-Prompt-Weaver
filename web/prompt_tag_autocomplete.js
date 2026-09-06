@@ -1,4 +1,4 @@
-import { getLocale, t } from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,
@@ -412,7 +412,7 @@ export class DanbooruTagProvider {
         else this.cachedStatus.clear();
     }
 
-    async status(locale = getLocale(), { signal, force = false } = {}) {
+    async status(locale = "en", { signal, force = false } = {}) {
         const normalizedLocale = locale === "zh" ? "zh-CN" : locale;
         const cached = this.cachedStatus.get(normalizedLocale);
         if (!force && cached && cached.expiresAt > this.now()) return cached.value;
@@ -430,7 +430,7 @@ export class DanbooruTagProvider {
         return value;
     }
 
-    async search(query, locale = getLocale(), limit = DEFAULT_AUTOCOMPLETE_LIMIT, { signal } = {}) {
+    async search(query, locale = "en", limit = DEFAULT_AUTOCOMPLETE_LIMIT, { signal } = {}) {
         const normalizedLocale = promptTokenHasHanText(query)
             ? "zh-CN"
             : (locale === "zh" ? "zh-CN" : locale);
@@ -498,7 +498,7 @@ export class DanbooruTagProvider {
         };
     }
 
-    async update(locale = getLocale(), { signal } = {}) {
+    async update(locale = "en", { signal } = {}) {
         const normalizedLocale = locale === "zh" ? "zh-CN" : locale;
         await this.fetchJson(
             "/prompt-weaver/tag-autocomplete/update",
@@ -646,7 +646,7 @@ export class PromptTagAutocompleteProvider {
         this.translationCache = new Map();
     }
 
-    async search(query, locale = getLocale(), limit = DEFAULT_AUTOCOMPLETE_LIMIT, { signal } = {}) {
+    async search(query, locale = "en", limit = DEFAULT_AUTOCOMPLETE_LIMIT, { signal } = {}) {
         if (!autocompleteQueryIsEligible(query)) {
             return { results: [], danbooruStatus: null, danbooruEnabled: this.danbooruEnabled() };
         }
@@ -681,7 +681,7 @@ export class PromptTagAutocompleteProvider {
         };
     }
 
-    async updateDanbooru(locale = getLocale(), options = {}) {
+    async updateDanbooru(locale = "en", options = {}) {
         const status = await this.danbooru.update(locale, options);
         this.translationCache.clear();
         return status;
@@ -766,7 +766,7 @@ function sourceLabel(record) {
 }
 
 
-export function formatAutocompleteCount(value, locale = getLocale()) {
+export function formatAutocompleteCount(value, locale = "en") {
     const number = Number(value);
     if (!Number.isFinite(number)) return String(value ?? "");
     return new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "en-US", {
@@ -1055,7 +1055,7 @@ export function resolveAutocompletePopupPosition({
 
 export class PromptAutocompleteController {
     constructor(input, provider, {
-        getLocale: localeGetter = getLocale,
+        getLocale: localeGetter = () => "en",
         getContext,
         getAnchorRect,
         getExistingPrompt = () => input.value,

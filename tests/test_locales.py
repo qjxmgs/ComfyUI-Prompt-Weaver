@@ -27,20 +27,13 @@ class LocaleResourceTests(unittest.TestCase):
             self.assertIn("config", node["inputs"])
             self.assertIn("0", node["outputs"])
 
-    def test_runtime_chinese_is_confined_to_the_dictionary_and_legacy_markers(self):
-        allowed_fragments = {
-            "archive_store.py": ("DEFAULT_ARCHIVE_NAME",),
-            "web/prompt_grid_archives.js": (
-                "DEFAULT_ARCHIVE_NAME",
-                "item.title === `提示词 ${number}`",
-            ),
-            "web/prompt_toggle_grid.js": ("(?:Prompt|提示词)",),
-        }
+    def test_runtime_javascript_uses_english_ui_strings_only(self):
+        allowed_fragments = {}
         runtime_files = [
             PLUGIN_ROOT / "__init__.py",
             PLUGIN_ROOT / "nodes.py",
             PLUGIN_ROOT / "archive_store.py",
-            *(path for path in (PLUGIN_ROOT / "web").glob("*.js") if path.name != "prompt_weaver_i18n.js"),
+            *(PLUGIN_ROOT / "web").glob("*.js"),
         ]
         violations = []
         for path in runtime_files:

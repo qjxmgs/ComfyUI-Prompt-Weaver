@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
 } from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";

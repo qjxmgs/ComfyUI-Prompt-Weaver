@@ -284,8 +284,8 @@ class ArchiveRouteTests(unittest.TestCase):
 
         alice = self.run_async(self.module.list_prompt_grid_archives(_Request()))
         bob = self.run_async(self.module.list_prompt_grid_archives(_Request(user="bob")))
-        self.assertEqual([item["name"] for item in alice.payload["archives"]], ["默认存档", "人物"])
-        self.assertEqual([item["name"] for item in bob.payload["archives"]], ["默认存档"])
+        self.assertEqual([item["name"] for item in alice.payload["archives"]], ["Default Archive", "人物"])
+        self.assertEqual([item["name"] for item in bob.payload["archives"]], ["Default Archive"])
         self.assertEqual(alice.payload["last_selected_archive_id"], DEFAULT_ARCHIVE_ID)
 
         selected = self.run_async(
@@ -470,7 +470,7 @@ class ArchiveRouteTests(unittest.TestCase):
         )
         self.assertEqual(renamed.payload["renamed"], 1)
         names = [item["name"] for item in renamed.payload["archives"]]
-        self.assertCountEqual(names, ["默认存档", "通用画质 (2)", "通用画质"])
+        self.assertCountEqual(names, ["Default Archive", "通用画质 (2)", "通用画质"])
 
     def test_tag_autocomplete_routes_are_user_isolated_and_report_missing_data(self):
         alice_store = self.module._tag_autocomplete_store(_Request(user="alice"))

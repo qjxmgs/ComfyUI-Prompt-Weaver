@@ -30,17 +30,13 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260902-favorite-card-edit-v1";
+} from "./prompt_card_library.js?v=20260907-english-ui-v1";
 import {
-    connectLocale,
     formatDateTime,
     formatList,
-    getLocale,
-    subscribeLocale,
-    syncLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
+} from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -183,7 +179,6 @@ const promptTagAutocompleteProvider = new PromptTagAutocompleteProvider(api, {
 });
 const loadedPromptGridNodes = new WeakSet();
 const promptGridArchiveControllers = new WeakMap();
-const promptGridLocaleControllers = new Set();
 const archiveChannel = typeof BroadcastChannel === "function"
     ? new BroadcastChannel(ARCHIVE_CHANNEL_NAME)
     : null;
@@ -213,11 +208,6 @@ if (archiveChannel) {
 }
 
 let fallbackId = 0;
-
-connectLocale(app);
-subscribeLocale(() => {
-    for (const controller of [...promptGridLocaleControllers]) controller.refreshLocale?.();
-});
 
 function createId() {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -706,7 +696,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260902-favorite-card-edit-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260907-english-ui-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -746,7 +736,6 @@ function archiveErrorMessage(error) {
 }
 
 function createPromptGridWidget(node, inputName, inputData) {
-    syncLocale(app);
     ensureStylesheet();
     const promptCardLibraryService = getPromptCardLibraryService(api);
 
@@ -916,7 +905,6 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function refreshLocale() {
         if (disposed) return;
-        syncLocale(app);
         refreshColumnOptions();
         columnSelect.querySelector("button")?.setAttribute("aria-label", t("Grid columns"));
         archiveSelect.querySelector("button")?.setAttribute(
@@ -4138,7 +4126,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     freeTextArea,
                     promptTagAutocompleteProvider,
                     {
-                        getLocale,
+                        getLocale: () => "en",
                         getLimit: readAutocompleteLimit,
                         getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                         getExistingPrompt: () => freeTextArea?.value || "",
@@ -4258,7 +4246,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     addInput,
                     promptTagAutocompleteProvider,
                     {
-                        getLocale,
+                        getLocale: () => "en",
                         getLimit: readAutocompleteLimit,
                         getExistingPrompt: () => tokens.join(", "),
                         onSelect(record) {
@@ -4903,7 +4891,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             prompt,
             promptTagAutocompleteProvider,
             {
-                getLocale,
+                getLocale: () => "en",
                 getLimit: readAutocompleteLimit,
                 getExistingPrompt: () => prompt.value,
                 completionSeparator: ", ",
@@ -4930,7 +4918,6 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function render() {
         if (disposed) return;
-        syncLocale(app);
         closePromptCardLibraryMenu(false);
         closeItemContextMenu();
         clearFavoriteRefreshTimers();
@@ -5054,8 +5041,6 @@ function createPromptGridWidget(node, inputName, inputData) {
             reconcileLoadedArchiveAssociation();
         },
     });
-    const localeController = { node, refreshLocale };
-    promptGridLocaleControllers.add(localeController);
     const sizeObserver = typeof ResizeObserver === "function"
         ? new ResizeObserver(scheduleArchiveSizeReconcile)
         : null;
@@ -5105,7 +5090,6 @@ function createPromptGridWidget(node, inputName, inputData) {
         columnSelect.customSelect.destroy();
         archiveSelect.customSelect.destroy();
         promptGridArchiveControllers.delete(node);
-        promptGridLocaleControllers.delete(localeController);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;

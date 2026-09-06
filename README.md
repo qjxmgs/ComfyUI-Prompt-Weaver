@@ -40,11 +40,11 @@ Prompt Weaver enables its workflow bridge and every server-side write only when 
 
 ## Language support
 
-The node automatically follows **Settings → Language** (`Comfy.Locale`) in ComfyUI. English and Simplified Chinese are included; every other locale falls back to English. Changing the ComfyUI language updates existing Prompt Weaver nodes without changing their serialized configuration, current selection, unsaved prompt-editor draft, or focus.
+Prompt Weaver's custom JavaScript controls use English source strings. They do not bundle a private translation table or listen to `Comfy.Locale` themselves.
 
-Only plugin-provided interface text is translated. Prompt text, Prompt Assistant tags, user-created archive names, card titles, and existing workflow data are never translated or rewritten. A newly created node uses the localized default card titles `Card 01` through `Card 04`. Headless/API usage uses the same canonical English defaults.
+The node display name, description, inputs, output, and category use ComfyUI's official `locales/en` and `locales/zh` resources. ComfyUI applies those resources through its own locale system. Other custom controls remain English until ComfyUI exposes a documented localization API for plain JavaScript extension UI.
 
-The built-in default archive is identified by its stable ID and is displayed as **Default Archive** or **默认存档**. Its historical stored name remains unchanged for compatibility. An untouched empty default snapshot can display localized generated titles without becoming dirty; after it is edited or saved, its titles are treated as user data.
+Prompt text, Prompt Assistant tags, user-created archive names, card titles, and existing workflow data are never translated or rewritten. New cards use the canonical titles `Card 01` through `Card 04`, and the built-in archive uses **Default Archive**. Historical stored names remain unchanged for compatibility.
 
 ## Prompt Card Grid
 
@@ -60,7 +60,7 @@ Each card contains:
 - Drag-to-reorder from any non-interactive blank area with live displacement animation. Blank areas use a grab cursor, and `Esc` restores the original order while dragging.
 - Card color and deletion actions in the card context menu. Delete expands in place to a Confirm/Cancel row before removing any card; right-clicking a text field keeps the browser's native menu.
 
-The toolbar can add cards, switch every card through one compact three-state master toggle, and select a fixed layout through a localized `1 column`–`6 columns` selector without a separate label. The toggle is on when every card is enabled, off when every card is disabled, and centered when the grid is mixed; activating a mixed toggle enables every card. A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
+The toolbar can add cards, switch every card through one compact three-state master toggle, and select a fixed layout through the `1 column`–`6 columns` selector without a separate label. The toggle is on when every card is enabled, off when every card is disabled, and centered when the grid is mixed; activating a mixed toggle enables every card. A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
 
 The editor button next to a prompt splits its text at top-level English or Chinese commas and line breaks. Separators inside parentheses, square or curly brackets, quotes, and escaped content are preserved. The editor deduplicates tags case-insensitively while retaining the first spelling and original order. Its `+` composer accepts multiple prompts using the same splitting rules and commits on Enter, blur, or Confirm. Existing inactive duplicates are re-enabled instead of added again. Clicking or painting across tags toggles their selection. **Retain Unselected** is enabled by default per card: inactive tags remain in the group after Confirm without entering node output. Their red `×` floats over the upper-right corner without changing the tag width and removes the tag from the current draft; removal is saved only after Confirm. Text Mode keeps the raw active prompt in its textarea and shows retained inactive tags in a dim strip below it. Turning retention off discards inactive tags only when Confirm is pressed. `Esc` dismisses one active interaction layer at a time—autocomplete, a favorite menu, prompt composition, or an in-progress pointer gesture—then closes the editor and discards the whole draft only when no cancellable layer remains. The red title-bar close button still closes immediately. Confirm writes only selected tags back with `, ` separators. The footer Copy button copies only the active current draft without closing or saving the editor.
 
@@ -99,7 +99,7 @@ The library is stored at `ComfyUI-Prompt-Weaver/prompt-card-library.json` in the
 
 ## Global archives
 
-The archive selector loads and switches complete grid states. The adjacent Save, Restore, Archive Manager, and Favorite Cards Manager actions use compact icon buttons; hovering or focusing an icon immediately shows its localized name below it. **Archive Manager** creates, saves, renames, deletes, imports, and exports archives. The Favorite Cards Manager opens the same three-column category and favorite management interface used by the card editor, replacing the draft overwrite action with an Edit action that opens the shared card editor and updates the saved favorite snapshot. A normal click selects one archive, `Ctrl` adds or removes individual selections, `Shift` selects a range from the latest anchor, and `Ctrl+Shift` adds a range. Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content. An archive contains node size, column count, card order, switches, titles, colors, active prompts, per-card retained-token state, and optional favorite associations, but not canvas position or links. Loading from the toolbar also restores the saved node size.
+The archive selector loads and switches complete grid states. The adjacent Save, Restore, Archive Manager, and Favorite Cards Manager actions use compact icon buttons; hovering or focusing an icon immediately shows its English name below it. **Archive Manager** creates, saves, renames, deletes, imports, and exports archives. The Favorite Cards Manager opens the same three-column category and favorite management interface used by the card editor, replacing the draft overwrite action with an Edit action that opens the shared card editor and updates the saved favorite snapshot. A normal click selects one archive, `Ctrl` adds or removes individual selections, `Shift` selects a range from the latest anchor, and `Ctrl+Shift` adds a range. Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content. An archive contains node size, column count, card order, switches, titles, colors, active prompts, per-card retained-token state, and optional favorite associations, but not canvas position or links. Loading from the toolbar also restores the saved node size.
 
 The Save button next to the selector writes the current grid and node size back to the associated archive. It is enabled only while the state is dirty and does not ask for confirmation. Changes made while a save is in progress remain dirty if they were not part of the saved snapshot.
 
@@ -189,7 +189,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 node --test tests/*.mjs
 ```
 
-Tests cover node configuration parsing, registration and routes, archive storage and ordering, the two-level prompt-card library, prompt-grid interaction, favorite insertion and deduplication, the prompt editor, dual-source autocomplete, dictionary validation and fallback, language resources, locale switching, and legacy data compatibility.
+Tests cover node configuration parsing, registration and routes, archive storage and ordering, the two-level prompt-card library, prompt-grid interaction, favorite insertion and deduplication, the prompt editor, dual-source autocomplete, dictionary validation and fallback, official locale resources, English UI fallback, and legacy data compatibility.
 
 ## License
 

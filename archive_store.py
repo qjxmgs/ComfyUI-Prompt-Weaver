@@ -25,7 +25,7 @@ ITEM_COLORS = frozenset(
     {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray", "white", "black"}
 )
 DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000"
-DEFAULT_ARCHIVE_NAME = "默认存档"
+DEFAULT_ARCHIVE_NAME = "Default Archive"
 
 
 class ArchiveError(Exception):

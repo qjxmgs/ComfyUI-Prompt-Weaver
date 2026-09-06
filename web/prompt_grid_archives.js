@@ -1,9 +1,9 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260902-favorite-card-edit-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
 
 export const ARCHIVE_EXPORT_FORMAT = "prompt-weaver-prompt-grid-archives";
 export const ARCHIVE_FORMAT_VERSION = 1;
 export const DEFAULT_ARCHIVE_ID = "00000000-0000-4000-8000-000000000000";
-export const DEFAULT_ARCHIVE_NAME = "默认存档";
+export const DEFAULT_ARCHIVE_NAME = "Default Archive";
 export const DEFAULT_ARCHIVE_NODE_SIZE = Object.freeze({ width: 600, height: 420 });
 export const PROMPT_GRID_ITEM_COLORS = Object.freeze({
     red: Object.freeze({ label: "Red", hex: "#ef5350" }),
@@ -116,7 +116,7 @@ export function isPristineDefaultSnapshot(snapshot) {
                     item.title === `Card ${String(number).padStart(2, "0")}`
                     || item.title === `\u5361\u7247 ${String(number).padStart(2, "0")}`
                     || item.title === `Prompt ${number}`
-                    || item.title === `提示词 ${number}`
+                    || item.title === `\u63d0\u793a\u8bcd ${number}`
                 );
         });
 }
