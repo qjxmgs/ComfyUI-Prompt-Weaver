@@ -9,129 +9,72 @@ import {
     translationManagerState,
 } from "../web/prompt_translation_manager.js";
 
-test("translation manager reports ready coverage and enabled supplement details", () => {
+test("one SQLite exposes selected source, fingerprint and total rows", () => {
     const state = translationManagerState({
-        available: true,
-        ready: true,
-        row_count: 32_259,
-        primary_translation_available: true,
-        primary_translation_count: 7_831,
-        translated_tag_count: 31_657,
-        translation_coverage_percent: 98.13,
-        supplement_enabled: true,
-        supplement_available: true,
-        supplement_translation_count: 23_826,
-        supplement_license_status: "cleared",
-        supplement_blob_sha: "1234567890abcdef",
+        available: true, total_count: 316314, selected_source: "local",
+        file_sha256: "a".repeat(64), version: "b".repeat(40),
+        local_path: "ComfyUI-Prompt-Weaver/tag-autocomplete/tag.sqlite",
+        sources: { downloaded: { available: true } },
     });
-
     assert.equal(state.summary, "ready");
-    assert.equal(state.tone, "success");
     assert.equal(state.action, "update");
-    assert.equal(state.translatedTagCount, 31_657);
-    assert.equal(state.coveragePercent, 98.13);
-    assert.equal(state.supplementState, "available");
-    assert.equal(shortBlobSha(state.supplementBlobSha), "1234567890ab");
+    assert.equal(state.selectedSource, "local");
+    assert.equal(state.rowCount, 316314);
+    assert.equal(state.coveragePercent, 100);
+    assert.equal(shortBlobSha(state.fileSha256), "aaaaaaaaaaaa");
+    assert.match(state.localPath, /tag.sqlite$/);
 });
 
-test("license-pending supplement stays disabled without turning the main dictionary into an error", () => {
-    const state = translationManagerState({
-        available: true,
-        ready: true,
-        primary_translation_available: true,
-        supplement_enabled: false,
-        supplement_available: false,
-        supplement_license_status: "pending",
-    });
-
-    assert.equal(state.summary, "ready");
-    assert.equal(state.tone, "success");
-    assert.equal(state.supplementState, "license-pending");
-    assert.equal(state.supplementTone, "warning");
+test("missing, failed, preserved-data warning and busy states are distinct", () => {
+    assert.equal(translationManagerState().summary, "not-installed");
+    assert.equal(translationManagerState().action, "download");
+    assert.equal(translationManagerState({ error: "invalid" }).summary, "failed");
+    assert.equal(translationManagerState({ available: true, error: "offline" }).summary, "warning");
+    assert.equal(translationManagerState({ updating: true }).summary, "updating");
+    assert.equal(translationManagerState({ importing: true }).importing, true);
 });
 
-test("user-directed supplement is enabled for local download without claiming a license", () => {
-    const pending = translationManagerState({
-        available: true,
-        ready: true,
-        primary_translation_available: true,
-        supplement_enabled: true,
-        supplement_available: false,
-        supplement_license_status: "user-directed",
-    });
-    assert.equal(pending.supplementState, "not-installed-local-use");
-
-    const installed = translationManagerState({
-        available: true,
-        ready: true,
-        primary_translation_available: true,
-        supplement_enabled: true,
-        supplement_available: true,
-        supplement_license_status: "user-directed",
-    });
-    assert.equal(installed.supplementState, "available-local-use");
-    assert.equal(installed.supplementTone, "warning");
-});
-
-test("local supplement state exposes origin, validation details, and fallback warnings", () => {
-    const local = translationManagerState({
-        available: true,
-        ready: true,
-        primary_translation_available: true,
-        supplement_enabled: true,
-        supplement_available: true,
-        supplement_license_status: "user-directed",
-        supplement_origin: "local",
-        supplement_drop_in_path: "ComfyUI-Prompt-Weaver/tag-autocomplete/tag.sqlite",
-        supplement_file_sha256: "a".repeat(64),
-        supplement_row_count: 323_130,
-        supplement_file_modified_at: "2026-08-19T12:00:00Z",
-    });
-    assert.equal(local.supplementState, "available-local-file");
-    assert.equal(local.supplementOrigin, "local");
-    assert.equal(local.supplementRowCount, 323_130);
-    assert.equal(local.supplementFileSha256, "a".repeat(64));
-    assert.match(local.supplementDropInPath, /tag\.sqlite$/);
-
-    const fallback = translationManagerState({
-        available: true,
-        ready: true,
-        primary_translation_available: true,
-        supplement_enabled: true,
-        supplement_available: true,
-        supplement_origin: "downloaded",
-        supplement_local_error: "invalid SQLite",
-    });
-    assert.equal(fallback.summary, "warning");
-    assert.equal(fallback.supplementState, "available");
-    assert.equal(fallback.supplementTone, "warning");
-    assert.equal(fallback.supplementLocalError, "invalid SQLite");
-});
-
-test("missing, partial failure, fatal failure, and updating states select the right actions", () => {
-    assert.deepEqual(
-        translationManagerState({}).summary,
-        "not-installed",
-    );
-    assert.equal(translationManagerState({}).action, "download");
-
-    const warning = translationManagerState({ available: true, error: "network failed" });
-    assert.equal(warning.summary, "warning");
-    assert.equal(warning.tone, "warning");
-    assert.equal(warning.action, "update");
-
-    const failed = translationManagerState({ error: "network failed" });
-    assert.equal(failed.summary, "failed");
-    assert.equal(failed.tone, "error");
-
-    const updating = translationManagerState({ available: true, updating: true });
-    assert.equal(updating.summary, "updating");
-    assert.equal(updating.tone, "info");
+test("both settings surfaces use the shared filter and official locale strings", async () => {
+    const source = await readFile(new URL("../web/prompt_translation_settings.js", import.meta.url), "utf8");
+    assert.match(source, /type: createMinPostCountControl/);
+    assert.match(source, /manager.filterControl = createMinPostCountControl\(\)/);
+    assert.match(source, /\/prompt-weaver\/tag-autocomplete\/source/);
+    assert.doesNotMatch(source, /English base dictionary|Missing-translation supplement/);
+    assert.match(source, /aria-live/);
+    assert.match(source, /manager.content.scrollTop = scrollTop/);
 });
 
 test("manager polling is bounded at five minutes", () => {
     assert.equal(TRANSLATION_STATUS_POLL_MS, 500);
     assert.equal(TRANSLATION_UPDATE_TIMEOUT_MS, 300_000);
+});
+
+test("threshold card fills the settings row without a duplicate label", async () => {
+    const css = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
+    const setting = '.setting-item[data-setting-id="PromptWeaver.Autocomplete.MinPostCount"]';
+    const declarations = (selector) => {
+        const start = css.indexOf(selector);
+        assert.notEqual(start, -1, `Missing scoped selector: ${selector}`);
+        const block = css.indexOf("{", start);
+        return css.slice(block + 1, css.indexOf("}", block));
+    };
+    assert.match(declarations(`${setting} .form-label`), /display:\s*none/);
+    for (const suffix of [" > div", " .form-input,", " .form-input > div"]) {
+        const rule = declarations(`${setting}${suffix}`);
+        assert.match(rule, /width:\s*100%/);
+        assert.match(rule, /display:\s*block/);
+    }
+    assert.match(declarations(".cpw-tag-filter__row,"), /flex-wrap:\s*wrap/);
+});
+
+test("both threshold surfaces offer all eight ordered quick values and keep the warning", async () => {
+    const source = await readFile(new URL("../web/prompt_translation_settings.js", import.meta.url), "utf8");
+    const presetValues = source.match(/const presets = (\[[\d, ]+\])\.map/);
+    assert.ok(presetValues);
+    assert.deepEqual(JSON.parse(presetValues[1]), [10, 50, 100, 200, 300, 400, 500, 1000]);
+    assert.match(source, /tagFilter\.input\(value\)/);
+    assert.match(source, /label\.htmlFor = input\.id/);
+    assert.match(source, /hint\.textContent = t\("Lower values load more tags and use more resources\."\)/);
 });
 
 test("settings button and legacy command open the same singleton manager", async () => {
@@ -160,8 +103,8 @@ test("settings button and legacy command open the same singleton manager", async
     assert.match(source, /activeSupplementOperation/);
     assert.match(source, /translationProvider\.importSupplement\(file\)/);
     assert.match(source, /translationProvider\.rescanSupplement\("zh-CN"\)/);
-    assert.match(source, /prompt_translation_manager\.js\?v=20260819-local-sqlite-v1/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260922-official-locale-v1/);
+    assert.match(source, /prompt_translation_manager\.js\?v=20260923-sqlite-filter-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260923-sqlite-filter-v3/);
     assert.match(source, /name:\s*"ComfyUIPromptWeaver\.TranslationSettings"/);
     assert.match(source, /void connectPromptWeaverI18n\(app, api\)/);
     assert.match(source, /subscribePromptWeaverLocale\(\(\) => \{/);
@@ -174,4 +117,25 @@ test("settings button and legacy command open the same singleton manager", async
     assert.match(css, /\.cpw-translation-manager__summary--warning/);
     assert.match(css, /\.cpw-translation-manager__source-actions/);
     assert.match(css, /@media \(max-width: 680px\)/);
+});
+
+test("threshold heading offers an accessible localized help tooltip without changing the input label", async () => {
+    const source = await readFile(new URL("../web/prompt_translation_settings.js", import.meta.url), "utf8");
+    const css = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
+    assert.match(source, /element\("span", "cpw-tag-filter__help", "!"\)/);
+    assert.match(source, /heading\.append\(label, help, helpTooltip\)/);
+    assert.match(source, /control\.append\(heading, row, count, hint\)/);
+    assert.match(source, /help\.tabIndex = 0/);
+    assert.match(source, /helpTooltip\.setAttribute\("role", "tooltip"\)/);
+    assert.match(source, /help\.setAttribute\("aria-describedby", helpTooltip\.id\)/);
+    assert.match(source, /input\.setAttribute\("aria-describedby", `\$\{helpTooltip\.id\} \$\{hint\.id\}`\)/);
+    assert.match(source, /helpTooltip\.textContent = t\("Only load tags used in at least this many Danbooru posts\."\)/);
+    for (const event of ["pointerenter", "focus", "blur", "keydown"]) {
+        assert.ok(source.includes(`help.addEventListener("${event}"`));
+    }
+    assert.match(source, /if \(event\.key !== "Escape"\) return/);
+    assert.match(source, /dialog\.querySelector\("\.cpw-tag-filter__tooltip:not\(\[hidden\]\)"\)/);
+    assert.match(css, /\.cpw-tag-filter__help:focus-visible\s*\{/);
+    assert.match(css, /max-width: min\(360px, 100%\)/);
+    assert.match(css, /\.cpw-tag-filter__tooltip\[hidden\] \{ display: none; \}/);
 });

@@ -1,9 +1,9 @@
 import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
-} from "./prompt_grid_archives.js?v=20260922-official-locale-v1";
+} from "./prompt_grid_archives.js?v=20260923-sqlite-filter-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";

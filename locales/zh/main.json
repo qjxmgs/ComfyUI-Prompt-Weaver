@@ -7,7 +7,8 @@
     "Autocomplete": "自动补全",
     "Prompt library sources": "提示词库来源",
     "Maximum autocomplete suggestions": "最大联想数量",
-    "Prompt translations": "提示词翻译"
+    "Prompt translations": "提示词翻译",
+    "Minimum Danbooru post count": "Danbooru 最低使用次数"
   },
   "promptWeaver": {
     "ui": {
@@ -439,7 +440,25 @@
       "Clear": "清空",
       "Clear all prompts": "清空全部提示词",
       "Danbooru tag resolution": "Danbooru 标签解析",
-      "Prompts cleared.": "提示词已清空。"
+      "Prompts cleared.": "提示词已清空。",
+      "Minimum Danbooru post count": "Danbooru 最低使用次数",
+      "Only load tags used in at least this many Danbooru posts.": "只加载Danbooru上作品引用数量不低于该数值的标签",
+      "Lower values load more tags and use more resources.": "数值越低，加载的标签数量越多，性能消耗也越大。",
+      "Set minimum post count to {count}": "将最低使用次数设为 {count}",
+      "Enter an integer of at least 10.": "请输入不小于 10 的整数。",
+      "Counting…": "统计中…",
+      "No valid Danbooru dictionary installed.": "尚未安装有效的 Danbooru 词库。",
+      "Active Danbooru tags: {active} / {total} total": "已激活 Danbooru 标签：{active} / 词库总数 {total}",
+      "Danbooru disabled — available tags: {active} / {total} total": "Danbooru 已停用 — 可用标签：{active} / 词库总数 {total}",
+      "Danbooru dictionary source": "Danbooru 词库来源",
+      "GitHub dictionary": "GitHub 下载词库",
+      "Imported local dictionary": "本地导入词库",
+      "Dictionary source changed": "词库来源已切换",
+      "Danbooru SQLite dictionary": "Danbooru SQLite 词库",
+      "One active SQLite provides tag names, Chinese translations, categories and post counts. Import a new copy to update a local file.": "同时只启用一个 SQLite，提供标签名称、中文、分类和使用次数。本地文件变化后需重新导入。",
+      "Local copy path": "本地副本路径",
+      "The validated local database is now the active dictionary.": "已验证的本地数据库现已设为当前词库。",
+      "Uses the selected Danbooru SQLite dictionary. Typing stays local.": "使用所选的 Danbooru SQLite 词库。输入内容仅在本机处理。"
     }
   }
 }

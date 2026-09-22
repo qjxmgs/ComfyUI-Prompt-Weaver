@@ -1,816 +1,320 @@
 import asyncio
-import csv
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
+from unittest.mock import patch
 
 from tag_autocomplete import (
-    LOCAL_SUPPLEMENT_DROP_IN_PATH,
-    SUPPLEMENT_REPOSITORY,
-    SUPPLEMENT_REF,
-    SUPPLEMENT_REMOTE_PATH,
-    TagAutocompleteStore,
-    TagAutocompleteCapacityError,
-    TagAutocompleteUnavailableError,
-    TagAutocompleteValidationError,
-    _validate_sqlite_dataset,
-    normalize_locale,
-    validate_manifest,
+    TagAutocompleteStore, TagAutocompleteValidationError, TagAutocompleteUnavailableError,
+    TagAutocompleteCapacityError, SUPPLEMENT_SOURCE_ID, validate_min_post_count,
+    _validate_sqlite_dataset, validate_manifest, normalize_locale,
 )
 
-
-def base_csv(rows):
-    output = ["tag,category,count,alias\n"]
-    for tag, category, count, aliases in rows:
-        escaped_aliases = aliases.replace('"', '""')
-        output.append(f'{tag},{category},{count},"{escaped_aliases}"\n')
-    return "".join(output).encode("utf-8")
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def translation_csv(rows):
-    from io import StringIO
-
-    buffer = StringIO(newline="")
-    writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerows(rows)
-    return buffer.getvalue().encode("utf-8")
-
-
-def supplement_sqlite(rows, *, invalid_schema=False):
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "tag.sqlite"
-        connection = sqlite3.connect(path)
-        try:
-            if invalid_schema:
-                connection.execute("CREATE TABLE tags (name TEXT PRIMARY KEY, cn_name TEXT)")
-                connection.executemany(
-                    "INSERT INTO tags (name, cn_name) VALUES (?, ?)",
-                    [(name, translation) for name, _category, translation, _count in rows],
-                )
-            else:
-                connection.execute(
-                    """
-                    CREATE TABLE tags (
-                        name TEXT PRIMARY KEY,
-                        category INTEGER,
-                        cn_name TEXT,
-                        post_count INTEGER
-                    )
-                    """
-                )
-                connection.executemany(
-                    "INSERT INTO tags (name, category, cn_name, post_count) VALUES (?, ?, ?, ?)",
-                    rows,
-                )
-            connection.commit()
-        finally:
-            connection.close()
-        return path.read_bytes()
-
-
-def source(filename, source_format, payload, minimum_rows=1):
-    return {
-        "filename": filename,
-        "format": source_format,
-        "url": f"https://raw.githubusercontent.com/example/project/commit/{filename}",
-        "sha256": hashlib.sha256(payload).hexdigest(),
-        "size_bytes": len(payload),
-        "min_rows": minimum_rows,
-        "license": "MIT",
-        "attribution": "example/project",
-        "source_page": "https://github.com/example/project",
-    }
-
-
-def supplement_source(payload, *, enabled=True, license_status="cleared", minimum_rows=1):
-    return {
-        "filename": "danbooru.zh-CN.supplement.sqlite",
-        "format": "tag_translation_sqlite_v1",
-        "enabled": enabled,
-        "license_status": license_status,
-        "repository": SUPPLEMENT_REPOSITORY,
-        "ref": SUPPLEMENT_REF,
-        "path": SUPPLEMENT_REMOTE_PATH,
-        "api_url": (
-            "https://api.github.com/repos/"
-            f"{SUPPLEMENT_REPOSITORY}/contents/{SUPPLEMENT_REMOTE_PATH}?ref={SUPPLEMENT_REF}"
-        ),
-        "max_size_bytes": max(len(payload) + 1, 1024),
-        "min_rows": minimum_rows,
-        "license": "Test license",
-        "attribution": "test supplement",
-        "source_page": f"https://github.com/{SUPPLEMENT_REPOSITORY}",
-    }
-
-
-def manifest(base_payload, zh_payload, version="test-1", supplement_payload=None):
-    payload = {
-        "schema_version": 1,
-        "version": version,
-        "published_at": "2026-08-13T00:00:00Z",
-        "content_scope": "full",
-        "sources": {
-            "base": source("danbooru.base.csv", "danbooru_tag_csv_v1", base_payload),
-            "zh-CN": source("danbooru.zh-CN.csv", "tag_translation_csv_v1", zh_payload),
-        },
-    }
-    if supplement_payload is not None:
-        payload["sources"]["zh-CN-supplement"] = supplement_source(supplement_payload)
-    return payload
+def database(path, rows):
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("CREATE TABLE tags (name TEXT PRIMARY KEY, category INTEGER, cn_name TEXT, post_count INTEGER)")
+        connection.executemany("INSERT INTO tags VALUES (?, ?, ?, ?)", rows)
+        connection.commit()
 
 
 class TagAutocompleteStoreTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.base_payload = base_csv([
-            ("blue_eyes", 0, 1409152, "azure_eyes"),
-            ("blue_hair", 0, 676176, ""),
-            ("blush", 0, 2535113, "red_face"),
-            ("blue_archive", 3, 267200, "BA"),
-        ])
-        self.zh_payload = translation_csv([
-            ("blue_eyes", "蓝眼睛"),
-            ("blue_hair", "蓝发"),
-            ("blush", "脸红"),
-        ])
-        self.manifest = manifest(self.base_payload, self.zh_payload)
-        self.manifest_path = self.root / "tag_sources.json"
-        self.manifest_path.write_text(
-            json.dumps(self.manifest, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        self.calls = []
-        self.file_calls = []
-        self.supplement_payload = None
-        self.supplement_blob_sha = "a" * 40
-        self.supplement_api_not_modified = False
+        self.manifest = json.loads((ROOT / "data/tag_sources.json").read_text())
+        self.manifest["sources"][SUPPLEMENT_SOURCE_ID]["min_rows"] = 1
+        self.manifest_path = self.root / "manifest.json"
+        self.manifest_path.write_text(json.dumps(self.manifest))
+        self.store = TagAutocompleteStore(self.root / "user/metadata.json", self.manifest_path)
+        self.store.root.mkdir()
+        self.rows = [
+            ("blue_eyes", 0, "蓝眼", 1000),
+            ("blue_hair", 0, "蓝发", 100),
+            ("blue_sky", 0, "蓝天", 99),
+            ("rare_tag", 0, "罕见", 10),
+            ("char_(series)", 4, "角色", 500),
+            ("Mixed Case", 0, "大小写", 200),
+        ]
+        database(self.store._path("downloaded"), self.rows)
 
-        async def fetcher(url, *, headers=None, maximum_bytes=None):
-            self.calls.append((url, dict(headers or {}), maximum_bytes))
-            if url == "https://manifest.example/tag_sources.json":
-                return 200, json.dumps(self.manifest).encode("utf-8"), {"ETag": '"manifest"'}
-            for source_id, payload in (("base", self.base_payload), ("zh-CN", self.zh_payload)):
-                if url == self.manifest["sources"][source_id]["url"]:
-                    return 200, payload, {"ETag": f'"{source_id}"'}
-            supplement_api_url = (
-                "https://api.github.com/repos/"
-                f"{SUPPLEMENT_REPOSITORY}/contents/{SUPPLEMENT_REMOTE_PATH}?ref={SUPPLEMENT_REF}"
-            )
-            if self.supplement_payload is not None and url == supplement_api_url:
-                if self.supplement_api_not_modified and headers and headers.get("If-None-Match"):
-                    return 304, b"", {"ETag": '"supplement"'}
-                metadata = {
-                    "type": "file",
-                    "name": SUPPLEMENT_REMOTE_PATH,
-                    "path": SUPPLEMENT_REMOTE_PATH,
-                    "sha": self.supplement_blob_sha,
-                    "size": len(self.supplement_payload),
-                    "download_url": (
-                        "https://raw.githubusercontent.com/"
-                        f"{SUPPLEMENT_REPOSITORY}/{SUPPLEMENT_REF}/{SUPPLEMENT_REMOTE_PATH}"
-                    ),
-                }
-                return 200, json.dumps(metadata).encode("utf-8"), {"ETag": '"supplement"'}
-            raise AssertionError(f"unexpected URL {url}")
+    def local(self, rows=None):
+        database(self.store._path("local"), rows or [("local_tag", 0, "本地", 100)])
 
-        async def file_fetcher(url, destination, *, headers=None, maximum_bytes=None):
-            self.file_calls.append((url, dict(headers or {}), maximum_bytes))
-            if len(self.supplement_payload) > maximum_bytes:
-                raise TagAutocompleteValidationError("download is too large")
-            Path(destination).write_bytes(self.supplement_payload)
-            return 200, {
-                "size_bytes": len(self.supplement_payload),
-                "sha256": hashlib.sha256(self.supplement_payload).hexdigest(),
-            }, {"ETag": '"sqlite"'}
+    def test_counts_inclusive_default_minimum_and_empty(self):
+        for value, count in [(10, 6), (99, 5), (100, 4), (500, 2), (1000, 1), (1001, 0)]:
+            status = self.store.status("zh", value)
+            self.assertEqual((status["active_count"], status["total_count"], status["min_post_count"]), (count, 6, value))
+        self.assertEqual(self.store.status()["active_count"], 4)
+        self.assertEqual(self.store._candidates, {})
 
-        self.fetcher = fetcher
-        self.file_fetcher = file_fetcher
-        self.store = TagAutocompleteStore(
-            self.root / "user" / "metadata.json",
-            self.manifest_path,
-            remote_manifest_url="https://manifest.example/tag_sources.json",
-            fetcher=fetcher,
-            file_fetcher=file_fetcher,
-            now=lambda: 1_700_000_000,
-        )
+    def test_invalid_thresholds(self):
+        for value in [None, "", 9, -1, True, 100.5, "1e2", "100.0", {}, 2**53]:
+            with self.subTest(value=value), self.assertRaises(TagAutocompleteValidationError):
+                self.store.status(min_post_count=value)
+            with self.assertRaises(TagAutocompleteValidationError):
+                self.store.search("blue", min_post_count=value)
+        self.assertEqual(validate_min_post_count("10"), 10)
 
-    def set_supplement_manifest(self, payload):
-        self.manifest = payload
-        self.manifest_path.write_text(
-            json.dumps(payload, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    def test_threshold_search_and_low_frequency_resolution(self):
+        self.assertEqual([r["tag"] for r in self.store.search("blue", "zh", 2)], ["blue_eyes", "blue_hair"])
+        self.assertNotIn("blue_sky", [r["tag"] for r in self.store.search("blue", "zh")])
+        self.assertIn("blue_sky", [r["tag"] for r in self.store.search("blue", "zh", min_post_count=10)])
+        self.assertEqual(self.store.resolve(["rare tag"])[0]["translation"], "罕见")
+        self.assertIsNone(self.store.resolve(["not_installed"])[0])
 
-    def tearDown(self):
-        self.temporary.cleanup()
+    def test_normalization_chinese_fuzzy_and_order(self):
+        self.assertEqual(self.store.search("BLUE EYES")[0]["tag"], "blue_eyes")
+        self.assertEqual(self.store.search("蓝发", "zh")[0]["tag"], "blue_hair")
+        self.assertEqual(self.store.resolve(["char \\(series\\)", "mixed_case"])[0]["tag"], "char_(series)")
+        self.assertEqual(self.store.resolve(["mixed_case"])[0]["tag"], "Mixed Case")
+        self.assertEqual(self.store.search("bleys", "zh")[0]["match_rank"], 3)
+        self.assertEqual(self.store.search("blue", "en")[0]["translation"], "")
+        self.assertEqual(normalize_locale("zh-TW"), "en")
 
-    async def test_first_download_installs_both_sources_and_searches_chinese(self):
-        self.assertTrue(self.store.status("zh-CN")["needs_download"])
-        status = await self.store.update("zh-CN")
-        self.assertTrue(status["ready"])
-        self.assertTrue(status["primary_translation_available"])
-        self.assertEqual(status["row_count"], 4)
-        self.assertEqual(status["primary_translation_count"], 3)
-        self.assertEqual(status["translated_tag_count"], 3)
-        self.assertEqual(status["translation_coverage_percent"], 75.0)
-        self.assertTrue((self.root / "user" / "danbooru.base.csv").is_file())
-        self.assertTrue((self.root / "user" / "danbooru.zh-CN.csv").is_file())
+    def test_fuzzy_only_if_direct_results_insufficient(self):
+        with patch("tag_autocomplete._ordered_subsequence_score_compact", side_effect=AssertionError("not needed")):
+            self.assertEqual(len(self.store.search("blue", limit=2)), 2)
 
-        english = self.store.search("bl", "en", 12)
-        self.assertEqual(
-            [record["tag"] for record in english],
-            ["blush", "blue_eyes", "blue_hair", "blue_archive"],
-        )
-        self.assertEqual(english[1]["insert_text"], "blue eyes")
-        self.assertNotEqual(english[0]["tag"], "blue_archive")
-        chinese = self.store.search("蓝", "zh-CN", 12)
-        self.assertEqual([record["tag"] for record in chinese], ["blue_eyes", "blue_hair"])
-        self.assertEqual(chinese[0]["translation"], "蓝眼睛")
+    def test_lru_two_candidate_sets_status_does_not_build(self):
+        for threshold in [10, 100, 500]:
+            self.store.search("blue", min_post_count=threshold)
+        self.assertEqual([key[1] for key in self.store._candidates], [100, 500])
+        before = list(self.store._candidates.values())
+        for threshold in [10, 100, 999]:
+            self.store.status(min_post_count=threshold)
+        self.assertEqual(list(self.store._candidates.values()), before)
 
-        resolved = self.store.resolve(
-            ["blue eyes", "blue_eyes", "azure eyes", "blue", "blue archive"],
-            "zh-CN",
-        )
-        self.assertEqual([record["tag"] for record in resolved[:3]], ["blue_eyes"] * 3)
-        self.assertEqual(resolved[0]["translation"], "蓝眼睛")
-        self.assertIsNone(resolved[3])
-        self.assertEqual(resolved[4]["translation"], "")
+    def test_read_only_migration_prefers_local_and_ignores_csv(self):
+        self.local()
+        (self.store.root / "danbooru.base.csv").write_text("invalid")
+        before = sorted(path.name for path in self.store.root.iterdir())
+        self.assertEqual(self.store.status()["selected_source"], "local")
+        self.assertEqual(self.store.search("local")[0]["tag"], "local_tag")
+        self.assertEqual(sorted(path.name for path in self.store.root.iterdir()), before)
+        self.assertFalse(self.store.metadata_path.exists())
 
-    async def test_exact_resolve_preserves_input_order_and_rejects_invalid_values(self):
-        await self.store.update("zh-CN")
-        resolved = self.store.resolve(["blush", "missing", "red face"], "zh-CN")
-        self.assertEqual(resolved[0]["tag"], "blush")
-        self.assertIsNone(resolved[1])
-        self.assertEqual(resolved[2]["tag"], "blush")
-        with self.assertRaisesRegex(TagAutocompleteValidationError, "must be an array"):
-            self.store.resolve("blush", "zh-CN")
-        with self.assertRaisesRegex(TagAutocompleteValidationError, "must be strings"):
-            self.store.resolve([123], "zh-CN")
+    def test_invalid_legacy_local_uses_existing_download(self):
+        self.store._path("local").write_bytes(b"broken")
+        self.assertEqual(self.store.status()["selected_source"], "downloaded")
+        self.assertTrue(self.store.status()["sources"]["local"]["error"])
 
-    async def test_escaped_parentheses_match_danbooru_character_tags(self):
-        self.base_payload = base_csv([
-            ("karin_(blue_archive)", 4, 159, ""),
-            ("karin_(bunny)_(blue_archive)", 4, 115, ""),
-        ])
-        self.zh_payload = translation_csv([
-            ("karin_(blue_archive)", "卡琳（蔚蓝档案）"),
-            ("karin_(bunny)_(blue_archive)", "卡琳（兔女郎）（蔚蓝档案）"),
-        ])
-        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-escaped-parentheses")
-        await self.store.update("zh-CN")
-
-        escaped_query = r"karin \(blue archive\)"
-        results = self.store.search(escaped_query, "zh-CN", 20)
-        self.assertEqual(results[0]["tag"], "karin_(blue_archive)")
-        self.assertEqual(results[0]["match_rank"], 0)
-
-        resolved = self.store.resolve([
-            r"karin \(blue archive\)",
-            r"karin \(bunny\) \(blue archive\)",
-        ], "zh-CN")
-        self.assertEqual(
-            [record["translation"] for record in resolved],
-            ["卡琳（蔚蓝档案）", "卡琳（兔女郎）（蔚蓝档案）"],
-        )
-
-    async def test_search_defaults_to_thirty_results(self):
-        self.base_payload = base_csv([
-            (f"test_tag_{index:02d}", 0, 10_000 - index, "")
-            for index in range(35)
-        ])
-        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-30-limit")
-        await self.store.update("en")
-
-        results = self.store.search("test", "en")
-        self.assertEqual(len(results), 30)
-        self.assertEqual(results[0]["tag"], "test_tag_00")
-        self.assertEqual(results[-1]["tag"], "test_tag_29")
-        self.assertEqual(len(self.store.search("test", "en", 100)), 35)
+    def test_explicit_source_no_fallback_and_persists(self):
+        self.local()
+        self.store.select_source("downloaded")
+        self.assertEqual(self.store.status()["selected_source"], "downloaded")
+        self.store.select_source("local")
+        self.store._path("local").write_bytes(b"broken")
+        self.assertFalse(self.store.status()["available"])
+        self.assertEqual(self.store.status()["selected_source"], "local")
+        with self.assertRaises(TagAutocompleteUnavailableError):
+            self.store.search("blue")
         with self.assertRaises(TagAutocompleteValidationError):
-            self.store.search("test", "en", 101)
+            self.store.select_source("base")
 
-    async def test_character_skip_fuzzy_matching_ranks_after_contiguous_matches(self):
-        self.base_payload = base_csv([
-            ("bleyes", 0, 1, ""),
-            ("bleyes_style", 0, 2, ""),
-            ("super_bleyes_tag", 0, 3, ""),
-            ("blue_eyes", 0, 9_000_000, ""),
-            ("black_eyes", 0, 8_000_000, ""),
-            ("black_pantyhose", 0, 7_000_000, ""),
-            ("yaoi", 0, 99_000_000, "bl"),
-        ])
-        self.zh_payload = translation_csv([
-            ("blue_eyes", "蓝眼睛"),
-            ("black_eyes", "黑眼睛"),
-            ("black_pantyhose", "黑色连裤袜"),
-        ])
-        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-fuzzy")
-        await self.store.update("zh-CN")
+    def test_switch_failure_preserves_selection(self):
+        self.store.select_source("downloaded")
+        with self.assertRaises(TagAutocompleteUnavailableError):
+            self.store.select_source("local")
+        self.assertEqual(self.store.status()["selected_source"], "downloaded")
 
-        english = self.store.search("bleyes", "zh-CN", 20)
-        self.assertEqual(
-            [record["tag"] for record in english[:5]],
-            ["bleyes", "bleyes_style", "super_bleyes_tag", "blue_eyes", "black_eyes"],
-        )
-        self.assertNotIn("match_score", english[0])
-        self.assertEqual(english[3]["match_rank"], 3)
-        self.assertEqual(
-            english[3]["match_score"],
-            {"start": 0, "gaps": 2, "length": 8},
-        )
-        self.assertEqual(self.store.search("blkpnths", "zh-CN", 20)[0]["tag"], "black_pantyhose")
-        self.assertEqual(self.store.search("蓝睛", "zh-CN", 20)[0]["tag"], "blue_eyes")
-        self.assertEqual(self.store.search("be", "zh-CN", 20), [])
-        prefix_results = self.store.search("bl", "zh-CN", 20)
-        self.assertNotEqual(prefix_results[0]["tag"], "yaoi")
-        yaoi_index = next(
-            index for index, record in enumerate(prefix_results) if record["tag"] == "yaoi"
-        )
-        self.assertTrue(all(
-            record["match_rank"] == 1
-            for record in prefix_results[:yaoi_index]
-        ))
+    def test_import_small_library_and_source_invalidation(self):
+        self.store.search("blue")
+        incoming = self.root / "upload"
+        database(incoming, [("only_tag", 0, "唯一", 10)])
+        self.store.begin_local_import()
+        try:
+            self.store.install_local_supplement(incoming)
+        finally:
+            self.store.finish_local_import()
+        self.assertEqual(self.store.status()["selected_source"], "local")
+        self.assertEqual(self.store.status()["active_count"], 0)
+        self.assertEqual(self.store.resolve(["only_tag"])[0]["translation"], "唯一")
+        self.assertEqual(len(self.store._candidates), 0)
 
-    async def test_failed_refresh_keeps_last_good_files_and_reports_error(self):
-        await self.store.update("zh-CN")
-        original = (self.root / "user" / "danbooru.base.csv").read_bytes()
-        newer = manifest(self.base_payload + b"broken", self.zh_payload, version="test-2")
-        self.manifest = newer
+    def test_bad_import_preserves_bytes_and_metadata(self):
+        self.local()
+        self.store.select_source("local")
+        before = self.store._path("local").read_bytes(), self.store.metadata_path.read_bytes()
+        for content in [b"", b"broken"]:
+            incoming = self.root / "upload"
+            incoming.write_bytes(content)
+            with self.assertRaises((TagAutocompleteValidationError, TagAutocompleteCapacityError)):
+                self.store.install_local_supplement(incoming)
+            self.assertEqual((self.store._path("local").read_bytes(), self.store.metadata_path.read_bytes()), before)
+
+    def test_metadata_write_failure_rolls_back_file(self):
+        self.local()
+        self.store.select_source("local")
+        before = self.store._path("local").read_bytes(), self.store.metadata_path.read_bytes()
+        incoming = self.root / "upload"
+        database(incoming, [("new_tag", 0, "新的", 100)])
+        with patch.object(self.store, "_write_metadata", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.store.install_local_supplement(incoming)
+        self.assertEqual((self.store._path("local").read_bytes(), self.store.metadata_path.read_bytes()), before)
+
+    def test_size_limit_and_invalid_rows(self):
+        incoming = self.root / "upload"
+        incoming.write_bytes(b"x" * 20)
+        with patch("tag_autocomplete.MAX_SQLITE_DATASET_BYTES", 10):
+            with self.assertRaises(TagAutocompleteCapacityError):
+                self.store.install_local_supplement(incoming)
+        for count in [9, 10.5]:
+            incoming.unlink()
+            database(incoming, [("bad", 0, "无效", count)])
+            with self.assertRaises(TagAutocompleteValidationError):
+                _validate_sqlite_dataset(incoming, {"min_rows": 1})
+
+    def test_rescan_invalidates_same_source(self):
+        self.local()
+        self.store.select_source("local")
+        revision = self.store.status()["source_revision"]
+        self.store.search("local")
+        with closing(sqlite3.connect(self.store._path("local"))) as connection:
+            connection.execute("INSERT INTO tags VALUES ('second', 0, '第二', 500)")
+            connection.commit()
+        self.store.rescan_local_supplement()
+        self.assertEqual(self.store.status()["active_count"], 2)
+        self.assertNotEqual(self.store.status()["source_revision"], revision)
+
+    def test_user_isolation_and_cancelled_search(self):
+        other = TagAutocompleteStore(self.root / "other/metadata.json", self.manifest_path)
+        self.assertFalse(other.status()["available"])
+        self.assertFalse(other.root.exists())
+        self.assertEqual(self.store.search("blue", cancelled=lambda: True), [])
+        self.assertEqual(self.store._candidates, {})
+
+    def test_busy_operation_rejects_switch(self):
+        self.store.begin_local_import()
+        try:
+            with self.assertRaises(TagAutocompleteUnavailableError):
+                self.store.select_source("downloaded")
+        finally:
+            self.store.finish_local_import()
+
+    def test_invalid_resolution_and_limits(self):
+        for tags in [None, ["x"] * 257, [True], ["x" * 129]]:
+            with self.assertRaises(TagAutocompleteValidationError):
+                self.store.resolve(tags)
+        for limit in [0, 101, True, "x"]:
+            with self.assertRaises(TagAutocompleteValidationError):
+                self.store.search("blue", limit=limit)
+
+    def mock_remote(self, *, corrupt=False, fail=False):
+        content = self.store._path("downloaded").read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        blob = hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
+        async def fetch(url, **kwargs):
+            self.assertIn("api.github.com/repos/ffdkj/", url)
+            return 200, json.dumps({"type": "file", "path": "tag.sqlite", "size": len(content),
+                "sha": blob, "download_url": f"https://raw.githubusercontent.com/{self.manifest['sources'][SUPPLEMENT_SOURCE_ID]['repository']}/main/tag.sqlite"}).encode(), {"ETag": "fixture"}
+        async def fetch_file(url, path, **kwargs):
+            if fail:
+                raise TagAutocompleteUnavailableError("offline")
+            Path(path).write_bytes(b"x" * len(content) if corrupt else content)
+            return 200, {"sha256": digest}, {}
+        self.store.fetcher = fetch
+        self.store.file_fetcher = fetch_file
+
+    async def test_download_hash_metadata_and_local_selection_preserved(self):
+        self.local()
+        self.mock_remote()
+        await self.store.update()
+        self.assertEqual(self.store.status()["selected_source"], "local")
+        metadata = json.loads(self.store.metadata_path.read_text())
+        self.assertEqual(metadata["sources"][SUPPLEMENT_SOURCE_ID]["license"], "MIT")
+        self.assertEqual(len(metadata["sources"][SUPPLEMENT_SOURCE_ID]["sha256"]), 64)
+
+    async def test_failed_download_and_hash_keep_previous(self):
+        for kwargs in [{"corrupt": True}, {"fail": True}]:
+            self.mock_remote(**kwargs)
+            before = self.store._path("downloaded").read_bytes()
+            with self.assertRaises((TagAutocompleteValidationError, TagAutocompleteUnavailableError)):
+                await self.store.update()
+            self.assertEqual(self.store._path("downloaded").read_bytes(), before)
+            self.assertFalse(self.store._local_import_lock.locked())
+
+    async def test_remote_requires_full_row_policy_but_local_accepts_one(self):
+        self.manifest["sources"][SUPPLEMENT_SOURCE_ID]["min_rows"] = 300000
+        self.manifest_path.write_text(json.dumps(self.manifest))
+        self.mock_remote()
         with self.assertRaises(TagAutocompleteValidationError):
-            await self.store.update("zh-CN")
-        self.assertEqual((self.root / "user" / "danbooru.base.csv").read_bytes(), original)
-        self.assertTrue(self.store.status("zh-CN")["available"])
-        self.assertTrue(self.store.status("zh-CN")["error"])
+            await self.store.update()
+        incoming = self.root / "upload"
+        database(incoming, [("one", 0, "一", 100)])
+        self.store.install_local_supplement(incoming)
+        self.assertEqual(self.store.status()["total_count"], 1)
 
-    async def test_parallel_update_requests_share_one_task(self):
-        first = self.store.start_update("zh-CN")
-        second = self.store.start_update("zh-CN")
-        self.assertIs(first, second)
-        await first
-        self.assertEqual(sum(url.endswith("tag_sources.json") for url, _headers, _limit in self.calls), 1)
+    async def test_unchanged_download_uses_etag_without_file_fetch(self):
+        self.mock_remote()
+        await self.store.update()
+        async def unchanged(url, **kwargs):
+            self.assertEqual(kwargs["headers"]["If-None-Match"], "fixture")
+            return 304, b"", {}
+        self.store.fetcher = unchanged
+        async def forbidden(*args, **kwargs):
+            self.fail("unchanged dictionary should not download")
+        self.store.file_fetcher = forbidden
+        await self.store.update()
+        self.assertTrue(self.store.status()["available"])
 
-    async def test_status_is_local_and_never_starts_an_update(self):
-        await self.store.update("en")
-        self.calls.clear()
-        self.file_calls.clear()
-        self.assertIsNone(self.store._update_task)
-        status = self.store.status("zh-CN")
-        self.assertIsNone(self.store._update_task)
-        self.assertEqual(self.calls, [])
-        self.assertEqual(self.file_calls, [])
-        self.assertTrue(status["available"])
+    def test_manifest_single_licensed_sqlite(self):
+        manifest = validate_manifest(json.loads((ROOT / "data/tag_sources.json").read_text()))
+        self.assertEqual(list(manifest["sources"]), [SUPPLEMENT_SOURCE_ID])
+        self.assertEqual(manifest["sources"][SUPPLEMENT_SOURCE_ID]["license"], "MIT")
 
-    async def test_supplement_only_fills_missing_primary_translations(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_eyes", 0, "碧蓝眼眸", 1_500_000),
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-            ("outside_dictionary", 0, "库外标签", 100),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-supplement-1",
-            supplement_payload=self.supplement_payload,
-        ))
+    def test_status_reuses_histogram_without_reopening_sqlite(self):
+        self.store.status()
+        with patch("tag_autocomplete._connect", side_effect=AssertionError("cached counts must not query SQLite")):
+            self.assertEqual(self.store.status(min_post_count=100)["active_count"], 4)
+            self.assertEqual(self.store.status(min_post_count=10)["active_count"], 6)
 
-        status = await self.store.update("zh-CN")
+    def test_source_change_during_search_discards_old_results(self):
+        self.local()
+        self.store.select_source("downloaded")
+        calls = 0
+        def switch_during_scan():
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                self.store.select_source("local")
+            return False
+        self.assertEqual(self.store.search("blue", cancelled=switch_during_scan), [])
+        self.assertEqual(self.store.status()["selected_source"], "local")
 
-        self.assertTrue(status["ready"])
-        self.assertTrue(status["supplement_enabled"])
-        self.assertTrue(status["supplement_available"])
-        self.assertEqual(status["supplement_translation_count"], 1)
-        self.assertEqual(status["primary_translation_count"], 3)
-        self.assertEqual(status["translated_tag_count"], 4)
-        self.assertEqual(status["translation_coverage_percent"], 100.0)
-        self.assertEqual(status["supplement_blob_sha"], "a" * 40)
-        self.assertEqual(status["supplement_license_status"], "cleared")
-        self.assertEqual(
-            status["supplement_source_page"],
-            f"https://github.com/{SUPPLEMENT_REPOSITORY}",
-        )
-        self.assertTrue(
-            (self.root / "user" / "danbooru.zh-CN.supplement.sqlite").is_file()
-        )
-        self.assertEqual(
-            self.store.resolve(["blue eyes"], "zh-CN")[0]["translation"],
-            "蓝眼睛",
-        )
-        self.assertEqual(
-            self.store.search("蔚蓝", "zh-CN", 20)[0]["tag"],
-            "blue_archive",
-        )
-        self.assertEqual(self.store.search("库外", "zh-CN", 20), [])
-        self.assertEqual(len(self.file_calls), 1)
+    def test_precancelled_and_midscan_cancelled_work_never_returns_results(self):
+        calls = 0
+        def cancel():
+            nonlocal calls
+            calls += 1
+            return calls >= 3
+        self.assertEqual(self.store.search("blue", cancelled=cancel), [])
 
-        self.supplement_api_not_modified = True
-        unchanged = await self.store.update("zh-CN")
-        self.assertEqual(len(self.file_calls), 1)
-        self.assertEqual(unchanged["supplement_translation_count"], 1)
+    def test_unicode_and_escaped_names_resolve_without_loading_candidates(self):
+        self.local([("Éclair", 0, "甜点", 10), ("Ｆｕｌｌ", 0, "全角", 10)])
+        self.assertEqual([row["translation"] for row in self.store.resolve(["éclair", "full"])], ["甜点", "全角"])
+        self.assertEqual(self.store._candidates, {})
 
-    async def test_drop_in_sqlite_is_auto_detected_preferred_and_skips_remote_download(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_eyes", 0, "不应覆盖主翻译", 1_500_000),
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-            ("outside_dictionary", 0, "库外标签", 100),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-local-drop-in",
-            supplement_payload=self.supplement_payload,
-        ))
-        local_path = self.root / "user" / "tag.sqlite"
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(self.supplement_payload)
-
-        status = await self.store.update("zh-CN")
-
-        self.assertEqual(status["supplement_origin"], "local")
-        self.assertEqual(
-            status["supplement_drop_in_path"],
-            LOCAL_SUPPLEMENT_DROP_IN_PATH,
-        )
-        self.assertEqual(status["supplement_row_count"], 3)
-        self.assertEqual(len(status["supplement_file_sha256"]), 64)
-        self.assertTrue(status["supplement_file_modified_at"])
-        self.assertEqual(status["supplement_translation_count"], 1)
-        self.assertEqual(status["primary_translation_count"], 3)
-        self.assertEqual(status["translated_tag_count"], 4)
-        self.assertEqual(self.file_calls, [])
-        self.assertFalse(any(
-            url == self.manifest["sources"]["zh-CN-supplement"]["api_url"]
-            for url, _headers, _limit in self.calls
-        ))
-        self.assertEqual(
-            self.store.resolve(["blue eyes"], "zh-CN")[0]["translation"],
-            "蓝眼睛",
-        )
-        self.assertEqual(
-            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
-            "蔚蓝档案",
-        )
-        self.assertEqual(self.store.search("库外", "zh-CN", 20), [])
-
-    async def test_invalid_drop_in_file_warns_and_falls_back_to_downloaded_supplement(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "远程补充翻译", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-local-fallback",
-            supplement_payload=self.supplement_payload,
-        ))
-        await self.store.update("zh-CN")
-        (self.root / "user" / "tag.sqlite").write_bytes(b"broken")
-
-        status = self.store.status("zh-CN")
-
-        self.assertEqual(status["supplement_origin"], "downloaded")
-        self.assertTrue(status["supplement_available"])
-        self.assertIn("not a SQLite", status["supplement_local_error"])
-        self.assertEqual(
-            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
-            "远程补充翻译",
-        )
-
-    async def test_replacing_or_removing_drop_in_file_refreshes_active_cache(self):
-        first_payload = supplement_sqlite([
-            ("blue_archive", 3, "本地翻译一", 300_000),
-        ])
-        second_payload = supplement_sqlite([
-            ("blue_archive", 3, "本地翻译二（更新）", 300_000),
-        ])
-        self.supplement_payload = first_payload
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-local-refresh",
-            supplement_payload=first_payload,
-        ))
-        local_path = self.root / "user" / "tag.sqlite"
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(first_payload)
-        await self.store.update("zh-CN")
-        self.assertEqual(
-            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
-            "本地翻译一",
-        )
-
-        local_path.write_bytes(second_payload)
-        self.assertEqual(
-            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
-            "本地翻译二（更新）",
-        )
-        local_path.unlink()
-        status = self.store.status("zh-CN")
-        self.assertEqual(status["supplement_origin"], "")
-        self.assertEqual(
-            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
-            "",
-        )
-
-    async def test_local_import_is_atomic_validated_and_blocks_remote_update(self):
-        local_path = self.root / "user" / "tag.sqlite"
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        original = supplement_sqlite([
-            ("blue_archive", 3, "原本地翻译", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-local-import",
-            supplement_payload=original,
-        ))
-        local_path.write_bytes(original)
-        valid_upload = self.root / "user" / ".valid-upload.tmp"
-        valid_upload.write_bytes(supplement_sqlite([
-            ("blue_archive", 3, "新本地翻译", 300_000),
-        ]))
-        self.store.begin_local_import()
-        try:
-            self.store.install_local_supplement(valid_upload)
-        finally:
-            self.store.finish_local_import()
-        self.assertFalse(valid_upload.exists())
-        self.assertEqual(self.store.status("zh-CN")["supplement_origin"], "local")
-
-        invalid_upload = self.root / "user" / ".invalid-upload.tmp"
-        invalid_upload.write_bytes(b"broken")
-        self.store.begin_local_import()
-        try:
-            with self.assertRaisesRegex(TagAutocompleteValidationError, "not a SQLite"):
-                self.store.install_local_supplement(invalid_upload)
-        finally:
-            self.store.finish_local_import()
-        self.assertNotEqual(local_path.read_bytes(), b"broken")
-        invalid_upload.unlink()
-
-        self.store.begin_local_import()
-        try:
-            with self.assertRaisesRegex(
-                TagAutocompleteUnavailableError,
-                "import is already running",
-            ):
-                self.store.start_update("zh-CN")
-        finally:
-            self.store.finish_local_import()
-
-    async def test_local_import_rejects_oversized_file_before_replacement(self):
-        local_path = self.root / "user" / "tag.sqlite"
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        original = supplement_sqlite([
-            ("blue_archive", 3, "原本地翻译", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-local-import-size",
-            supplement_payload=original,
-        ))
-        local_path.write_bytes(original)
-        oversized = self.root / "user" / ".oversized-upload.tmp"
-        with oversized.open("wb") as handle:
-            handle.truncate(64 * 1024 * 1024 + 1)
-        with self.assertRaises(TagAutocompleteCapacityError):
-            self.store.install_local_supplement(oversized)
-        self.assertEqual(local_path.read_bytes(), original)
-        oversized.unlink()
-
-    async def test_failed_supplement_refresh_keeps_primary_and_last_good_database(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-supplement-good",
-            supplement_payload=self.supplement_payload,
-        ))
-        await self.store.update("zh-CN")
-        supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
-        original = supplement_path.read_bytes()
-
-        self.supplement_payload = b"not a sqlite database"
-        self.supplement_blob_sha = "b" * 40
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-supplement-broken",
-            supplement_payload=self.supplement_payload,
-        ))
-        status = await self.store.update("zh-CN")
-
-        self.assertTrue(status["ready"])
-        self.assertTrue(status["supplement_available"])
-        self.assertTrue(status["supplement_error"])
-        self.assertEqual(supplement_path.read_bytes(), original)
-        self.assertEqual(
-            self.store.resolve(["blue archive"], "zh-CN")[0]["translation"],
-            "蔚蓝档案",
-        )
-        self.assertEqual(
-            self.store.resolve(["blue eyes"], "zh-CN")[0]["translation"],
-            "蓝眼睛",
-        )
-
-    async def test_broken_installed_supplement_reports_local_warning_and_keeps_primary_coverage(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-supplement-broken-local",
-            supplement_payload=self.supplement_payload,
-        ))
-        await self.store.update("zh-CN")
-        supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
-        supplement_path.write_bytes(b"not sqlite")
-        self.store._coverage_cache_key = None
-
-        status = self.store.status("zh-CN")
-
-        self.assertTrue(status["available"])
-        self.assertEqual(status["primary_translation_count"], 3)
-        self.assertEqual(status["translated_tag_count"], 3)
-        self.assertEqual(status["translation_coverage_percent"], 75.0)
-        self.assertIn("could not read Chinese translation supplement", status["supplement_error"])
-
-    async def test_not_modified_metadata_redownloads_a_missing_local_database(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-supplement-redownload",
-            supplement_payload=self.supplement_payload,
-        ))
-        await self.store.update("zh-CN")
-        supplement_path = self.root / "user" / "danbooru.zh-CN.supplement.sqlite"
-        supplement_path.unlink()
-        self.supplement_api_not_modified = True
-
-        status = await self.store.update("zh-CN")
-
-        self.assertTrue(status["supplement_available"])
-        self.assertTrue(supplement_path.is_file())
-        self.assertEqual(len(self.file_calls), 2)
-
-    async def test_repository_change_forces_local_sqlite_replacement(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-        ])
-        self.set_supplement_manifest(manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-source-migration",
-            supplement_payload=self.supplement_payload,
-        ))
-        await self.store.update("zh-CN")
-
-        metadata = json.loads(self.store.metadata_path.read_text(encoding="utf-8"))
-        installed = metadata["sources"]["zh-CN-supplement"]
-        installed["repository"] = "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
-        installed["source_page"] = f"https://github.com/{installed['repository']}"
-        self.store.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-        self.file_calls.clear()
-
-        status = await self.store.update("zh-CN")
-
-        self.assertEqual(len(self.file_calls), 1)
-        self.assertEqual(status["supplement_license_status"], "cleared")
-        refreshed = json.loads(self.store.metadata_path.read_text(encoding="utf-8"))
-        self.assertEqual(
-            refreshed["sources"]["zh-CN-supplement"]["repository"],
-            SUPPLEMENT_REPOSITORY,
-        )
-
-    async def test_bundled_supplement_policy_overrides_remote_manifest(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-        ])
-        bundled = manifest(
-            self.base_payload,
-            self.zh_payload,
-            version="test-bundled-policy",
-            supplement_payload=self.supplement_payload,
-        )
-        bundled["sources"]["zh-CN-supplement"]["license_status"] = "user-directed"
-        self.manifest_path.write_text(json.dumps(bundled), encoding="utf-8")
-        stale_remote_source = supplement_source(self.supplement_payload)
-        stale_remote_source["repository"] = (
-            "qjxmgs/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table"
-        )
-        stale_remote_source["api_url"] = (
-            "https://api.github.com/repos/"
-            f"{stale_remote_source['repository']}/contents/{SUPPLEMENT_REMOTE_PATH}?ref=main"
-        )
-        self.manifest["sources"]["zh-CN-supplement"] = stale_remote_source
-
-        status = await self.store.update("zh-CN")
-
-        self.assertTrue(status["supplement_enabled"])
-        self.assertTrue(status["supplement_available"])
-        self.assertEqual(status["supplement_license_status"], "user-directed")
-        self.assertEqual(len(self.file_calls), 1)
-
-    async def test_disabled_pending_supplement_is_not_downloaded(self):
-        self.supplement_payload = supplement_sqlite([
-            ("blue_archive", 3, "蔚蓝档案", 300_000),
-        ])
-        self.manifest = manifest(self.base_payload, self.zh_payload, version="test-disabled")
-        source_payload = supplement_source(
-            self.supplement_payload,
-            enabled=False,
-            license_status="pending",
-        )
-        self.manifest["sources"]["zh-CN-supplement"] = source_payload
-        self.manifest_path.write_text(
-            json.dumps(self.manifest, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-        status = await self.store.update("zh-CN")
-
-        self.assertFalse(status["supplement_enabled"])
-        self.assertFalse(status["supplement_available"])
-        self.assertEqual(status["supplement_license_status"], "pending")
-        self.assertEqual(status["translated_tag_count"], 3)
-        self.assertEqual(status["translation_coverage_percent"], 75.0)
-        self.assertEqual(self.file_calls, [])
-        self.assertFalse(any(url == source_payload["api_url"] for url, _headers, _limit in self.calls))
-        self.assertEqual(self.store.resolve(["blue archive"], "zh-CN")[0]["translation"], "")
-
-
-class TagAutocompleteValidationTests(unittest.TestCase):
-    def test_locale_normalization(self):
-        self.assertEqual(normalize_locale("zh_Hans"), "zh-CN")
-        self.assertEqual(normalize_locale("zh-CN"), "zh-CN")
-        self.assertEqual(normalize_locale("ja"), "en")
-
-    def test_manifest_rejects_untrusted_urls_and_bad_hashes(self):
-        base = base_csv([("test", 0, 1, "")])
-        zh = translation_csv([("test", "测试")])
-        payload = manifest(base, zh)
-        payload["sources"]["base"]["url"] = "http://example.com/tags.csv"
-        with self.assertRaisesRegex(TagAutocompleteValidationError, "allowed HTTPS"):
-            validate_manifest(payload)
-        payload = manifest(base, zh)
-        payload["sources"]["base"]["sha256"] = "bad"
-        with self.assertRaisesRegex(TagAutocompleteValidationError, "SHA-256"):
-            validate_manifest(payload)
-
-    def test_manifest_accepts_user_directed_local_use_but_rejects_pending_enablement(self):
-        base = base_csv([("test", 0, 1, "")])
-        zh = translation_csv([("test", "测试")])
-        sqlite_payload = supplement_sqlite([("test", 0, "测试", 10)])
-        payload = manifest(base, zh)
-        payload["sources"]["zh-CN-supplement"] = supplement_source(
-            sqlite_payload,
-            enabled=True,
-            license_status="user-directed",
-        )
-        validated = validate_manifest(payload)
-        self.assertEqual(
-            validated["sources"]["zh-CN-supplement"]["license_status"],
-            "user-directed",
-        )
-
-        payload["sources"]["zh-CN-supplement"] = supplement_source(
-            sqlite_payload,
-            enabled=True,
-            license_status="pending",
-        )
-        with self.assertRaisesRegex(TagAutocompleteValidationError, "user-directed use"):
-            validate_manifest(payload)
-
-    def test_sqlite_validation_rejects_corruption_schema_and_invalid_rows(self):
-        cases = {
-            "not a SQLite": b"broken",
-            "column is invalid": supplement_sqlite(
-                [("test", 0, "测试", 10)],
-                invalid_schema=True,
-            ),
-            "only 1 rows": supplement_sqlite([("test", 0, "测试", 10)]),
-            "invalid tag rows": supplement_sqlite([("test", 2, "", 9)]),
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "tag.sqlite"
-            for expected, sqlite_payload in cases.items():
-                with self.subTest(expected=expected):
-                    path.write_bytes(sqlite_payload)
-                    source_payload = supplement_source(
-                        sqlite_payload,
-                        minimum_rows=2 if expected == "only 1 rows" else 1,
-                    )
-                    with self.assertRaisesRegex(TagAutocompleteValidationError, expected):
-                        _validate_sqlite_dataset(path, source_payload)
+    def test_invalid_schema_blob_and_empty_dictionary_are_rejected(self):
+        incoming = self.root / "bad.sqlite"
+        for rows in [[], [("blob", 0, b"not text", 100)], [("bad_category", 99, "无效", 100)]]:
+            database(incoming, rows)
+            with self.assertRaises(TagAutocompleteValidationError):
+                self.store.install_local_supplement(incoming)
+            incoming.unlink()
+        with closing(sqlite3.connect(incoming)) as connection:
+            connection.execute("CREATE TABLE tags(name TEXT, cn_name TEXT)")
+            connection.commit()
+        with self.assertRaises(TagAutocompleteValidationError):
+            self.store.install_local_supplement(incoming)
 
 
 if __name__ == "__main__":

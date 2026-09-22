@@ -2643,17 +2643,21 @@
     background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 13%, var(--comfy-input-bg, #303136));
 }
 
-.setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] > div {
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] > div,
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.MinPostCount"] > div {
     width: 100%;
     display: block;
 }
 
-.setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] .form-label {
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] .form-label,
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.MinPostCount"] .form-label {
     display: none;
 }
 
 .setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] .form-input,
-.setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] .form-input > div {
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.SourceOrder"] .form-input > div,
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.MinPostCount"] .form-input,
+.setting-item[data-setting-id="PromptWeaver.Autocomplete.MinPostCount"] .form-input > div {
     width: 100%;
     display: block;
 }
@@ -4654,3 +4658,97 @@
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-primary-color, #7c6df2) 70%, transparent);
     }
 }
+.cpw-tag-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border-color, #555);
+    border-radius: 8px;
+    background: var(--comfy-input-bg, #222);
+    color: var(--input-text, #ddd);
+    min-width: 0;
+}
+.cpw-tag-filter__heading {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.cpw-tag-filter__help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    color: var(--descrip-text, #999);
+    font: bold 12px/1 system-ui, sans-serif;
+    cursor: help;
+}
+.cpw-tag-filter__help:hover,
+.cpw-tag-filter__help:focus-visible {
+    color: var(--input-text, #ddd);
+    background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.cpw-tag-filter__help:focus-visible {
+    outline: 2px solid var(--p-primary-color, #5b9cff);
+    outline-offset: 2px;
+}
+.cpw-tag-filter__tooltip {
+    position: absolute;
+    z-index: 2;
+    top: 100%;
+    left: 0;
+    width: max-content;
+    max-width: min(360px, 100%);
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, #555);
+    border-radius: 6px;
+    color: var(--input-text, #ddd);
+    background: var(--comfy-menu-bg, #171717);
+    box-shadow: 0 3px 10px rgb(0 0 0 / 20%);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.cpw-tag-filter__tooltip[hidden] { display: none; }
+.cpw-tag-filter__row,
+.cpw-translation-manager__source-picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.cpw-tag-filter__input {
+    min-width: 80px;
+    max-width: 100%;
+    border: 1px solid var(--border-color, #555);
+    background: var(--comfy-input-bg, #222);
+    color: var(--input-text, #ddd);
+    border-radius: 5px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+}
+.cpw-tag-filter input { width: 112px; }
+.cpw-tag-filter__row > button { width: auto; flex: 0 0 auto; }
+.cpw-tag-filter__input:hover { border-color: var(--input-text, #aaa); }
+.cpw-tag-filter__input:focus-visible {
+    outline: 2px solid var(--p-primary-color, #5b9cff);
+    outline-offset: 2px;
+}
+.cpw-tag-filter__input:disabled { opacity: .5; }
+.cpw-tag-filter__input[aria-invalid="true"] { border-color: #d66868; }
+.cpw-tag-filter button[aria-pressed="true"] {
+    border-color: var(--p-primary-color, #5b9cff);
+    background: color-mix(in srgb, var(--p-primary-color, #5b9cff) 20%, var(--comfy-input-bg, #222));
+}
+.cpw-tag-filter__hint { margin: 0; font-size: 12px; opacity: .8; line-height: 1.5; }
+.cpw-tag-filter__count { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cpw-tag-filter__count--error { color: var(--error-text, #d66868); }
+.cpw-translation-manager__body { display: flex; flex-direction: column; gap: 12px; }

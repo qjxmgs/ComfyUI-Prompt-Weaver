@@ -10,5 +10,9 @@
   "PromptWeaver_Autocomplete_TranslationManager": {
     "name": "提示词翻译",
     "tooltip": "查看本地翻译覆盖率并手动更新提示词词库。"
+  },
+  "PromptWeaver_Autocomplete_MinPostCount": {
+    "name": "Danbooru 最低使用次数",
+    "tooltip": "数值越低，加载的标签数量越多，性能消耗也越大。"
   }
 }

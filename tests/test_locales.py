@@ -44,10 +44,15 @@ class LocaleResourceTests(unittest.TestCase):
         self.assertTrue(all(key == value for key, value in english_ui.items()))
         self.assertEqual(chinese_ui["Clear"], "清空")
         self.assertEqual(chinese_ui["Card title"], "卡片标题")
+        self.assertEqual(
+            chinese_ui["Only load tags used in at least this many Danbooru posts."],
+            "只加载Danbooru上作品引用数量不低于该数值的标签",
+        )
 
         expected_settings = {
             "PromptWeaver_Autocomplete_SourceOrder",
             "PromptWeaver_Autocomplete_MaxResults",
+            "PromptWeaver_Autocomplete_MinPostCount",
             "PromptWeaver_Autocomplete_TranslationManager",
         }
         expected_commands = {"PromptWeaver_Autocomplete_UpdateDictionary"}

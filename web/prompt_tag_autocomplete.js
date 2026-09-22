@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,
@@ -6,7 +6,7 @@ import {
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260922-official-locale-v1";
+} from "./prompt_assistant_tags.js?v=20260923-sqlite-filter-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
@@ -393,11 +393,13 @@ export function promptPresenceKeys(value) {
 
 
 export class DanbooruTagProvider {
-    constructor(api, { statusTtlMs = 30_000, now = () => Date.now() } = {}) {
+    constructor(api, { statusTtlMs = 30_000, now = () => Date.now(), minPostCount = () => 100 } = {}) {
         this.api = api;
         this.statusTtlMs = statusTtlMs;
         this.now = now;
         this.cachedStatus = new Map();
+        this.minPostCount = minPostCount;
+        this.generation = 0;
     }
 
     async fetchJson(path, options, label) {
@@ -408,22 +410,26 @@ export class DanbooruTagProvider {
     }
 
     invalidateStatus(locale = null) {
-        if (locale) this.cachedStatus.delete(locale);
-        else this.cachedStatus.clear();
+        this.generation += 1;
+        this.cachedStatus.clear();
     }
 
     async status(locale = "en", { signal, force = false } = {}) {
         const normalizedLocale = locale === "zh" ? "zh-CN" : locale;
-        const cached = this.cachedStatus.get(normalizedLocale);
+        const generation = this.generation;
+        const threshold = this.minPostCount();
+        const cacheKey = `${normalizedLocale}:${threshold}`;
+        const cached = this.cachedStatus.get(cacheKey);
         if (!force && cached && cached.expiresAt > this.now()) return cached.value;
         ensureNotAborted(signal);
         const value = await this.fetchJson(
-            `/prompt-weaver/tag-autocomplete/status?locale=${encodeURIComponent(normalizedLocale)}`,
+            `/prompt-weaver/tag-autocomplete/status?locale=${encodeURIComponent(normalizedLocale)}&min_post_count=${threshold}`,
             { signal },
             t("Danbooru dictionary status"),
         );
         ensureNotAborted(signal);
-        this.cachedStatus.set(normalizedLocale, {
+        if (generation !== this.generation) throw new DOMException("Stale dictionary", "AbortError");
+        this.cachedStatus.set(cacheKey, {
             value,
             expiresAt: this.now() + this.statusTtlMs,
         });
@@ -434,6 +440,8 @@ export class DanbooruTagProvider {
         const normalizedLocale = promptTokenHasHanText(query)
             ? "zh-CN"
             : (locale === "zh" ? "zh-CN" : locale);
+        const generation = this.generation;
+        const threshold = this.minPostCount();
         const status = await this.status(normalizedLocale, { signal });
         if (!status?.available) return { results: [], status };
         ensureNotAborted(signal);
@@ -441,11 +449,12 @@ export class DanbooruTagProvider {
             "/prompt-weaver/tag-autocomplete/search"
                 + `?q=${encodeURIComponent(query)}`
                 + `&locale=${encodeURIComponent(normalizedLocale)}`
-                + `&limit=${encodeURIComponent(limit)}`,
+                + `&limit=${encodeURIComponent(limit)}&min_post_count=${threshold}`,
             { signal },
             t("Danbooru tag search"),
         );
         ensureNotAborted(signal);
+        if (generation !== this.generation || threshold !== this.minPostCount()) throw new DOMException("Stale dictionary", "AbortError");
         const results = Array.isArray(payload?.results) ? payload.results : [];
         return {
             status,
@@ -464,6 +473,7 @@ export class DanbooruTagProvider {
     }
 
     async resolve(tags, locale = "zh-CN", { signal } = {}) {
+        const generation = this.generation;
         const status = await this.status(locale, { signal });
         if (!status?.available) return { results: tags.map(() => null), status };
         ensureNotAborted(signal);
@@ -478,6 +488,7 @@ export class DanbooruTagProvider {
             t("Danbooru tag resolution"),
         );
         ensureNotAborted(signal);
+        if (generation !== this.generation) throw new DOMException("Stale dictionary", "AbortError");
         const rows = Array.isArray(payload?.results) ? payload.results : [];
         return {
             status,
@@ -633,6 +644,7 @@ export class PromptTagAutocompleteProvider {
         danbooruEnabled = () => true,
         promptAssistantEnabled = () => true,
         sourceOrder = () => DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
+        minPostCount = () => 100,
         onDiagnostic,
     } = {}) {
         this.danbooruEnabled = danbooruEnabled;
@@ -641,7 +653,7 @@ export class PromptTagAutocompleteProvider {
             ? sourceOrder
             : () => DEFAULT_AUTOCOMPLETE_SOURCE_ORDER;
         this.onDiagnostic = typeof onDiagnostic === "function" ? onDiagnostic : null;
-        this.danbooru = new DanbooruTagProvider(api);
+        this.danbooru = new DanbooruTagProvider(api, { minPostCount });
         this.promptAssistant = new PromptAssistantTagProvider(api, { onDiagnostic });
         this.translationCache = new Map();
     }
@@ -692,7 +704,8 @@ export class PromptTagAutocompleteProvider {
         const danbooruEnabled = this.danbooruEnabled();
         const promptAssistantEnabled = this.promptAssistantEnabled();
         const sourceOrder = normalizeAutocompleteSourceOrder(this.sourceOrder());
-        const sourceKey = `${promptAssistantEnabled ? 1 : 0}:${danbooruEnabled ? 1 : 0}:${sourceOrder.join(",")}`;
+        const generation = this.danbooru.generation;
+        const sourceKey = `${generation}:${promptAssistantEnabled ? 1 : 0}:${danbooruEnabled ? 1 : 0}:${sourceOrder.join(",")}`;
         const inputKeys = values.map(normalizeAutocompleteInsertionKey);
         const missing = [];
         const seen = new Set();
@@ -731,6 +744,7 @@ export class PromptTagAutocompleteProvider {
                     "prompt-assistant": promptAssistantResults[index],
                     danbooru: danbooruResults[index],
                 };
+                if (generation !== this.danbooru.generation) throw new DOMException("Stale dictionary", "AbortError");
                 this.translationCache.set(
                     `${sourceKey}:${batch[index]}`,
                     sourceOrder.map((source) => resultsBySource[source]).find(Boolean) || null,

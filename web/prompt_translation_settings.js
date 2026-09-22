@@ -6,13 +6,13 @@ import {
     formatNumber,
     subscribePromptWeaverLocale,
     t,
-} from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
+} from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,
     shortBlobSha,
     translationManagerState,
-} from "./prompt_translation_manager.js?v=20260819-local-sqlite-v1";
+} from "./prompt_translation_manager.js?v=20260923-sqlite-filter-v1";
 import {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
     AUTOCOMPLETE_SETTINGS_EVENT,
@@ -21,12 +21,12 @@ import {
     DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
     PROMPT_ASSISTANT_SETTING_ID,
     normalizeAutocompleteSourceOrder,
-} from "./prompt_tag_autocomplete.js?v=20260922-official-locale-v1";
+} from "./prompt_tag_autocomplete.js?v=20260923-sqlite-filter-v1";
+
+import { MIN_POST_COUNT_SETTING_ID, DEFAULT_MIN_POST_COUNT, DanbooruFilterState } from "./prompt_tag_filter.js?v=20260923-sqlite-filter-v1";
 
 const TRANSLATION_MANAGER_SETTING_ID = "PromptWeaver.Autocomplete.TranslationManager";
 const TRANSLATION_MANAGER_COMMAND_ID = "PromptWeaver.Autocomplete.UpdateDictionary";
-const BASE_TAG_SOURCE_PAGE = "https://huggingface.co/datasets/newtextdoc1111/danbooru-tag-csv";
-const PRIMARY_TRANSLATION_SOURCE_PAGE = "https://github.com/Aaalice233/ComfyUI-Danbooru-Gallery";
 const MAX_LOCAL_SUPPLEMENT_BYTES = 64 * 1024 * 1024;
 
 class TranslationApiClient {
@@ -53,9 +53,9 @@ class TranslationApiClient {
 
     invalidateStatus() {}
 
-    status(locale = "zh-CN", { signal } = {}) {
+    status(locale = "zh-CN", { signal, minPostCount = readMinPostCount() } = {}) {
         return this.fetchJson(
-            `/prompt-weaver/tag-autocomplete/status?locale=${encodeURIComponent(locale)}`,
+            `/prompt-weaver/tag-autocomplete/status?locale=${encodeURIComponent(locale)}&min_post_count=${minPostCount}`,
             { signal },
             t("Danbooru dictionary status"),
         );
@@ -81,6 +81,14 @@ class TranslationApiClient {
             }
         }
         throw new Error(t("Danbooru dictionary update timed out."));
+    }
+
+    selectSource(source) {
+        return this.fetchJson("/prompt-weaver/tag-autocomplete/source", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source }),
+        }, t("Danbooru dictionary source"));
     }
 
     importSupplement(file) {
@@ -110,6 +118,104 @@ class TranslationApiClient {
 
 const translationProvider = new TranslationApiClient(api);
 
+function readMinPostCount() {
+    const value = Number(app?.extensionManager?.setting?.get?.(MIN_POST_COUNT_SETTING_ID));
+    return Number.isSafeInteger(value) && value >= 10 ? value : DEFAULT_MIN_POST_COUNT;
+}
+
+const tagFilter = new DanbooruFilterState({
+    value: readMinPostCount(),
+    save: (value) => writeAutocompleteSetting(MIN_POST_COUNT_SETTING_ID, value),
+    status: (value, signal) => translationProvider.status("zh-CN", { signal, minPostCount: value }),
+    changed: () => {
+        for (const control of document.querySelectorAll("[data-cpw-tag-filter]")) control.refresh();
+    },
+});
+
+function createMinPostCountControl() {
+    ensureTranslationStylesheet();
+    const control = element("section", "cpw-tag-filter");
+    control.dataset.cpwTagFilter = "true";
+    const heading = element("div", "cpw-tag-filter__heading");
+    const label = element("label", "cpw-tag-filter__label");
+    const help = element("span", "cpw-tag-filter__help", "!");
+    help.tabIndex = 0;
+    help.setAttribute("role", "img");
+    const helpTooltip = element("span", "cpw-tag-filter__tooltip");
+    helpTooltip.setAttribute("role", "tooltip");
+    helpTooltip.hidden = true;
+    const input = element("input", "cpw-tag-filter__input");
+    input.type = "number";
+    input.min = "10";
+    input.max = String(Number.MAX_SAFE_INTEGER);
+    input.step = "1";
+    input.id = `cpw-tag-filter-${createId()}`;
+    label.htmlFor = input.id;
+    helpTooltip.id = `${input.id}-help`;
+    help.setAttribute("aria-describedby", helpTooltip.id);
+    heading.append(label, help, helpTooltip);
+    help.addEventListener("pointerenter", () => { helpTooltip.hidden = false; });
+    help.addEventListener("focus", () => { helpTooltip.hidden = false; });
+    heading.addEventListener("pointerleave", () => {
+        if (document.activeElement !== help) helpTooltip.hidden = true;
+    });
+    help.addEventListener("blur", () => { helpTooltip.hidden = true; });
+    help.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        helpTooltip.hidden = true;
+    });
+    const row = element("div", "cpw-tag-filter__row");
+    row.append(input);
+    const presets = [10, 50, 100, 200, 300, 400, 500, 1000].map((value) => {
+        const button = translationManagerActionButton(String(value), () => tagFilter.input(value));
+        row.append(button);
+        return [button, value];
+    });
+    const count = element("div", "cpw-tag-filter__count");
+    count.setAttribute("role", "status");
+    count.setAttribute("aria-live", "polite");
+    const hint = element("p", "cpw-tag-filter__hint");
+    hint.id = `${input.id}-hint`;
+    input.setAttribute("aria-describedby", `${helpTooltip.id} ${hint.id}`);
+    control.append(heading, row, count, hint);
+    input.addEventListener("input", () => tagFilter.input(input.value));
+    input.addEventListener("keydown", (event) => event.stopPropagation());
+    control.refresh = () => {
+        label.textContent = t("Minimum Danbooru post count");
+        help.setAttribute("aria-label", label.textContent);
+        helpTooltip.textContent = t("Only load tags used in at least this many Danbooru posts.");
+        input.setAttribute("aria-label", label.textContent);
+        input.setAttribute("aria-invalid", String(tagFilter.invalid));
+        if (input.value !== tagFilter.draft) input.value = tagFilter.draft;
+        hint.textContent = t("Lower values load more tags and use more resources.");
+        for (const [button, value] of presets) {
+            button.setAttribute("aria-pressed", String(Number(tagFilter.draft) === value));
+            button.title = t("Set minimum post count to {count}", { count: value });
+            button.setAttribute("aria-label", button.title);
+        }
+        count.textContent = tagFilter.invalid
+            ? t("Enter an integer of at least 10.")
+            : tagFilter.pending ? t("Counting…")
+            : tagFilter.error || (!tagFilter.status?.available ? t("No valid Danbooru dictionary installed.")
+                : t(readBooleanAutocompleteSetting(DANBOORU_SETTING_ID)
+                    ? "Active Danbooru tags: {active} / {total} total"
+                    : "Danbooru disabled — available tags: {active} / {total} total", {
+                    active: formatNumber(tagFilter.status.active_count),
+                    total: formatNumber(tagFilter.status.total_count),
+                }));
+        count.classList.toggle("cpw-tag-filter__count--error", tagFilter.invalid || Boolean(tagFilter.error));
+    };
+    control.refresh();
+    if (!tagFilter.pending && !tagFilter.status) void tagFilter.refresh(readMinPostCount());
+    return control;
+}
+
+globalThis.addEventListener(AUTOCOMPLETE_SETTINGS_EVENT, () => {
+    void tagFilter.refresh(readMinPostCount());
+});
+
 let activeTranslationManager = null;
 let activeUpdateOperation = null;
 let activeSupplementOperation = null;
@@ -135,7 +241,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260922-official-locale-v1",
+        "./prompt_toggle_grid.css?v=20260923-sqlite-filter-v3",
         import.meta.url,
     ).href;
     document.head.append(link);
@@ -221,7 +327,7 @@ function translationManagerSummary(state) {
         "not-installed": t("Download the local dictionary and Simplified Chinese translations to get started."),
         updating: t("Downloading and validating prompt translation data…"),
         failed: state.error || t("Prompt translation data could not be installed."),
-        warning: state.error || state.supplementError || state.supplementLocalError
+        warning: state.error
             || t("The local dictionary remains usable, but part of the translation data needs attention."),
         ready: t("Local prompt translations are ready. Prompt text stays on this device."),
     };
@@ -273,7 +379,15 @@ async function copyLocalSupplementPath(manager, path) {
 function renderPromptTranslationManager(manager) {
     if (!manager || manager !== activeTranslationManager) return;
     const state = translationManagerState(manager.status);
-    manager.content.replaceChildren();
+    const scrollTop = manager.content.scrollTop;
+    const focusKey = document.activeElement?.dataset?.focusKey;
+    if (!manager.filterControl) manager.filterControl = createMinPostCountControl();
+    if (!manager.body) {
+        manager.body = element("div", "cpw-translation-manager__body");
+        manager.content.replaceChildren(manager.filterControl, manager.body);
+    }
+    const content = manager.body;
+    content.replaceChildren();
 
     const summary = translationManagerSummary(state);
     const summaryCard = element(
@@ -284,7 +398,7 @@ function renderPromptTranslationManager(manager) {
     const heading = element("div", "cpw-translation-manager__summary-heading");
     const operationInProgress = Boolean(
         state.updating
-        || state.supplementImporting
+        || state.importing
         || manager.busy
         || activeUpdateOperation
         || activeSupplementOperation
@@ -330,101 +444,71 @@ function renderPromptTranslationManager(manager) {
         })),
     );
     summaryCard.append(dates);
-    manager.content.append(summaryCard);
+    content.append(summaryCard);
 
-    const sources = element("section", "cpw-translation-manager__sources");
-    sources.append(
-        translationManagerSourceCard({
-            title: t("English base dictionary"),
-            description: t("Canonical Danbooru tags, categories, aliases, and usage counts."),
-            statusText: state.available ? t("Installed") : t("Not installed"),
-            tone: state.available ? "success" : "neutral",
-            details: [
-                [t("Tags"), formatNumber(state.rowCount)],
-                [t("Version"), state.version || "—"],
-                [t("License"), "MIT"],
-            ],
-            sourcePage: BASE_TAG_SOURCE_PAGE,
-        }),
-        translationManagerSourceCard({
-            title: t("Primary Chinese translations"),
-            description: t("The primary Simplified Chinese display and search translation layer."),
-            statusText: state.primaryTranslationAvailable ? t("Installed") : t("Not installed"),
-            tone: state.primaryTranslationAvailable ? "success" : "neutral",
-            details: [
-                [t("Translated tags"), formatNumber(state.primaryTranslationCount)],
-                [t("License"), "MIT"],
-            ],
-            sourcePage: PRIMARY_TRANSLATION_SOURCE_PAGE,
-        }),
-    );
-
-    const supplementLabels = {
-        "license-pending": t("Awaiting license"),
-        failed: t("Update failed"),
-        available: t("Installed"),
-        "available-local-use": t("Installed for local use"),
-        "available-local-file": t("Local file active"),
-        "not-installed": t("Not installed"),
-        "not-installed-local-use": t("Ready for local download"),
-        disabled: t("Disabled"),
-    };
-    const supplementDescriptions = {
-        "license-pending": t("This source has not declared a data license, so it is shown for transparency but cannot be enabled or downloaded."),
-        failed: state.supplementError,
-        available: t("Only fills base-dictionary tags still missing from the primary translation layer."),
-        "available-local-use": t("Downloaded from the user-selected source for local missing-translation completion; the source has not declared a data license."),
-        "available-local-file": t("Using the validated tag.sqlite supplied in the current ComfyUI user directory."),
-        "not-installed": t("This approved supplement will be downloaded during the next manual update."),
-        "not-installed-local-use": t("The next manual update downloads tag.sqlite from the user-selected source and applies it only to missing local translations."),
-        disabled: t("The optional missing-translation supplement is disabled by the source manifest."),
-    };
-    if (state.supplementLocalError && state.supplementAvailable) {
-        supplementDescriptions[state.supplementState] = t(
-            "The local tag.sqlite is invalid, so the last valid downloaded supplement remains active: {message}",
-            { message: state.supplementLocalError },
-        );
+    const sourceRow = element("div", "cpw-translation-manager__source-picker");
+    const sourceLabel = element("label", "", t("Danbooru dictionary source"));
+    const sourceSelect = element("select", "cpw-tag-filter__input");
+    sourceSelect.id = "cpw-dictionary-source";
+    sourceSelect.dataset.focusKey = "source";
+    sourceLabel.htmlFor = sourceSelect.id;
+    for (const [value, name] of [["downloaded", t("GitHub dictionary")], ["local", t("Imported local dictionary")]]) {
+        const option = element("option", "", name);
+        option.value = value;
+        option.disabled = !manager.status?.sources?.[value]?.available && value !== state.selectedSource;
+        sourceSelect.append(option);
     }
+    sourceSelect.value = state.selectedSource;
+    sourceSelect.disabled = operationInProgress;
+    sourceSelect.addEventListener("change", async () => {
+        const next = sourceSelect.value;
+        manager.busy = true;
+        renderPromptTranslationManager(manager);
+        try {
+            manager.status = await beginLocalSupplementOperation(
+                () => translationProvider.selectSource(next), t("Dictionary source changed"),
+            );
+            manager.notice = null;
+        } catch (error) {
+            manager.notice = { tone: "error", text: String(error?.message || error) };
+        } finally {
+            manager.busy = false;
+            renderPromptTranslationManager(manager);
+        }
+    });
+    sourceRow.append(sourceLabel, sourceSelect);
+    content.append(sourceRow);
     const chooseLocalButton = translationManagerActionButton(
-        t("Choose local tag.sqlite…"),
-        () => manager.fileInput.click(),
-        { disabled: operationInProgress || !state.supplementEnabled },
+        t("Choose local tag.sqlite…"), () => manager.fileInput.click(), { disabled: operationInProgress },
     );
     const rescanLocalButton = translationManagerActionButton(
-        t("Rescan local file"),
-        () => void rescanLocalSupplement(manager),
-        { disabled: operationInProgress },
+        t("Rescan local file"), () => void rescanLocalSupplement(manager), { disabled: operationInProgress },
     );
     const copyPathButton = translationManagerActionButton(
-        t("Copy path"),
-        () => void copyLocalSupplementPath(manager, state.supplementDropInPath),
-        { disabled: !state.supplementDropInPath },
+        t("Copy path"), () => void copyLocalSupplementPath(manager, state.localPath),
     );
-    const originLabels = {
-        local: t("Local file"),
-        downloaded: t("Downloaded"),
-    };
-    sources.append(translationManagerSourceCard({
-        title: t("Missing-translation supplement"),
-        description: supplementDescriptions[state.supplementState],
-        statusText: supplementLabels[state.supplementState],
-        tone: state.supplementTone,
+    [chooseLocalButton, rescanLocalButton, copyPathButton].forEach((button, index) => {
+        button.dataset.focusKey = `source-action-${index}`;
+    });
+    content.append(translationManagerSourceCard({
+        title: t("Danbooru SQLite dictionary"),
+        description: t("One active SQLite provides tag names, Chinese translations, categories and post counts. Import a new copy to update a local file."),
+        statusText: state.available ? t("Installed") : t("Not installed"),
+        tone: state.available ? "success" : "neutral",
         details: [
-            [t("Added translations"), formatNumber(state.supplementTranslationCount)],
-            [t("Active source"), originLabels[state.supplementOrigin] || t("None")],
-            [t("Drop-in path"), state.supplementDropInPath || "—"],
-            [t("Database rows"), formatNumber(state.supplementRowCount)],
-            [t("File SHA-256"), shortBlobSha(state.supplementFileSha256) || "—"],
-            [t("Blob SHA"), shortBlobSha(state.supplementBlobSha)],
-            [t("File modified"), translationManagerDate(state.supplementFileModifiedAt)],
+            [t("Database rows"), formatNumber(state.rowCount)],
+            [t("File SHA-256"), shortBlobSha(state.fileSha256) || "—"],
+            [t("Version"), shortBlobSha(state.version) || "—"],
+            [t("File modified"), translationManagerDate(state.fileModifiedAt)],
+            [t("Local copy path"), state.localPath || "—"],
+            ...(state.selectedSource === "downloaded" ? [[t("License"), "MIT"]] : []),
         ],
-        sourcePage: state.supplementSourcePage,
+        sourcePage: state.sourcePage,
         actions: [chooseLocalButton, rescanLocalButton, copyPathButton],
     }));
-    manager.content.append(sources);
 
     if (manager.notice?.text) {
-        manager.content.append(element(
+        content.append(element(
             "div",
             `cpw-translation-manager__notice cpw-translation-manager__notice--${manager.notice.tone || "info"}`,
             manager.notice.text,
@@ -438,6 +522,9 @@ function renderPromptTranslationManager(manager) {
         : (state.action === "download"
             ? t("Download dictionary and translations")
             : t("Check and update"));
+    manager.content.scrollTop = scrollTop;
+    manager.filterControl.refresh();
+    if (focusKey) content.querySelector(`[data-focus-key="${focusKey}"]`)?.focus({ preventScroll: true });
     manager.closeButton.textContent = t("Close");
     manager.closeIcon.setAttribute("aria-label", t("Close prompt translation manager"));
 }
@@ -530,11 +617,11 @@ function beginPromptTranslationUpdate() {
         .then((status) => {
             dispatchAutocompleteSettingsChanged();
             const state = translationManagerState(status);
-            if (state.error || state.supplementError) {
+            if (state.error) {
                 showAutocompleteToast(
                     "warn",
                     t("Prompt translations updated with warnings"),
-                    state.error || state.supplementError,
+                    state.error,
                 );
             } else {
                 showAutocompleteToast(
@@ -636,7 +723,7 @@ async function importLocalSupplement(manager, file) {
         manager.status = status;
         manager.notice = {
             tone: "info",
-            text: t("The validated local database is now the active supplement."),
+            text: t("The validated local database is now the active dictionary."),
         };
     } catch (error) {
         if (manager !== activeTranslationManager) return;
@@ -747,7 +834,7 @@ function refreshPromptTranslationManagerLocale(manager) {
 function trapPromptTranslationFocus(manager, event) {
     if (event.key !== "Tab") return;
     const focusable = [...manager.dialog.querySelectorAll(
-        "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])",
+        "a[href], input:not([disabled]):not([hidden]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex='-1'])",
     )].filter((item) => !item.hidden && item.getClientRects().length > 0);
     if (!focusable.length) {
         event.preventDefault();
@@ -826,7 +913,9 @@ export function openPromptTranslationManager(opener = document.activeElement) {
         if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
-            closePromptTranslationManager();
+            const helpTooltip = dialog.querySelector(".cpw-tag-filter__tooltip:not([hidden])");
+            if (helpTooltip) helpTooltip.hidden = true;
+            else closePromptTranslationManager();
             return;
         }
         trapPromptTranslationFocus(manager, event);
@@ -875,7 +964,7 @@ const AUTOCOMPLETE_SOURCE_DEFINITIONS = Object.freeze({
     danbooru: Object.freeze({
         settingId: DANBOORU_SETTING_ID,
         label: "Danbooru",
-        description: "Uses the Prompt-Weaver local Danbooru CSV dictionary. Typing stays local.",
+        description: "Uses the selected Danbooru SQLite dictionary. Typing stays local.",
     }),
 });
 
@@ -1174,6 +1263,7 @@ subscribePromptWeaverLocale(() => {
     for (const button of document.querySelectorAll("[data-cpw-translation-manager-button]")) {
         button.textContent = t("Manage prompt translations…");
     }
+    for (const control of document.querySelectorAll("[data-cpw-tag-filter]")) control.refresh();
     if (activeTranslationManager) refreshPromptTranslationManagerLocale(activeTranslationManager);
     for (const control of document.querySelectorAll("[data-cpw-autocomplete-source-control]")) {
         refreshAutocompleteSourceControlLocale(control);
@@ -1183,6 +1273,15 @@ subscribePromptWeaverLocale(() => {
 app.registerExtension({
     name: "ComfyUIPromptWeaver.TranslationSettings",
     settings: [
+        {
+            id: MIN_POST_COUNT_SETTING_ID,
+            name: t("Minimum Danbooru post count"),
+            tooltip: t("Lower values load more tags and use more resources."),
+            category: ["Prompt Weaver", "Autocomplete", "Minimum Danbooru post count"],
+            type: createMinPostCountControl,
+            defaultValue: DEFAULT_MIN_POST_COUNT,
+            onChange: dispatchAutocompleteSettingsChanged,
+        },
         {
             id: AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
             name: t("Prompt library sources"),

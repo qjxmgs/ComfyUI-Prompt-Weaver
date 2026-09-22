@@ -10,15 +10,47 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const assistantSource = (await readFile(
     new URL("../web/prompt_assistant_tags.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260922-official-locale-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
 const assistantUrl = `data:text/javascript;base64,${Buffer.from(assistantSource).toString("base64")}`;
 const moduleSource = (await readFile(
     new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_weaver_i18n.js?v=20260922-official-locale-v1", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260922-official-locale-v1", assistantUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl)
+    .replace("./prompt_assistant_tags.js?v=20260923-sqlite-filter-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
+test("Danbooru threshold is sent to status/search but never exact resolution", async () => {
+    let threshold = 100;
+    const requests = [];
+    const provider = new (await import(moduleUrl)).DanbooruTagProvider({
+        async fetchApi(path, options = {}) {
+            requests.push({ path, body: options.body });
+            return { ok: true, json: async () => path.includes("/status")
+                ? { available: true, source_revision: "local:abc" } : { results: [] } };
+        },
+    }, { minPostCount: () => threshold });
+    await provider.search("blue", "zh");
+    threshold = 10;
+    await provider.search("blue", "zh");
+    await provider.resolve(["rare_tag"]);
+    const searches = requests.filter(r => r.path.includes("/search"));
+    assert.match(searches[0].path, /min_post_count=100/);
+    assert.match(searches[1].path, /min_post_count=10/);
+    assert.equal(requests.filter(r => r.path.includes("/status")).length, 2);
+    assert.deepEqual(JSON.parse(requests.at(-1).body), { tags: ["rare_tag"], locale: "zh-CN" });
+});
+
+test("invalidating a source rejects old in-flight status responses", async () => {
+    let finish;
+    const provider = new (await import(moduleUrl)).DanbooruTagProvider({
+        fetchApi: () => new Promise(resolve => { finish = resolve; }),
+    });
+    const pending = provider.status();
+    provider.invalidateStatus();
+    finish({ ok: true, json: async () => ({ available: true }) });
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.equal(provider.cachedStatus.size, 0);
+});
 const {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
     AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID,
@@ -701,14 +733,14 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260922-official-locale-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260923-sqlite-filter-v1/);
     assert.match(source, /sourceOrder:\s*readAutocompleteSourceOrder/);
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
     assert.equal((source.match(/getLocale: getPromptWeaverLocale/g) || []).length, 3);
     assert.doesNotMatch(source, /getLocale: \(\) => "en"/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260922-official-locale-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260923-sqlite-filter-v3/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);

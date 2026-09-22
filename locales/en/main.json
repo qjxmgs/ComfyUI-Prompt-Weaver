@@ -7,7 +7,8 @@
     "Autocomplete": "Autocomplete",
     "Prompt library sources": "Prompt library sources",
     "Maximum autocomplete suggestions": "Maximum autocomplete suggestions",
-    "Prompt translations": "Prompt translations"
+    "Prompt translations": "Prompt translations",
+    "Minimum Danbooru post count": "Minimum Danbooru post count"
   },
   "promptWeaver": {
     "ui": {
@@ -439,7 +440,25 @@
       "Clear": "Clear",
       "Clear all prompts": "Clear all prompts",
       "Danbooru tag resolution": "Danbooru tag resolution",
-      "Prompts cleared.": "Prompts cleared."
+      "Prompts cleared.": "Prompts cleared.",
+      "Minimum Danbooru post count": "Minimum Danbooru post count",
+      "Only load tags used in at least this many Danbooru posts.": "Only load tags used in at least this many Danbooru posts.",
+      "Lower values load more tags and use more resources.": "Lower values load more tags and use more resources.",
+      "Set minimum post count to {count}": "Set minimum post count to {count}",
+      "Enter an integer of at least 10.": "Enter an integer of at least 10.",
+      "Counting…": "Counting…",
+      "No valid Danbooru dictionary installed.": "No valid Danbooru dictionary installed.",
+      "Active Danbooru tags: {active} / {total} total": "Active Danbooru tags: {active} / {total} total",
+      "Danbooru disabled — available tags: {active} / {total} total": "Danbooru disabled — available tags: {active} / {total} total",
+      "Danbooru dictionary source": "Danbooru dictionary source",
+      "GitHub dictionary": "GitHub dictionary",
+      "Imported local dictionary": "Imported local dictionary",
+      "Dictionary source changed": "Dictionary source changed",
+      "Danbooru SQLite dictionary": "Danbooru SQLite dictionary",
+      "One active SQLite provides tag names, Chinese translations, categories and post counts. Import a new copy to update a local file.": "One active SQLite provides tag names, Chinese translations, categories and post counts. Import a new copy to update a local file.",
+      "Local copy path": "Local copy path",
+      "The validated local database is now the active dictionary.": "The validated local database is now the active dictionary.",
+      "Uses the selected Danbooru SQLite dictionary. Typing stays local.": "Uses the selected Danbooru SQLite dictionary. Typing stays local."
     }
   }
 }

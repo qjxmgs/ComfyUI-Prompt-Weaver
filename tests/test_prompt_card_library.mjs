@@ -16,15 +16,15 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260922-official-locale-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_grid_archives.js?v=20260922-official-locale-v1", archiveUrl)
+    .replace("./prompt_grid_archives.js?v=20260923-sqlite-filter-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260922-official-locale-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -499,8 +499,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260922-official-locale-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260922-official-locale-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260923-sqlite-filter-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260923-sqlite-filter-v3/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);

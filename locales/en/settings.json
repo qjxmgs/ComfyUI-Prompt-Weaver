@@ -10,5 +10,9 @@
   "PromptWeaver_Autocomplete_TranslationManager": {
     "name": "Prompt translations",
     "tooltip": "View local translation coverage and manually update the prompt dictionary."
+  },
+  "PromptWeaver_Autocomplete_MinPostCount": {
+    "name": "Minimum Danbooru post count",
+    "tooltip": "Lower values load more tags and use more resources."
   }
 }

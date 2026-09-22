@@ -165,6 +165,7 @@ class ArchiveRouteTests(unittest.TestCase):
             ("POST", "/prompt-weaver/open-workflow"),
             ("GET", "/prompt-weaver/workflow/{token}"),
             ("POST", "/prompt-weaver/tag-autocomplete/update"),
+            ("POST", "/prompt-weaver/tag-autocomplete/source"),
             ("POST", "/prompt-weaver/tag-autocomplete/supplement/import"),
             ("POST", "/prompt-weaver/tag-autocomplete/supplement/rescan"),
             ("POST", "/prompt-weaver/prompt-grid-archives"),
@@ -211,6 +212,26 @@ class ArchiveRouteTests(unittest.TestCase):
         self.module.args.listen = "0.0.0.0"
         response = self.run_async(self.module.list_prompt_grid_archives(_Request()))
         self.assertEqual(response.status, 200)
+
+    def test_dictionary_source_guard_runs_before_storage_or_body_access(self):
+        self.module.args.listen = "0.0.0.0"
+        with mock.patch.object(self.module, "_tag_autocomplete_store", side_effect=AssertionError("must not open storage")):
+            response = self.run_async(self.module.select_tag_autocomplete_source(object()))
+        self.assertEqual(response.status, 403)
+
+    def test_dictionary_threshold_validation_and_source_payload(self):
+        for value in ["9", "invalid", "1.5"]:
+            response = self.run_async(self.module.get_tag_autocomplete_status(_Request(query={"min_post_count": value})))
+            self.assertEqual(response.status, 400)
+            response = self.run_async(self.module.search_tag_autocomplete(_Request(query={"q": "blue", "min_post_count": value})))
+            self.assertEqual(response.status, 400)
+        response = self.run_async(self.module.select_tag_autocomplete_source(_Request({"source": "CSV"})))
+        self.assertEqual(response.status, 400)
+        with mock.patch.object(self.module, "_tag_autocomplete_store") as factory:
+            factory.return_value.select_source.return_value = {"selected_source": "local"}
+            response = self.run_async(self.module.select_tag_autocomplete_source(_Request({"source": "local"}, user="alice")))
+            factory.return_value.select_source.assert_called_once_with("local")
+            self.assertEqual(response.payload, {"selected_source": "local"})
 
     def test_open_workflow_keeps_legacy_ui_workflow_payload(self):
         workflow = {"nodes": [{"id": 1, "type": "KSampler"}]}
@@ -517,8 +538,8 @@ class ArchiveRouteTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def status(self, locale):
-                self.calls.append(locale)
+            def status(self, locale, threshold):
+                self.calls.append((locale, threshold))
                 return {"available": True, "locale": locale, "updating": False}
 
             def maybe_start_weekly_check(self, _locale):
@@ -531,15 +552,16 @@ class ArchiveRouteTests(unittest.TestCase):
             ))
         self.assertEqual(response.status, 200)
         self.assertEqual(response.payload["locale"], "zh-CN")
-        self.assertEqual(store.calls, ["zh-CN"])
+        self.assertEqual(store.calls, [("zh-CN", "100")])
 
     def test_tag_autocomplete_search_route_defaults_to_thirty_results(self):
         class _FakeStore:
             def __init__(self):
                 self.calls = []
 
-            def search(self, query, locale, limit):
-                self.calls.append((query, locale, limit))
+            def search(self, query, locale, limit, threshold, *, cancelled):
+                self.calls.append((query, locale, limit, threshold))
+                assert not cancelled()
                 return []
 
         store = _FakeStore()
@@ -549,7 +571,7 @@ class ArchiveRouteTests(unittest.TestCase):
             ))
         self.assertEqual(response.status, 200)
         self.assertEqual(response.payload, {"results": []})
-        self.assertEqual(store.calls, [("bl", "en", "30")])
+        self.assertEqual(store.calls, [("bl", "en", "30", "100")])
 
     def test_tag_autocomplete_resolve_route_preserves_batch_and_locale(self):
         class _FakeStore:

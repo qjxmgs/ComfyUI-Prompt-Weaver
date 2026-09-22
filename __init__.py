@@ -355,6 +355,7 @@ async def get_tag_autocomplete_status(request):
         status = await asyncio.to_thread(
             _tag_autocomplete_store(request).status,
             locale,
+            request.query.get("min_post_count", "100"),
         )
         return web.json_response(status)
     except TagAutocompleteError as error:
@@ -370,7 +371,7 @@ async def update_tag_autocomplete(request):
         task = _tag_autocomplete_store(request).start_update(locale, force=True)
         task.add_done_callback(_consume_background_task)
         return web.json_response(
-            _tag_autocomplete_store(request).status(locale),
+            await asyncio.to_thread(_tag_autocomplete_store(request).status, locale),
             status=202,
         )
     except (
@@ -451,13 +452,31 @@ async def search_tag_autocomplete(request):
             TagAutocompleteValidationError("tag autocomplete query is too long")
         )
     try:
+        transport = getattr(request, "transport", None)
         results = await asyncio.to_thread(
             _tag_autocomplete_store(request).search,
             query,
             locale,
             limit,
+            request.query.get("min_post_count", "100"),
+            cancelled=lambda: transport is not None and transport.is_closing(),
         )
         return web.json_response({"results": results})
+    except TagAutocompleteError as error:
+        return _tag_autocomplete_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/tag-autocomplete/source")
+@_local_only
+async def select_tag_autocomplete_source(request):
+    try:
+        payload = await _request_json(request, 4096)
+        status = await asyncio.to_thread(
+            _tag_autocomplete_store(request).select_source, payload.get("source"),
+        )
+        return web.json_response(status)
+    except (ArchiveValidationError, ArchiveCapacityError) as error:
+        return _archive_error_response(error)
     except TagAutocompleteError as error:
         return _tag_autocomplete_error_response(error)
 

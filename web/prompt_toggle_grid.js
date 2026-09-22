@@ -22,7 +22,7 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260922-official-locale-v1";
+} from "./prompt_grid_archives.js?v=20260923-sqlite-filter-v1";
 import {
     getPromptCardLibraryService,
     favoriteCardBilingualPrompt,
@@ -30,7 +30,7 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260922-official-locale-v1";
+} from "./prompt_card_library.js?v=20260923-sqlite-filter-v1";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
@@ -40,7 +40,7 @@ import {
     syncPromptWeaverLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
+} from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -77,7 +77,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260922-official-locale-v1";
+} from "./prompt_tag_autocomplete.js?v=20260923-sqlite-filter-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -174,6 +174,10 @@ const readAutocompleteSourceOrder = () => normalizeAutocompleteSourceOrder(
     readAutocompleteSettingValue(AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID),
 );
 const promptTagAutocompleteProvider = new PromptTagAutocompleteProvider(api, {
+    minPostCount: () => {
+        const value = Number(readAutocompleteSettingValue("PromptWeaver.Autocomplete.MinPostCount"));
+        return Number.isSafeInteger(value) && value >= 10 ? value : 100;
+    },
     danbooruEnabled: () => readAutocompleteSetting(DANBOORU_SETTING_ID),
     promptAssistantEnabled: () => readAutocompleteSetting(PROMPT_ASSISTANT_SETTING_ID),
     sourceOrder: readAutocompleteSourceOrder,
@@ -706,7 +710,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260922-official-locale-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260923-sqlite-filter-v3", import.meta.url).href;
     document.head.append(link);
 }
 
