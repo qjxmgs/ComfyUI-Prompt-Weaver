@@ -1,9 +1,12 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import {
+    connectPromptWeaverI18n,
     formatDateTime,
+    formatNumber,
+    subscribePromptWeaverLocale,
     t,
-} from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
+} from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,
@@ -18,7 +21,7 @@ import {
     DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
     PROMPT_ASSISTANT_SETTING_ID,
     normalizeAutocompleteSourceOrder,
-} from "./prompt_tag_autocomplete.js?v=20260902-editor-keyboard-layers-v1";
+} from "./prompt_tag_autocomplete.js?v=20260922-official-locale-v1";
 
 const TRANSLATION_MANAGER_SETTING_ID = "PromptWeaver.Autocomplete.TranslationManager";
 const TRANSLATION_MANAGER_COMMAND_ID = "PromptWeaver.Autocomplete.UpdateDictionary";
@@ -132,7 +135,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260907-english-ui-v1",
+        "./prompt_toggle_grid.css?v=20260922-official-locale-v1",
         import.meta.url,
     ).href;
     document.head.append(link);
@@ -151,10 +154,6 @@ function showAutocompleteToast(severity, summary, detail) {
     } else {
         console.info(`[Prompt Weaver] ${summary}: ${detail}`);
     }
-}
-
-function formatNumber(value) {
-    return new Intl.NumberFormat("en-US").format(Number(value) || 0);
 }
 
 function translationManagerDate(value) {
@@ -1169,6 +1168,17 @@ function createAutocompleteSourceOrderControl(_name, setter, storedValue) {
     }
     return control;
 }
+
+void connectPromptWeaverI18n(app, api);
+subscribePromptWeaverLocale(() => {
+    for (const button of document.querySelectorAll("[data-cpw-translation-manager-button]")) {
+        button.textContent = t("Manage prompt translations…");
+    }
+    if (activeTranslationManager) refreshPromptTranslationManagerLocale(activeTranslationManager);
+    for (const control of document.querySelectorAll("[data-cpw-autocomplete-source-control]")) {
+        refreshAutocompleteSourceControlLocale(control);
+    }
+});
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.TranslationSettings",

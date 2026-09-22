@@ -27,6 +27,43 @@ class LocaleResourceTests(unittest.TestCase):
             self.assertIn("config", node["inputs"])
             self.assertIn("0", node["outputs"])
 
+    def test_official_locale_resources_cover_custom_ui_settings_and_commands(self):
+        resources = {}
+        for locale in ("en", "zh"):
+            locale_root = PLUGIN_ROOT / "locales" / locale
+            resources[locale] = {
+                "main": json.loads((locale_root / "main.json").read_text(encoding="utf-8")),
+                "settings": json.loads((locale_root / "settings.json").read_text(encoding="utf-8")),
+                "commands": json.loads((locale_root / "commands.json").read_text(encoding="utf-8")),
+            }
+
+        english_ui = resources["en"]["main"]["promptWeaver"]["ui"]
+        chinese_ui = resources["zh"]["main"]["promptWeaver"]["ui"]
+        self.assertGreaterEqual(len(english_ui), 400)
+        self.assertEqual(set(english_ui), set(chinese_ui))
+        self.assertTrue(all(key == value for key, value in english_ui.items()))
+        self.assertEqual(chinese_ui["Clear"], "清空")
+        self.assertEqual(chinese_ui["Card title"], "卡片标题")
+
+        expected_settings = {
+            "PromptWeaver_Autocomplete_SourceOrder",
+            "PromptWeaver_Autocomplete_MaxResults",
+            "PromptWeaver_Autocomplete_TranslationManager",
+        }
+        expected_commands = {"PromptWeaver_Autocomplete_UpdateDictionary"}
+        for locale in ("en", "zh"):
+            self.assertEqual(set(resources[locale]["settings"]), expected_settings)
+            self.assertEqual(set(resources[locale]["commands"]), expected_commands)
+            self.assertIn("Prompt Weaver", resources[locale]["main"]["settingsCategories"])
+
+    def test_runtime_i18n_adapter_consumes_the_official_comfyui_endpoint(self):
+        source = (PLUGIN_ROOT / "web" / "prompt_weaver_i18n.js").read_text(encoding="utf-8")
+        self.assertIn("getCustomNodesI18n", source)
+        self.assertIn('"/i18n"', source)
+        self.assertIn("Comfy.Locale.change", source)
+        self.assertNotIn("CHINESE_MESSAGES", source)
+        self.assertNotIn("app.vueApp", source)
+
     def test_runtime_javascript_uses_english_ui_strings_only(self):
         allowed_fragments = {}
         runtime_files = [

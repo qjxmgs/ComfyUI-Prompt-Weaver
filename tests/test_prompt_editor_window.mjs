@@ -76,7 +76,7 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /cardTitleInput\.placeholder = t\("Card title"\)/);
     assert.doesNotMatch(uiSource, /t\("Prompt title"\)/);
     assert.match(uiSource, /titleBar\.append\(title, closeButton\)/);
-    assert.match(uiSource, /titleControls\.append\(cardTitleInput, bulkSelectionButton\)/);
+    assert.match(uiSource, /titleControls\.append\(cardTitleInput, bulkSelectionButton, clearPromptButton\)/);
     assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);
     assert.match(uiSource, /modeActions\.append\(retainUnselectedLabel, freeModeLabel\)/);
     assert.match(uiSource, /const favoriteUpdateMode = options\.mode === "favorite-update"/);
@@ -170,6 +170,12 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /PROMPT_EDITOR_MIN_WIDTH = 600/);
     assert.match(styleSource, /min-width: min\(600px, calc\(100vw - 32px\)\)/);
     assert.match(uiSource, /getAnchorRect: \(\) => textareaCaretClientRect\(freeTextArea\)/);
+    assert.match(uiSource, /void connectPromptWeaverI18n\(app, api\)/);
+    assert.match(uiSource, /subscribePromptWeaverLocale\(\(\) => \{/);
+    assert.match(uiSource, /for \(const controller of \[\.\.\.promptGridLocaleControllers\]\) controller\.refreshLocale\?\.\(\)/);
+    assert.match(uiSource, /activePromptCardLibraryMenu\?\.refreshLocale\?\.\(\)/);
+    assert.match(uiSource, /promptGridLocaleControllers\.add\(localeController\)/);
+    assert.match(uiSource, /promptGridLocaleControllers\.delete\(localeController\)/);
 });
 
 test("prompt editor history icons are valid 64px PNG files", async () => {

@@ -22,7 +22,7 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
+} from "./prompt_grid_archives.js?v=20260922-official-locale-v1";
 import {
     getPromptCardLibraryService,
     favoriteCardBilingualPrompt,
@@ -30,13 +30,17 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260907-english-ui-v1";
+} from "./prompt_card_library.js?v=20260922-official-locale-v1";
 import {
+    connectPromptWeaverI18n,
     formatDateTime,
     formatList,
+    getPromptWeaverLocale,
+    subscribePromptWeaverLocale,
+    syncPromptWeaverLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
+} from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -73,7 +77,7 @@ import {
     promptTokenHasHanText,
     promptTokenLookupText,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260902-editor-keyboard-layers-v1";
+} from "./prompt_tag_autocomplete.js?v=20260922-official-locale-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -179,6 +183,7 @@ const promptTagAutocompleteProvider = new PromptTagAutocompleteProvider(api, {
 });
 const loadedPromptGridNodes = new WeakSet();
 const promptGridArchiveControllers = new WeakMap();
+const promptGridLocaleControllers = new Set();
 const archiveChannel = typeof BroadcastChannel === "function"
     ? new BroadcastChannel(ARCHIVE_CHANNEL_NAME)
     : null;
@@ -208,6 +213,11 @@ if (archiveChannel) {
 }
 
 let fallbackId = 0;
+
+void connectPromptWeaverI18n(app, api);
+subscribePromptWeaverLocale(() => {
+    for (const controller of [...promptGridLocaleControllers]) controller.refreshLocale?.();
+});
 
 function createId() {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -696,7 +706,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260907-english-ui-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260922-official-locale-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -736,6 +746,7 @@ function archiveErrorMessage(error) {
 }
 
 function createPromptGridWidget(node, inputName, inputData) {
+    syncPromptWeaverLocale(app);
     ensureStylesheet();
     const promptCardLibraryService = getPromptCardLibraryService(api);
 
@@ -946,6 +957,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             button.setAttribute("aria-label", label);
         }
         activePromptEditor?.refreshLocale?.();
+        activePromptCardLibraryMenu?.refreshLocale?.();
         renderArchiveSelect();
         activeArchiveManager?.refreshLocale?.();
         if (!activePromptEditor && !activeArchiveManager && !activeArchiveConfirmation) render();
@@ -3409,8 +3421,16 @@ function createPromptGridWidget(node, inputName, inputData) {
         );
         bulkSelectionButton.type = "button";
         bulkSelectionButton.setAttribute("role", "checkbox");
+        const clearPromptButton = element(
+            "button",
+            "cpw-prompt-editor__action cpw-prompt-editor__clear",
+            t("Clear"),
+        );
+        clearPromptButton.type = "button";
+        clearPromptButton.title = t("Clear all prompts");
+        clearPromptButton.setAttribute("aria-label", t("Clear all prompts"));
         const titleControls = element("div", "cpw-prompt-editor__title-controls");
-        titleControls.append(cardTitleInput, bulkSelectionButton);
+        titleControls.append(cardTitleInput, bulkSelectionButton, clearPromptButton);
         const freeModeLabel = element("label", "cpw-prompt-editor__free-mode");
         const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
         freeModeInput.type = "checkbox";
@@ -3597,6 +3617,15 @@ function createPromptGridWidget(node, inputName, inputData) {
                 "aria-checked",
                 selectionState === "mixed" ? "mixed" : String(selectionState === "on"),
             );
+        };
+        const promptDraftHasContent = () => {
+            const pendingInput = addDraft || (adding && addInput ? addInput.value : "");
+            if (!freeMode) return tokens.length > 0 || Boolean(pendingInput.trim());
+            const activeText = freeTextArea?.value ?? freePromptText;
+            return Boolean(activeText.trim()) || tokens.some((_token, index) => !selected[index]);
+        };
+        const syncClearPromptButton = () => {
+            clearPromptButton.disabled = submitting || !promptDraftHasContent();
         };
         const clearCopyFeedbackTimer = () => {
             if (!copyFeedbackTimer) return;
@@ -3822,6 +3851,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 tp("{count} prompt active", "{count} prompts active", count),
             );
             syncBulkSelectionButton();
+            syncClearPromptButton();
         };
         const currentPromptTokenStates = () => tokens.map((text, index) => ({
             text,
@@ -4037,13 +4067,13 @@ function createPromptGridWidget(node, inputName, inputData) {
             focusTagMode = false,
         } = {}) => {
             cancelPromptTokenTranslations();
-            renderActivePromptCount();
             editorAutocompleteController?.destroy();
             editorAutocompleteController = null;
             tokenList.replaceChildren();
             addInput = null;
             addButton = null;
             freeTextArea = null;
+            renderActivePromptCount();
             tokenList.classList.toggle("cpw-prompt-editor__tokens--free", freeMode);
             tokenList.setAttribute(
                 "aria-label",
@@ -4126,7 +4156,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     freeTextArea,
                     promptTagAutocompleteProvider,
                     {
-                        getLocale: () => "en",
+                        getLocale: getPromptWeaverLocale,
                         getLimit: readAutocompleteLimit,
                         getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                         getExistingPrompt: () => freeTextArea?.value || "",
@@ -4241,12 +4271,13 @@ function createPromptGridWidget(node, inputName, inputData) {
                 addInput.addEventListener("input", (event) => {
                     markTextHistoryDirty(event.currentTarget);
                     addDraft = event.currentTarget.value;
+                    syncClearPromptButton();
                 });
                 editorAutocompleteController = new PromptAutocompleteController(
                     addInput,
                     promptTagAutocompleteProvider,
                     {
-                        getLocale: () => "en",
+                        getLocale: getPromptWeaverLocale,
                         getLimit: readAutocompleteLimit,
                         getExistingPrompt: () => tokens.join(", "),
                         onSelect(record) {
@@ -4591,6 +4622,27 @@ function createPromptGridWidget(node, inputName, inputData) {
                 : "");
             recordPromptContentChange(historySnapshot);
         };
+        const clearPromptEditorDraft = () => {
+            if (submitting || !promptDraftHasContent()) return false;
+            clearAddBlurTimer();
+            const historySnapshot = capturePromptContentSnapshot();
+            discardTextHistory();
+            cleanupPromptTokenToggleGesture();
+            clearTokenClickSuppressionTimer();
+            suppressTokenClick = false;
+            editorAutocompleteController?.destroy();
+            editorAutocompleteController = null;
+            tokens = [];
+            selected = [];
+            freePromptText = "";
+            adding = false;
+            addDraft = "";
+            promptRequiresRebuild = true;
+            renderTokens();
+            setAddStatus(t("Prompts cleared."));
+            recordPromptContentChange(historySnapshot);
+            return true;
+        };
 
         const cleanupPromptEditor = () => {
             clearAddBlurTimer();
@@ -4617,6 +4669,9 @@ function createPromptGridWidget(node, inputName, inputData) {
             renderActivePromptCount();
             cardTitleInput.placeholder = t("Card title");
             cardTitleInput.setAttribute("aria-label", t("Card title"));
+            clearPromptButton.textContent = t("Clear");
+            clearPromptButton.title = t("Clear all prompts");
+            clearPromptButton.setAttribute("aria-label", t("Clear all prompts"));
             freeModeInput.setAttribute("aria-label", t("Text Mode"));
             freeModeText.textContent = t("Text Mode");
             retainUnselectedInput.setAttribute("aria-label", t("Retain unselected prompts"));
@@ -4699,6 +4754,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (freeMode || selectionState === "empty") return;
             setAllPromptTokensActive(selectionState !== "on");
         });
+        clearPromptButton.addEventListener("click", clearPromptEditorDraft);
         freeModeInput.addEventListener("change", () => setFreeModeEnabled(freeModeInput.checked));
         retainUnselectedInput.addEventListener("change", () => (
             setRetainUnselectedEnabled(retainUnselectedInput.checked)
@@ -4728,6 +4784,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 submitting = true;
                 confirmButton.disabled = true;
                 closeButton.disabled = true;
+                syncClearPromptButton();
                 dialog.setAttribute("aria-busy", "true");
                 setAddStatus(t("Saving…"));
                 try {
@@ -4745,6 +4802,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     submitting = false;
                     confirmButton.disabled = false;
                     closeButton.disabled = false;
+                    syncClearPromptButton();
                     dialog.setAttribute("aria-busy", "false");
                     confirmButton.focus();
                 }
@@ -4891,7 +4949,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             prompt,
             promptTagAutocompleteProvider,
             {
-                getLocale: () => "en",
+                getLocale: getPromptWeaverLocale,
                 getLimit: readAutocompleteLimit,
                 getExistingPrompt: () => prompt.value,
                 completionSeparator: ", ",
@@ -5041,6 +5099,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             reconcileLoadedArchiveAssociation();
         },
     });
+    const localeController = { node, refreshLocale };
+    promptGridLocaleControllers.add(localeController);
     const sizeObserver = typeof ResizeObserver === "function"
         ? new ResizeObserver(scheduleArchiveSizeReconcile)
         : null;
@@ -5090,6 +5150,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         columnSelect.customSelect.destroy();
         archiveSelect.customSelect.destroy();
         promptGridArchiveControllers.delete(node);
+        promptGridLocaleControllers.delete(localeController);
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;

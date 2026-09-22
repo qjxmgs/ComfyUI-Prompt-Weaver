@@ -1,9 +1,9 @@
 import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
-} from "./prompt_grid_archives.js?v=20260830-prompt-card-library-v1";
+} from "./prompt_grid_archives.js?v=20260922-official-locale-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -1209,13 +1209,31 @@ export function openPromptCardFavoriteCascade({
         library = nextLibrary;
         if (!closed) renderOpenBranch();
     });
+    const refreshLocale = () => {
+        if (closed) return;
+        const focusedCategoryId = document.activeElement?.dataset?.categoryId ?? null;
+        const focusedFavoriteId = document.activeElement
+            ?.closest?.("[data-favorite-card-id]")
+            ?.dataset?.favoriteCardId ?? null;
+        const scrollPositions = panels.map((panel) => panel?.scrollTop ?? 0);
+        renderOpenBranch();
+        panels.forEach((panel, index) => {
+            if (panel) panel.scrollTop = scrollPositions[index] ?? 0;
+        });
+        const nextFocus = focusedFavoriteId
+            ? root.querySelector(`[data-favorite-card-id="${focusedFavoriteId}"] .cpw-prompt-card-cascade__item--favorite`)
+            : focusedCategoryId
+                ? root.querySelector(`[data-category-id="${focusedCategoryId}"]`)
+                : null;
+        nextFocus?.focus?.({ preventScroll: true });
+    };
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     document.addEventListener("keydown", onDocumentKeyDown, true);
     window.addEventListener("resize", repositionPanels);
     window.addEventListener("scroll", repositionPanels, true);
     load(false);
 
-    return { root, anchor, close };
+    return { root, anchor, close, refreshLocale };
 }
 
 function categoryChildren(library, parentId) {
@@ -1296,11 +1314,12 @@ export function openPromptCardLibraryMenu({
     onFavoriteLinked = null,
     onClose = null,
 }) {
-    const windowTitle = mode === "manage"
+    const localizedWindowTitle = () => (mode === "manage"
         ? t("Favorite Cards Manager")
         : mode === "assign"
             ? t("Add Favorite Card")
-            : t("Favorite Cards");
+            : t("Favorite Cards"));
+    const windowTitle = localizedWindowTitle();
     const geometryStorageKey = FAVORITE_GEOMETRY_STORAGE_KEYS[mode]
         ?? FAVORITE_GEOMETRY_STORAGE_KEYS.browse;
     const root = element("section", "cpw-prompt-card-library");
@@ -2022,6 +2041,22 @@ export function openPromptCardLibraryMenu({
                 preview.append(item);
             }
             syncConfirm();
+        };
+        activeImportDialog.refreshLocale = () => {
+            dialog.setAttribute("aria-label", t("Import Favorite Cards"));
+            importHeading.textContent = t("Import Favorite Cards");
+            importClose.title = t("Close");
+            importClose.setAttribute("aria-label", t("Close favorite card import"));
+            categoryLabel.querySelector(".cpw-prompt-card-import__label").textContent = t("Target secondary category");
+            categorySelect.setAttribute("aria-label", t("Target secondary category"));
+            if (!secondaryCategories.length) categorySelect.options[0].textContent = t("No secondary categories available");
+            textLabel.querySelector(".cpw-prompt-card-import__label").textContent = t("Paste alternating title and prompt lines");
+            textarea.placeholder = t("Card title\nprompt text\n\nAnother title\nanother prompt");
+            textarea.setAttribute("aria-label", t("Favorite cards import text"));
+            previewButton.textContent = t("Preview");
+            confirmButton.textContent = t("Confirm Import");
+            if (preview.hidden) clearPreview();
+            else renderPreview(parseCurrent());
         };
         const onDraftChanged = () => clearPreview();
         textarea.addEventListener("input", onDraftChanged);
@@ -3471,6 +3506,67 @@ export function openPromptCardLibraryMenu({
         library = nextLibrary;
         render();
     });
+    const refreshLocale = () => {
+        if (closed) return;
+        const activeElement = document.activeElement;
+        const focusedCategoryId = activeElement?.dataset?.categoryId
+            ?? activeElement?.closest?.("[data-category-id]")?.dataset?.categoryId
+            ?? null;
+        const focusedFavoriteId = activeElement?.dataset?.favoriteCardId
+            ?? activeElement?.closest?.("[data-favorite-card-id]")?.dataset?.favoriteCardId
+            ?? null;
+        const focusedClass = activeElement instanceof HTMLElement
+            ? [...activeElement.classList].find((name) => name.startsWith("cpw-prompt-card-library__"))
+            : null;
+        const categoryDraftInput = root.querySelector(".cpw-prompt-card-library__category-input");
+        const favoriteDraftInput = root.querySelector(".cpw-prompt-card-library__favorite-rename-input");
+        const draftState = {
+            categoryValue: categoryDraftInput?.value,
+            favoriteValue: favoriteDraftInput?.value,
+            selectionStart: activeElement?.selectionStart,
+            selectionEnd: activeElement?.selectionEnd,
+        };
+        const scrollPositions = [...root.querySelectorAll(".cpw-prompt-card-library__list")]
+            .map((list) => list.scrollTop);
+        const title = localizedWindowTitle();
+        root.setAttribute("aria-label", title);
+        heading.textContent = title;
+        importButton.textContent = t("Import");
+        importButton.title = t("Import favorite cards from text");
+        importButton.setAttribute("aria-label", t("Import favorite cards from text"));
+        closeButton.title = t("Close");
+        closeButton.setAttribute("aria-label", t("Close favorite cards"));
+        resizeHandle.title = t("Resize Favorite Cards");
+        resizeHandle.setAttribute("aria-label", t("Resize Favorite Cards"));
+        activeImportDialog?.refreshLocale?.();
+        render();
+        const nextCategoryDraft = root.querySelector(".cpw-prompt-card-library__category-input");
+        const nextFavoriteDraft = root.querySelector(".cpw-prompt-card-library__favorite-rename-input");
+        if (nextCategoryDraft && draftState.categoryValue !== undefined) {
+            nextCategoryDraft.value = draftState.categoryValue;
+        }
+        if (nextFavoriteDraft && draftState.favoriteValue !== undefined) {
+            nextFavoriteDraft.value = draftState.favoriteValue;
+        }
+        [...root.querySelectorAll(".cpw-prompt-card-library__list")].forEach((list, index) => {
+            list.scrollTop = scrollPositions[index] ?? 0;
+        });
+        let nextFocus = null;
+        if (focusedClass) {
+            const scope = focusedFavoriteId
+                ? root.querySelector(`[data-favorite-card-id="${focusedFavoriteId}"]`)
+                : focusedCategoryId
+                    ? root.querySelector(`[data-category-id="${focusedCategoryId}"]`)
+                    : root;
+            nextFocus = scope?.querySelector?.(`.${focusedClass}`) ?? null;
+        }
+        nextFocus?.focus?.({ preventScroll: true });
+        if (typeof nextFocus?.setSelectionRange === "function"
+            && Number.isInteger(draftState.selectionStart)
+            && Number.isInteger(draftState.selectionEnd)) {
+            nextFocus.setSelectionRange(draftState.selectionStart, draftState.selectionEnd);
+        }
+    };
     const setSuspended = (value) => {
         suspended = Boolean(value);
         root.classList.toggle("cpw-prompt-card-library--suspended", suspended);
@@ -3566,5 +3662,5 @@ export function openPromptCardLibraryMenu({
             render();
         });
     position();
-    return { close, root, setSuspended };
+    return { close, root, setSuspended, refreshLocale };
 }

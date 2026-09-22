@@ -40,9 +40,9 @@ git pull --ff-only origin master
 
 ## 语言支持
 
-Prompt Weaver 自定义 JavaScript 控件统一使用英文源文案，不再内置私有翻译表，也不自行监听 `Comfy.Locale`。
+Prompt Weaver 使用英文源文案和 ComfyUI 官方 locale 资源。节点定义、设置、命令及全部自定义 JavaScript 控件的英文和简体中文文案均放在 `locales/en` 与 `locales/zh` 中，并通过 ComfyUI 的 `/api/i18n` 资源加载；JavaScript 运行时代码不再内置私有中文词典。
 
-节点显示名称、说明、输入、输出和分类继续使用 ComfyUI 官方的 `locales/en` 与 `locales/zh` 资源，由 ComfyUI 自身的 locale 系统应用。在 ComfyUI 为普通 JavaScript 扩展界面提供公开且有文档的本地化接口之前，其余自定义控件保持英文。
+自定义弹窗、Tooltip、状态提示和无障碍文案会跟随 `Comfy.Locale`，切换语言后即时更新。官方资源不可用或缺少对应键时回退到英文源码。本项目暂未提供繁体中文资源，繁体中文设置会回退英文，不会用简体中文冒充繁体中文。
 
 Prompt 内容、Prompt Assistant 标签、用户创建的存档名称、卡片标题和已有 Workflow 数据不会被翻译或重写。新卡片统一使用 `Card 01` 到 `Card 04`，固定存档显示为 `Default Archive`；已有历史存储名称保持不变。
 

@@ -1,0 +1,14 @@
+{
+  "PromptWeaver_Autocomplete_SourceOrder": {
+    "name": "Prompt library sources",
+    "tooltip": "Drag sources to change their priority. Higher sources win equal-quality matches."
+  },
+  "PromptWeaver_Autocomplete_MaxResults": {
+    "name": "Maximum autocomplete suggestions",
+    "tooltip": "Choose how many prompt suggestions can be shown (1–100)."
+  },
+  "PromptWeaver_Autocomplete_TranslationManager": {
+    "name": "Prompt translations",
+    "tooltip": "View local translation coverage and manually update the prompt dictionary."
+  }
+}

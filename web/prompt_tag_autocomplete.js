@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260907-english-ui-v1";
+import { t } from "./prompt_weaver_i18n.js?v=20260922-official-locale-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,
@@ -6,7 +6,7 @@ import {
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260825-matched-alias-v1";
+} from "./prompt_assistant_tags.js?v=20260922-official-locale-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";

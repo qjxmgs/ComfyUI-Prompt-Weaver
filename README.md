@@ -40,9 +40,9 @@ Prompt Weaver enables its workflow bridge and every server-side write only when 
 
 ## Language support
 
-Prompt Weaver's custom JavaScript controls use English source strings. They do not bundle a private translation table or listen to `Comfy.Locale` themselves.
+Prompt Weaver uses English source strings and ComfyUI's official locale resources. The node definition, settings, commands, and every custom JavaScript control load their English and Simplified Chinese text from `locales/en` and `locales/zh` through ComfyUI's `/api/i18n` resource. No private Chinese translation table is bundled in the JavaScript runtime.
 
-The node display name, description, inputs, output, and category use ComfyUI's official `locales/en` and `locales/zh` resources. ComfyUI applies those resources through its own locale system. Other custom controls remain English until ComfyUI exposes a documented localization API for plain JavaScript extension UI.
+Custom dialogs, tooltips, status messages, and accessibility labels follow `Comfy.Locale` and update when the language changes. If the official resource is unavailable or a key is missing, the original English source string remains visible. Traditional Chinese is not currently bundled and falls back to English rather than displaying Simplified Chinese.
 
 Prompt text, Prompt Assistant tags, user-created archive names, card titles, and existing workflow data are never translated or rewritten. New cards use the canonical titles `Card 01` through `Card 04`, and the built-in archive uses **Default Archive**. Historical stored names remain unchanged for compatibility.
 

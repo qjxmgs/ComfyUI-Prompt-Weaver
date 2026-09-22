@@ -10,14 +10,14 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const assistantSource = (await readFile(
     new URL("../web/prompt_assistant_tags.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260907-english-ui-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20260922-official-locale-v1", i18nUrl);
 const assistantUrl = `data:text/javascript;base64,${Buffer.from(assistantSource).toString("base64")}`;
 const moduleSource = (await readFile(
     new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_weaver_i18n.js?v=20260907-english-ui-v1", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260825-matched-alias-v1", assistantUrl);
+    .replace("./prompt_weaver_i18n.js?v=20260922-official-locale-v1", i18nUrl)
+    .replace("./prompt_assistant_tags.js?v=20260922-official-locale-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     AUTOCOMPLETE_LIMIT_SETTING_ID,
@@ -701,12 +701,14 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260902-editor-keyboard-layers-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260922-official-locale-v1/);
     assert.match(source, /sourceOrder:\s*readAutocompleteSourceOrder/);
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260907-english-ui-v1/);
+    assert.equal((source.match(/getLocale: getPromptWeaverLocale/g) || []).length, 3);
+    assert.doesNotMatch(source, /getLocale: \(\) => "en"/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260922-official-locale-v1/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);

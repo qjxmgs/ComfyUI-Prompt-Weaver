@@ -2546,6 +2546,24 @@
     white-space: nowrap;
 }
 
+.cpw-prompt-editor__clear {
+    min-width: 60px;
+    height: 30px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.cpw-prompt-editor__clear:hover:not(:disabled),
+.cpw-prompt-editor__clear:focus-visible:not(:disabled) {
+    border-color: var(--p-primary-color, #7c6df2);
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 12%, var(--comfy-input-bg, #17181a));
+}
+
+.cpw-prompt-editor__clear:active:not(:disabled) {
+    border-color: color-mix(in srgb, var(--p-primary-color, #7c6df2) 84%, #fff);
+    background: color-mix(in srgb, var(--p-primary-color, #7c6df2) 22%, var(--comfy-input-bg, #17181a));
+}
+
 .cpw-prompt-editor__bulk-selection[data-state="on"] {
     border-color: color-mix(in srgb, #45b978 78%, var(--border-color, #4b4d52));
     color: color-mix(in srgb, #45b978 76%, var(--input-text, #e8e8ea));

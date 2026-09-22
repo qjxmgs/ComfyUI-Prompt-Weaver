@@ -197,7 +197,7 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
     assert.match(uiSource, /bulkSelectionButton\.setAttribute\("role", "checkbox"\)/);
     assert.match(
         uiSource,
-        /titleControls\.append\(cardTitleInput, bulkSelectionButton\)/,
+        /titleControls\.append\(cardTitleInput, bulkSelectionButton, clearPromptButton\)/,
     );
     assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);
     assert.match(uiSource, /content\.append\(tokenList, addStatus\)/);
@@ -227,6 +227,17 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
     assert.match(styleSource, /data-state="mixed"\]:active:not\(:disabled\)/);
     assert.match(styleSource, /data-state="off"\]:focus-visible/);
     assert.match(styleSource, /\.cpw-prompt-editor__bulk-selection:disabled/);
+    assert.match(uiSource, /cpw-prompt-editor__action cpw-prompt-editor__clear/);
+    assert.match(uiSource, /clearPromptButton\.title = t\("Clear all prompts"\)/);
+    assert.match(uiSource, /clearPromptButton\.disabled = submitting \|\| !promptDraftHasContent\(\)/);
+    assert.match(uiSource, /clearPromptButton\.addEventListener\("click", clearPromptEditorDraft\)/);
+    assert.match(
+        uiSource,
+        /const clearPromptEditorDraft = \(\) => \{[\s\S]*?const historySnapshot = capturePromptContentSnapshot\(\);[\s\S]*?tokens = \[\];[\s\S]*?selected = \[\];[\s\S]*?freePromptText = "";[\s\S]*?adding = false;[\s\S]*?addDraft = "";[\s\S]*?promptRequiresRebuild = true;[\s\S]*?recordPromptContentChange\(historySnapshot\);/,
+    );
+    assert.match(styleSource, /\.cpw-prompt-editor__clear\s*\{[\s\S]*?height:\s*30px;/);
+    assert.match(styleSource, /\.cpw-prompt-editor__clear:hover:not\(:disabled\)/);
+    assert.match(styleSource, /\.cpw-prompt-editor__clear:active:not\(:disabled\)/);
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--toggling/);
 });
 

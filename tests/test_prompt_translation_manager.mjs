@@ -161,8 +161,12 @@ test("settings button and legacy command open the same singleton manager", async
     assert.match(source, /translationProvider\.importSupplement\(file\)/);
     assert.match(source, /translationProvider\.rescanSupplement\("zh-CN"\)/);
     assert.match(source, /prompt_translation_manager\.js\?v=20260819-local-sqlite-v1/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260907-english-ui-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260922-official-locale-v1/);
     assert.match(source, /name:\s*"ComfyUIPromptWeaver\.TranslationSettings"/);
+    assert.match(source, /void connectPromptWeaverI18n\(app, api\)/);
+    assert.match(source, /subscribePromptWeaverLocale\(\(\) => \{/);
+    assert.match(source, /if \(activeTranslationManager\) refreshPromptTranslationManagerLocale\(activeTranslationManager\)/);
+    assert.match(source, /document\.querySelectorAll\("\[data-cpw-autocomplete-source-control\]"\)/);
     assert.match(source, /manager\.controller\.abort\(\)/);
     assert.doesNotMatch(source, /translationProvider\.update\("zh-CN",\s*\{\s*signal/);
     assert.match(source, /activeUpdateOperation/);
