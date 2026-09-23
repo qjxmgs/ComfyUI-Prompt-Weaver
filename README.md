@@ -9,6 +9,13 @@ ComfyUI Prompt Weaver provides two features:
 
 The plugin has no additional Python or JavaScript dependencies.
 
+## Recent updates
+
+- Custom controls, dialogs, tooltips, and accessibility labels now follow ComfyUI's English or Simplified Chinese locale through the official locale resources; open interfaces update when the language changes.
+- The card editor has a **Clear** action for its current prompt draft, with undo/redo support. The card title and editor settings are preserved.
+- Danbooru autocomplete uses one selected SQLite dictionary, either a manually downloaded copy or an imported local copy. A configurable minimum post count (default **100**, minimum **10**) controls the active suggestion set and displays its size; dictionary updates remain manual.
+- A [sample workflow](./workflow/ComfyUI-Prompt-Weaver_Sample_Workflow.json) is available to inspect or download.
+
 ## Installation and upgrades
 
 Clone this repository into ComfyUI's `custom_nodes` directory:
@@ -34,9 +41,15 @@ The desktop application currently installs the plugin only when the target direc
 - `web/prompt_grid_archives.js`, `web/prompt_grid_reorder.js`, and `web/prompt_card_library.js`
 - `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, `web/prompt_assistant_tags.js`, and `web/prompt_tag_autocomplete.js`
 
+## Sample workflow
+
+[View the sample workflow](./workflow/ComfyUI-Prompt-Weaver_Sample_Workflow.json) or [download the JSON file](https://raw.githubusercontent.com/qjxmgs/ComfyUI-Prompt-Weaver/master/workflow/ComfyUI-Prompt-Weaver_Sample_Workflow.json). Open the downloaded file in ComfyUI to explore the Prompt Card Grid in a complete graph. The sample also uses other custom nodes and model files, which must be installed separately if they are not already available.
+
 ## Local-only state changes
 
-Prompt Weaver enables its workflow bridge and every server-side write only when ComfyUI is configured to listen exclusively on loopback addresses such as `127.0.0.1`, `::1`, or `localhost`. Starting ComfyUI with `--listen`, `--listen 0.0.0.0`, a LAN address, or any mixed local/non-local address keeps read-only queries available but makes archive, favorite-card, and tag-dictionary changes return HTTP `403`. Restart ComfyUI with a loopback-only listener to use those operations. Proxy and forwarding headers are intentionally not trusted to relax this boundary.
+Prompt Weaver enables its workflow bridge and every server-side write only when ComfyUI is configured to listen exclusively on loopback addresses such as `127.0.0.1`, `::1`, or `localhost`. Starting ComfyUI with `--listen`, `--listen 0.0.0.0`, a LAN address, or any mixed local/non-local address keeps read-only queries available but makes archive, favorite-card, and tag-dictionary changes return HTTP `403`.
+
+Restart ComfyUI with a loopback-only listener to use those operations. Proxy and forwarding headers are intentionally not trusted to relax this boundary.
 
 ## Language support
 
@@ -50,7 +63,17 @@ Prompt text, Prompt Assistant tags, user-created archive names, card titles, and
 
 Add **Prompt Card Grid** from the `Prompt Weaver/Prompt` node category. The node outputs a standard `STRING`, which can connect directly to `CLIPTextEncode.text` or any other string input.
 
-The optional `prefix_prompt` string input can receive trigger words or any other prompt text. When connected, its value is placed before the enabled grid cards with an automatic `, ` separator. The combined result is deduplicated case-insensitively at top-level English/Chinese commas and line breaks, preserving the first spelling and keeping separators inside brackets, quotes, and escaped content intact. Leaving the input disconnected or empty preserves the existing grid-only output.
+The optional `prefix_prompt` string input can receive trigger words or any other prompt text. When connected, its value is placed before the enabled grid cards with an automatic `, ` separator.
+
+The combined result is deduplicated case-insensitively at top-level English/Chinese commas and line breaks, preserving the first spelling and keeping separators inside brackets, quotes, and escaped content intact.
+
+Leaving the input disconnected or empty preserves the existing grid-only output.
+
+Screenshots show the Simplified Chinese UI; interface text follows the language selected in ComfyUI.
+
+[![Prompt Card Grid with three columns of prompt cards](./web/assets/images/cpw_card_grid.png)](./web/assets/images/cpw_card_grid.png)
+
+*Prompt Card Grid: arrange and enable prompt cards in a multi-column layout.*
 
 Each card contains:
 
@@ -60,45 +83,193 @@ Each card contains:
 - Drag-to-reorder from any non-interactive blank area with live displacement animation. Blank areas use a grab cursor, and `Esc` restores the original order while dragging.
 - Card color and deletion actions in the card context menu. Delete expands in place to a Confirm/Cancel row before removing any card; right-clicking a text field keeps the browser's native menu.
 
-The toolbar can add cards, switch every card through one compact three-state master toggle, and select a fixed layout through the `1 column`–`6 columns` selector without a separate label. The toggle is on when every card is enabled, off when every card is disabled, and centered when the grid is mixed; activating a mixed toggle enables every card. A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
+### Grid controls
 
-The editor button next to a prompt splits its text at top-level English or Chinese commas and line breaks. Separators inside parentheses, square or curly brackets, quotes, and escaped content are preserved. The editor deduplicates tags case-insensitively while retaining the first spelling and original order. Its `+` composer accepts multiple prompts using the same splitting rules and commits on Enter, blur, or Confirm. Existing inactive duplicates are re-enabled instead of added again. Clicking or painting across tags toggles their selection. **Retain Unselected** is enabled by default per card: inactive tags remain in the group after Confirm without entering node output. Their red `×` floats over the upper-right corner without changing the tag width and removes the tag from the current draft; removal is saved only after Confirm. Text Mode keeps the raw active prompt in its textarea and shows retained inactive tags in a dim strip below it. Turning retention off discards inactive tags only when Confirm is pressed. `Esc` dismisses one active interaction layer at a time—autocomplete, a favorite menu, prompt composition, or an in-progress pointer gesture—then closes the editor and discards the whole draft only when no cancellable layer remains. The red title-bar close button still closes immediately. Confirm writes only selected tags back with `, ` separators. The footer Copy button copies only the active current draft without closing or saving the editor.
+The toolbar can add cards, switch every card through one compact three-state master toggle, and select a fixed layout through the `1 column`–`6 columns` selector without a separate label.
 
-The editor uses a two-level header: the primary title bar contains only the active-tag count and red close button, while the toolbar below contains the editable card-title field, its adjacent current-state bulk button, undo/redo controls, and the 12–30 px **Font Size** control. The bulk button reports **All Enabled**, **All Disabled**, **Partially Enabled**, or disabled **No Prompts**. Activating All Enabled disables every tag; activating All Disabled or Partially Enabled enables every tag. The button stays visible but disabled in Text Mode, and each activation creates one history step. The title draft is saved with the prompt only after Confirm, and favorite actions opened from the editor use the current title draft. **Retain Unselected** and **Text Mode** are kept in that order at the left of the footer; hovering either option describes the action represented by its current checked state. Plain Tab and Shift+Tab are reserved throughout the editor for switching between Text Mode and tag mode; they never move focus or accept an autocomplete result. Undo and redo keep up to 100 prompt-content steps for the current editor session only and are cleared on Confirm, Cancel, or close. Tag changes, additions, removals, autocomplete insertions, bulk changes, and committed text edits participate; title, mode, retention, font-size, and geometry changes do not. Continuous typing becomes one step when the field loses focus or is committed. Use Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z to redo, or Ctrl+Y on Windows/Linux; while a text field is still actively editing, its native browser history remains in control. Status messages remain below the prompt content. Font size is remembered locally. The dialog has a 600 px minimum width, can be moved only by dragging the non-interactive primary title-bar area, and can be resized from its corner; its saved geometry is clamped back into the current viewport when reopened.
+The toggle is on when every card is enabled, off when every card is disabled, and centered when the grid is mixed; activating a mixed toggle enables every card.
 
-The card prompt field, the `+` composer, and Text Mode share dual-source autocomplete. **Danbooru** suggestions come from the selected local SQLite dictionary; **Prompt Assistant** suggestions come from every CSV exposed by an installed [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant). Both sources are enabled by default and appear in one rounded source group in ComfyUI settings. Use the drag handle to reorder their priority or toggle either source independently; the top source wins equal-quality matches. Exact, prefix, substring, and ordered character-skip matches are ranked in that order before source priority is applied. Character-skip matching ignores spaces, underscores, and hyphens, then favors an earlier first hit, fewer skipped characters, and a shorter candidate. Danbooru ties use post count. Final insertion text is deduplicated across sources.
+A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
 
-Matching starts after one Chinese character or two Latin characters. Character-skip matching starts after two Chinese characters or three Latin characters. The maximum suggestion count is configurable in ComfyUI settings from 1 to 100 and defaults to 30. Both data sources use the same four-column layout: English prompt with Chinese description underneath, category, source, and usage count. Matching text is highlighted in red in both the English tag and Chinese description, including the individual characters selected by character-skip matching. Missing Chinese descriptions display `—`, while Prompt Assistant keeps the count column empty because it has no reliable usage statistics. Selecting a Danbooru tag inserts its canonical English tag with underscores converted to spaces. The popup opens above or below according to available space and has a distinct title bar plus an animated accent border. Drag the outer edge away from the input to resize its height; all three input surfaces share the saved 120–720 px preference, and double-clicking the grip restores the 320 px default. Arrow keys move the highlight and Enter selects it. Tab can still select a highlighted result in the grid card field, but inside the editor it always switches editing modes. `Esc` closes the autocomplete layer first. IME composition is not intercepted. In the card and Text Mode fields only the fragment surrounding the caret is replaced, preserving separators, wrappers, quotes, escapes, and weight suffixes.
+### Card editor
+
+The editor button next to a prompt splits its text at top-level English or Chinese commas and line breaks. Separators inside parentheses, square or curly brackets, quotes, and escaped content are preserved. The editor deduplicates tags case-insensitively while retaining the first spelling and original order.
+
+Its `+` composer accepts multiple prompts using the same splitting rules and commits on Enter, blur, or Confirm. Existing inactive duplicates are re-enabled instead of added again. Clicking or painting across tags toggles their selection.
+
+**Retain Unselected** is enabled by default per card: inactive tags remain in the group after Confirm without entering node output. Their red `×` floats over the upper-right corner without changing the tag width and removes the tag from the current draft; removal is saved only after Confirm.
+
+Text Mode keeps the raw active prompt in its textarea and shows retained inactive tags in a dim strip below it. Turning retention off discards inactive tags only when Confirm is pressed.
+
+`Esc` dismisses one active interaction layer at a time—autocomplete, a favorite menu, prompt composition, or an in-progress pointer gesture—then closes the editor and discards the whole draft only when no cancellable layer remains. The red title-bar close button still closes immediately.
+
+Confirm writes only selected tags back with `, ` separators. The footer Copy button copies only the active current draft without closing or saving the editor.
+
+[![Card editor showing prompt tags and editing controls](./web/assets/images/cpw_card_edit.png)](./web/assets/images/cpw_card_edit.png)
+
+*Card editor: edit prompt tags, selection states, and the card title.*
+
+### Editor controls and shortcuts
+
+The editor uses a two-level header: the primary title bar contains only the active-tag count and red close button, while the toolbar below contains the editable card-title field, its adjacent current-state bulk button, undo/redo controls, and the 12–30 px **Font Size** control.
+
+The bulk button reports **All Enabled**, **All Disabled**, **Partially Enabled**, or disabled **No Prompts**. Activating All Enabled disables every tag; activating All Disabled or Partially Enabled enables every tag. The button stays visible but disabled in Text Mode, and each activation creates one history step.
+
+The title draft is saved with the prompt only after Confirm, and favorite actions opened from the editor use the current title draft. **Retain Unselected** and **Text Mode** are kept in that order at the left of the footer; hovering either option describes the action represented by its current checked state.
+
+Plain Tab and Shift+Tab are reserved throughout the editor for switching between Text Mode and tag mode; they never move focus or accept an autocomplete result.
+
+Undo and redo keep up to 100 prompt-content steps for the current editor session only and are cleared on Confirm, Cancel, or close. Tag changes, additions, removals, autocomplete insertions, bulk changes, and committed text edits participate; title, mode, retention, font-size, and geometry changes do not.
+
+Continuous typing becomes one step when the field loses focus or is committed. Use Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z to redo, or Ctrl+Y on Windows/Linux; while a text field is still actively editing, its native browser history remains in control.
+
+Status messages remain below the prompt content. Font size is remembered locally. The dialog has a 600 px minimum width, can be moved only by dragging the non-interactive primary title-bar area, and can be resized from its corner; its saved geometry is clamped back into the current viewport when reopened.
+
+**Clear**, between the bulk-state button and Undo, removes all active and retained tags, pending additions, and Text Mode content from the current editor draft. It preserves the card title, current mode, and **Retain Unselected** setting.
+
+A nonempty draft can be cleared in one undoable step; Redo clears it again. The button is disabled when there is nothing to clear or a favorite update is being submitted.
+
+Clearing does not save immediately: close the editor to discard the change, or use **Confirm** to save an empty grid-card prompt. Favorite-library snapshots still require a nonempty prompt, so add content before using **Update** there.
+
+### Autocomplete
+
+The card prompt field, the `+` composer, and Text Mode share dual-source autocomplete. **Danbooru** suggestions come from the selected local SQLite dictionary; **Prompt Assistant** suggestions come from every CSV exposed by an installed [ComfyUI-Prompt-Assistant](https://github.com/yawiii/comfyui_prompt_assistant).
+
+Both sources are enabled by default and appear in one rounded source group in ComfyUI settings. Use the drag handle to reorder their priority or toggle either source independently; the top source wins equal-quality matches.
+
+Exact, prefix, substring, and ordered character-skip matches are ranked in that order before source priority is applied. Character-skip matching ignores spaces, underscores, and hyphens, then favors an earlier first hit, fewer skipped characters, and a shorter candidate. Danbooru ties use post count. Final insertion text is deduplicated across sources.
+
+Matching starts after one Chinese character or two Latin characters. Character-skip matching starts after two Chinese characters or three Latin characters. The maximum suggestion count is configurable in ComfyUI settings from 1 to 100 and defaults to 30.
+
+Both data sources use the same four-column layout: English prompt with Chinese description underneath, category, source, and usage count. Matching text is highlighted in red in both the English tag and Chinese description, including the individual characters selected by character-skip matching.
+
+Missing Chinese descriptions display `—`, while Prompt Assistant keeps the count column empty because it has no reliable usage statistics. Selecting a Danbooru tag inserts its canonical English tag with underscores converted to spaces.
+
+The popup opens above or below according to available space and has a distinct title bar plus an animated accent border. Drag the outer edge away from the input to resize its height; all three input surfaces share the saved 120–720 px preference, and double-clicking the grip restores the 320 px default.
+
+Arrow keys move the highlight and Enter selects it. Tab can still select a highlighted result in the grid card field, but inside the editor it always switches editing modes. `Esc` closes the autocomplete layer first. IME composition is not intercepted. In the card and Text Mode fields only the fragment surrounding the caret is replaced, preserving separators, wrappers, quotes, escapes, and weight suffixes.
+
+[![Tag autocomplete in the card editor with English tags and Chinese translations](./web/assets/images/cpw_card_edit_association.png)](./web/assets/images/cpw_card_edit_association.png)
+
+*Tag autocomplete: inspect matching tags, translations, sources, and usage counts.*
+
+### Danbooru dictionary
 
 Danbooru now uses **one SQLite dictionary at a time**: the manually downloaded [ffdkj tag.sqlite](https://github.com/ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table/blob/main/tag.sqlite) (MIT), or a validated local copy imported through **Manage prompt translations…**. Prompt Assistant remains an independent source with its own switch and priority. Old Danbooru CSV files are left on disk but are no longer queried; CSV aliases are no longer matched.
 
-Choose the active dictionary in the manager. A local import copies the file into the current ComfyUI user's data directory; changing the original file requires re-importing. Manual GitHub updates refresh only the downloaded copy and never replace the imported file or silently switch the active source. Opening the manager, searching and changing the threshold never download anything. On upgrade, an existing valid local SQLite is preferred, otherwise an existing downloaded SQLite is reused, without writing migration state during reads.
+Choose the active dictionary in the manager. A local import copies the file into the current ComfyUI user's data directory; changing the original file requires re-importing. Manual GitHub updates refresh only the downloaded copy and never replace the imported file or silently switch the active source. Opening the manager, searching and changing the threshold never download anything.
 
-**Minimum Danbooru post count** defaults to **100**, accepts integers of **10 or greater**, and is independent of the maximum suggestion count. Both the ComfyUI autocomplete settings and dictionary manager show the same input, quick values (10 / 50 / 100 / 200 / 300 / 400 / 500 / 1000), eligible count and dictionary total. The settings card spans the full row without a duplicate external label. Valid edits save after a 300 ms debounce; invalid edits keep the previous effective value. Counts exclude Prompt Assistant. Lower values load more tags and use more resources. The threshold only filters autocomplete: existing cards, favorites and manually entered low-frequency tags can still resolve their Chinese translations.
+On upgrade, an existing valid local SQLite is preferred, otherwise an existing downloaded SQLite is reused, without writing migration state during reads.
 
-Downloads and imports use a 64 MiB cap, read-only SQLite validation, temporary files and atomic replacement. A local dictionary needs at least one valid row; the remote full dictionary requires at least 300,000 rows. Errors preserve the previous valid data and selection. The downloaded Git blob and SHA-256, update time, active source and total count are visible in the manager. The expected table is `tags(name TEXT PRIMARY KEY, category INTEGER, cn_name TEXT, post_count INTEGER)`; categories are 0/1/3/4/5, translations must be nonempty and counts at least 10.
+**Minimum Danbooru post count** defaults to **100**, accepts integers of **10 or greater**, and is independent of the maximum suggestion count. Both the ComfyUI autocomplete settings and dictionary manager show the same input, quick values (10 / 50 / 100 / 200 / 300 / 400 / 500 / 1000), eligible count and dictionary total. The settings card spans the full row without a duplicate external label.
 
-Source choice is stored per ComfyUI user. Thresholds use `PromptWeaver.Autocomplete.MinPostCount` and are sent as `min_post_count` to status/search; exact resolution is unfiltered. The source-switch endpoint is `POST /prompt-weaver/tag-autocomplete/source` with `downloaded` or `local`. All dictionary writes retain the local-only server-listen guard. Only threshold-qualified rows enter autocomplete memory (two candidate sets maximum); statistics reuse a frequency histogram, while translations query the full SQLite by primary key. Direct matches precede fuzzy scans, which run only if needed.
+Valid edits save after a 300 ms debounce; invalid edits keep the previous effective value. Counts exclude Prompt Assistant. Lower values load more tags and use more resources. The threshold only filters autocomplete: existing cards, favorites and manually entered low-frequency tags can still resolve their Chinese translations.
+
+Downloads and imports use a 64 MiB cap, read-only SQLite validation, temporary files and atomic replacement. A local dictionary needs at least one valid row; the remote full dictionary requires at least 300,000 rows.
+
+Errors preserve the previous valid data and selection. The downloaded Git blob and SHA-256, update time, active source and total count are visible in the manager. The expected table is `tags(name TEXT PRIMARY KEY, category INTEGER, cn_name TEXT, post_count INTEGER)`; categories are 0/1/3/4/5, translations must be nonempty and counts at least 10.
+
+Source choice is stored per ComfyUI user. Thresholds use `PromptWeaver.Autocomplete.MinPostCount` and are sent as `min_post_count` to status/search; exact resolution is unfiltered. The source-switch endpoint is `POST /prompt-weaver/tag-autocomplete/source` with `downloaded` or `local`.
+
+All dictionary writes retain the local-only server-listen guard. Only threshold-qualified rows enter autocomplete memory (two candidate sets maximum); statistics reuse a frequency histogram, while translations query the full SQLite by primary key. Direct matches precede fuzzy scans, which run only if needed.
 
 ## Favorite Cards
 
-Favorite cards form a user-level library shared by every Prompt Card Grid node, workflow, archive, and browser tab for the same ComfyUI user. Every favorite belongs to a secondary category under exactly one primary category. Both category levels can be created and renamed at runtime. Empty categories can be deleted directly; deleting a branch that contains favorites first requires choosing another secondary category, and the backend migrates those cards and removes the branch in one atomic operation. Sibling category names are case-insensitively unique.
+Favorite cards form a user-level library shared by every Prompt Card Grid node, workflow, archive, and browser tab for the same ComfyUI user. Every favorite belongs to a secondary category under exactly one primary category. Both category levels can be created and renamed at runtime.
 
-Each grid card embeds a dropdown arrow at the right edge of its title field. It opens a read-only Primary Category → Secondary Category → Favorite Card cascade: pointing at a category opens its submenu, and choosing a favorite switches the current grid card to that saved prompt snapshot. The open primary and secondary branch stays highlighted, and each favorite title shows its active output-prompt count. Hovering or keyboard-focusing a favorite shows a subdued, translucent, wrapping two-part prompt tooltip: normalized English output first, followed by Chinese translations resolved through the enabled autocomplete sources and their configured priority. The Chinese line uses full-width Chinese commas between top-level tokens, while missing translations retain the corresponding English token. Moving away from the favorite keeps the current three-level branch open but hides the tooltip once that card is neither hovered nor focused; hovering another favorite shows its tooltip, and an outside click or `Esc` closes the cascade. A red `×` on the right arms deletion as `!`; clicking it again deletes the global favorite, while three seconds, another interaction, or `Esc` cancels confirmation. The title, prompt, retained-token policy, token states, and `favorite_id` are replaced together, while the grid card ID, enabled switch, color, and position stay unchanged. Selecting the same favorite reloads its latest saved prompt data without changing the card color. After every selection, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead. The cascade automatically flips and clamps to the viewport and supports arrow keys, Home, End, Enter/Space, `Esc`, and outside-click dismissal.
+Empty categories can be deleted directly; deleting a branch that contains favorites first requires choosing another secondary category, and the backend migrates those cards and removes the branch in one atomic operation. Sibling category names are case-insensitively unique.
 
-The editor footer **Favorites** action opens a three-column Primary Category → Secondary Category → My Favorites manager for the card currently being edited. Hovering or clicking a secondary category immediately browses its favorites. Primary categories can be dragged vertically to persistent insertion positions. Secondary categories support the same sibling reordering and can be dropped onto another primary category to reclassify them; their favorite cards move with them unchanged. Category context menus also expose Top, Up, Down, and Bottom commands, while secondary categories retain a Move to Category fallback for keyboard, touch, and narrow layouts. The `+` in the My Favorites header saves the current draft as a new independent favorite in that category, including when the draft is already linked to another favorite. Each favorite shows its active output-prompt count and the same bilingual tooltip and two-click red deletion control as the grid cascade. The favorite content area is display-only; only its rounded **Overwrite** button asks for confirmation before replacing that saved snapshot with the current editor draft and linking the draft to it. Favorites can be dragged vertically to an insertion line to reorder them within the current secondary category. While dragging, hovering another secondary category previews its favorites in the third column, where the card can be inserted at an exact position; dropping directly on the category row still appends it. The favorite context menu also provides Rename, Top, Up, Down, Bottom, and Move to Category commands. Rename replaces the whole favorite row with a title input plus Cancel and Confirm actions without changing the saved Prompt snapshot. Empty prompts cannot be created or used to overwrite a favorite, and request failures remain in the manager without blocking editing, copying, or confirmation.
+### Switch a grid card to a favorite
 
-The Favorite Cards manager can be moved by dragging its title bar and resized in both directions from the lower-right handle. Its size and position are remembered in the current browser and clamped to the visible viewport when reopened. Rendering, category changes, library mutations, and list scrolling no longer recenter the window. Status and validation messages appear inline immediately to the right of the Favorite Cards title, reveal from left to right, and retract in the opposite direction after three seconds instead of adding a separate row. The three columns scroll independently with compact themed scrollbars; shrinking the manager below the three-column threshold switches to the existing drill-down view and expanding it restores all columns.
+Each grid card embeds a dropdown arrow at the right edge of its title field. It opens a read-only Primary Category → Secondary Category → Favorite Card cascade: pointing at a category opens its submenu, and choosing a favorite switches the current grid card to that saved prompt snapshot.
 
-The **Import** action beside the Favorite Cards title opens a batch text importer shared by editor and toolbar management modes. Choose an existing secondary category, then paste alternating title and Prompt lines; blank lines are ignored. Preview is optional and lists valid cards plus skipped reasons. Confirmation always reparses the latest text, appends valid cards in source order with existing defaults, skips invalid entries, and reports an unmatched final title without blocking the remaining import.
+The open primary and secondary branch stays highlighted, and each favorite title shows its active output-prompt count.
+
+Hovering or keyboard-focusing a favorite shows a subdued, translucent, wrapping two-part prompt tooltip: normalized English output first, followed by Chinese translations resolved through the enabled autocomplete sources and their configured priority. The Chinese line uses full-width Chinese commas between top-level tokens, while missing translations retain the corresponding English token.
+
+Moving away from the favorite keeps the current three-level branch open but hides the tooltip once that card is neither hovered nor focused; hovering another favorite shows its tooltip, and an outside click or `Esc` closes the cascade.
+
+A red `×` on the right arms deletion as `!`; clicking it again deletes the global favorite, while three seconds, another interaction, or `Esc` cancels confirmation.
+
+Choosing a favorite updates the current grid card:
+
+- Replaces the title, prompt, retained-token policy, token states, and `favorite_id` together.
+- Preserves the grid card ID, enabled switch, color, and position.
+
+Selecting the same favorite again reloads its latest saved prompt data without changing the card color.
+
+After every selection, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead.
+
+The cascade automatically flips and clamps to the viewport and supports arrow keys, Home, End, Enter/Space, `Esc`, and outside-click dismissal.
+
+[![Three-level favorite selection menu opened from a grid card](./web/assets/images/cpw_card_switch.jpg)](./web/assets/images/cpw_card_switch.jpg)
+
+*Switch a grid card to a saved favorite through the category menu.*
+
+### Manage favorite cards
+
+The editor footer **Favorites** action opens a three-column Primary Category → Secondary Category → My Favorites manager for the card currently being edited.
+
+Hovering or clicking a secondary category immediately browses its favorites. Primary categories can be dragged vertically to persistent insertion positions. Secondary categories support the same sibling reordering and can be dropped onto another primary category to reclassify them; their favorite cards move with them unchanged.
+
+Category context menus also expose Top, Up, Down, and Bottom commands, while secondary categories retain a Move to Category fallback for keyboard, touch, and narrow layouts.
+
+The `+` in the My Favorites header saves the current draft as a new independent favorite in that category, including when the draft is already linked to another favorite.
+
+Each favorite shows its active output-prompt count and the same bilingual tooltip and two-click red deletion control as the grid cascade. The favorite content area is display-only; only its rounded **Overwrite** button asks for confirmation before replacing that saved snapshot with the current editor draft and linking the draft to it.
+
+Favorites can be dragged vertically to an insertion line to reorder them within the current secondary category. While dragging, hovering another secondary category previews its favorites in the third column, where the card can be inserted at an exact position; dropping directly on the category row still appends it.
+
+The favorite context menu also provides Rename, Top, Up, Down, Bottom, and Move to Category commands. Rename replaces the whole favorite row with a title input plus Cancel and Confirm actions without changing the saved Prompt snapshot.
+
+Empty prompts cannot be created or used to overwrite a favorite, and request failures remain in the manager without blocking editing, copying, or confirmation.
+
+The Favorite Cards manager can be moved by dragging its title bar and resized in both directions from the lower-right handle. Its size and position are remembered in the current browser and clamped to the visible viewport when reopened. Rendering, category changes, library mutations, and list scrolling no longer recenter the window.
+
+Status and validation messages appear inline immediately to the right of the Favorite Cards title, reveal from left to right, and retract in the opposite direction after three seconds instead of adding a separate row.
+
+The three columns scroll independently with compact themed scrollbars; shrinking the manager below the three-column threshold switches to the existing drill-down view and expanding it restores all columns.
+
+[![Favorite Cards add window showing categories and saved cards](./web/assets/images/cpw_card_favor.png)](./web/assets/images/cpw_card_favor.png)
+
+*Favorite Cards: browse categories and save the current card to a favorite.*
+
+### Import and storage
+
+The **Import** action beside the Favorite Cards title opens a batch text importer shared by editor and toolbar management modes. Choose an existing secondary category, then paste alternating title and Prompt lines; blank lines are ignored.
+
+Preview is optional and lists valid cards plus skipped reasons. Confirmation always reparses the latest text, appends valid cards in source order with existing defaults, skips invalid entries, and reports an unmatched final title without blocking the remaining import.
 
 Favorite-library create, move, update, and remove operations take effect immediately. The current grid card content and favorite association are committed only by **Confirm**; cancelling the editor leaves the card configuration unchanged without rolling back global library operations. Favorites remain independent snapshots, so later card edits never overwrite them implicitly.
 
-The library is stored at `ComfyUI-Prompt-Weaver/prompt-card-library.json` in the current ComfyUI user's data directory. It uses the archive service's locked, validated, temporary-file plus atomic-replacement strategy; a corrupt or failed read never overwrites the original file. Limits are 100 primary categories, 500 secondary categories, 2,000 favorite cards, and a 20 MiB library file. Version 1 persists primary-category order, secondary-category order within each primary, and favorite order within each secondary without adding per-item order fields. Batch text import uses one locked validation pass, one atomic write, and one revision update for every accepted group.
+The library is stored at `ComfyUI-Prompt-Weaver/prompt-card-library.json` in the current ComfyUI user's data directory. It uses the archive service's locked, validated, temporary-file plus atomic-replacement strategy; a corrupt or failed read never overwrites the original file.
+
+Limits are 100 primary categories, 500 secondary categories, 2,000 favorite cards, and a 20 MiB library file. Version 1 persists primary-category order, secondary-category order within each primary, and favorite order within each secondary without adding per-item order fields. Batch text import uses one locked validation pass, one atomic write, and one revision update for every accepted group.
 
 ## Global archives
 
-The archive selector loads and switches complete grid states. The adjacent Save, Restore, Archive Manager, and Favorite Cards Manager actions use compact icon buttons; hovering or focusing an icon immediately shows its English name below it. **Archive Manager** creates, saves, renames, deletes, imports, and exports archives. The Favorite Cards Manager opens the same three-column category and favorite management interface used by the card editor, replacing the draft overwrite action with an Edit action that opens the shared card editor and updates the saved favorite snapshot. A normal click selects one archive, `Ctrl` adds or removes individual selections, `Shift` selects a range from the latest anchor, and `Ctrl+Shift` adds a range. Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content. An archive contains node size, column count, card order, switches, titles, colors, active prompts, per-card retained-token state, and optional favorite associations, but not canvas position or links. Loading from the toolbar also restores the saved node size.
+### Select and manage archives
+
+The archive selector loads and switches complete grid states. The adjacent Save, Restore, Archive Manager, and Favorite Cards Manager actions use compact icon buttons; hovering or focusing an icon immediately shows its English name below it.
+
+**Archive Manager** creates, saves, renames, deletes, imports, and exports archives. The Favorite Cards Manager opens the same three-column category and favorite management interface used by the card editor, replacing the draft overwrite action with an Edit action that opens the shared card editor and updates the saved favorite snapshot.
+
+Archive-manager selection uses these controls:
+
+- A normal click selects one archive.
+- `Ctrl` adds or removes individual selections.
+- `Shift` selects a range from the latest anchor.
+- `Ctrl+Shift` adds a range.
+
+Manager selection changes only the target of the Save/Rename/Export/Delete actions; it does not load node content.
+
+An archive contains node size, column count, card order, switches, titles, colors, active prompts, per-card retained-token state, and optional favorite associations, but not canvas position or links. Loading from the toolbar also restores the saved node size.
+
+[![Archive Manager showing archive details and actions](./web/assets/images/cpw_archive_manage.png)](./web/assets/images/cpw_archive_manage.png)
+
+*Archive Manager: inspect, select, and manage saved grid states.*
+
+### Archive rules
 
 The Save button next to the selector writes the current grid and node size back to the associated archive. It is enabled only while the state is dirty and does not ask for confirmation. Changes made while a save is in progress remain dirty if they were not part of the saved snapshot.
 
@@ -113,11 +284,17 @@ The Save button next to the selector writes the current grid and node size back 
 - Saving over an archive and deleting archives require confirmation.
 - Nodes on the same page synchronize archive changes immediately. Other tabs use `BroadcastChannel`, and focusing the selector also refreshes the list.
 
-Archives are stored under the current ComfyUI user's data directory at `ComfyUI-Prompt-Weaver/prompt-grid-archives.json`, so they can be shared across workflows and browser sessions while remaining isolated between ComfyUI users. Older files are upgraded with the default archive, a 600×420 default node size, and the global selection. Writes use a temporary file and atomic replacement; corrupt files return an error and are never silently replaced. The limits are 100 regular archives, 500 cards per archive, and bounded snapshot, import, and total file sizes.
+### Storage and compatibility
 
-One archive, the selected archives, or all archives can be exported in the same portable JSON format; batch export retains list order. Batch deletion uses one confirmation and one atomic write, and an invalid target cancels the entire operation. Import preview shows archive and card counts and supports Skip, Overwrite Local Archives, or Automatically Rename for name conflicts. The server validates the whole batch before writing anything.
+Archives are stored under the current ComfyUI user's data directory at `ComfyUI-Prompt-Weaver/prompt-grid-archives.json`, so they can be shared across workflows and browser sessions while remaining isolated between ComfyUI users. Older files are upgraded with the default archive, a 600×420 default node size, and the global selection. Writes use a temporary file and atomic replacement; corrupt files return an error and are never silently replaced.
 
-Archive snapshots are not written into the execution `config`. Workflow node properties store only the associated archive ID, leaving Queue Prompt, the Python node contract, and desktop C++ parsing unchanged. ComfyUI must remain running while archive operations are used. Restart ComfyUI after upgrading because the plugin registers Python routes.
+The limits are 100 regular archives, 500 cards per archive, and bounded snapshot, import, and total file sizes. One archive, the selected archives, or all archives can be exported in the same portable JSON format; batch export retains list order.
+
+Batch deletion uses one confirmation and one atomic write, and an invalid target cancels the entire operation. Import preview shows archive and card counts and supports Skip, Overwrite Local Archives, or Automatically Rename for name conflicts. The server validates the whole batch before writing anything.
+
+Archive snapshots are not written into the execution `config`. Workflow node properties store only the associated archive ID, leaving Queue Prompt, the Python node contract, and desktop C++ parsing unchanged.
+
+ComfyUI must remain running while archive operations are used. Restart ComfyUI after upgrading because the plugin registers Python routes.
 
 ## Combination rules
 
