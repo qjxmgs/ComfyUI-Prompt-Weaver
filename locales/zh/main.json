@@ -467,7 +467,6 @@
       "Actions": "操作",
       "Enter variable name": "输入变量名称",
       "Enter variable value": "输入变量值",
-      "Add Variable": "新增变量",
       "Variable name": "变量名称",
       "Variable value": "变量值",
       "Clear variable value": "清空变量值",
@@ -475,10 +474,8 @@
       "Variable updated.": "变量已更新。",
       "Variable added.": "变量已新增。",
       "Variable deleted.": "变量已删除。",
-      "{count} cards reference this variable. Click Delete again to confirm.": "有 {count} 张卡片引用此变量。再次点击删除以确认。",
       "Delete variable": "删除变量",
       "Drag to reorder variable; use arrow keys for keyboard sorting": "拖动调整变量顺序；也可用方向键排序",
-      "Delete": "删除",
       "Variables": "变量",
       "No matching variables.": "没有匹配的变量。",
       "Undefined variable": "未定义变量",
@@ -486,7 +483,18 @@
       "Variable values must be strings of at most 10,000 characters.": "变量值可以为空，最长 10,000 个字符。",
       "variables must be an array of at most 100 entries": "变量列表最多可包含 100 项。",
       "Each variable needs a unique ID and an NFC name.": "每个变量都需要唯一 ID 和 NFC 规范化名称。",
-      "Variable names must be unique.": "变量名不能重复。"
+      "Variable names must be unique.": "变量名不能重复。",
+      "Copy Variables": "复制变量",
+      "Paste Variables": "粘贴变量",
+      "Copy all variables to the clipboard": "复制全部变量到剪贴板",
+      "Paste variables from the clipboard": "从剪贴板粘贴变量",
+      "Variables copied.": "变量已复制。",
+      "Variables pasted.": "变量已粘贴。",
+      "The clipboard does not contain valid Prompt Weaver variables.": "剪贴板中没有有效的 Prompt Weaver 变量数据。",
+      "This variable is referenced by {count} cards. Click Delete again to confirm.": "该变量被 {count} 张卡片引用。再次点击删除以确认。",
+      "This variable no longer exists. Reopen the variable manager.": "该变量已不存在，请重新打开变量管理。",
+      "Close the card editor before editing variables.": "请先关闭卡片编辑窗口再编辑变量。",
+      "The workflow variables changed. Review the latest values and retry.": "工作流变量已改变，请检查最新值后重试。"
     }
   }
 }

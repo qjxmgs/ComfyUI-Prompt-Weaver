@@ -18,6 +18,14 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
     def combine(self, config, prefix_prompt=""):
         return NODES.PromptWeaverPromptToggleGrid().combine(config, prefix_prompt)[0]
 
+    def test_shared_library_link_does_not_affect_snapshot_only_execution(self):
+        config = json.dumps({"version": 1, "variables": [
+            {"id": "legacy", "name": "color", "value": "red", "library_id": "11111111-1111-4111-8111-111111111111"},
+            {"id": "empty", "name": "empty", "value": ""},
+        ], "items": [{"id": "card", "enabled": True, "prompt": "{color}, {empty}"}]})
+        self.assertEqual(self.combine(config), "red")
+        self.assertEqual(self.combine(config, "{color}"), "{color}, red")
+
     def test_node_contract_and_default_config(self):
         input_spec = NODES.PromptWeaverPromptToggleGrid.INPUT_TYPES()
         widget_type, options = input_spec["required"]["config"]

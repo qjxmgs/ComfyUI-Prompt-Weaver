@@ -1,0 +1,242 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workflow Variables Clipboard QA</title>
+<link id="cpw-prompt-toggle-grid-styles" rel="stylesheet" href="../web/prompt_toggle_grid.css">
+<style>
+body { background:#171717;color:#ddd;font:13px system-ui;margin:16px; }
+body.light { background:#f6f6f6;color:#222;--comfy-menu-bg:#fff;--comfy-input-bg:#f5f5f5;--fg-color:#222;--border-color:#bbb; }
+#nodes { display:flex;gap:16px;flex-wrap:wrap; } .node {width:600px;height:340px;border:1px solid #888;margin-top:16px;}
+#results {white-space:pre-wrap;}
+</style>
+<button id="run">Run workflow variable tests</button>
+<button id="language">Switch Language</button>
+<button id="theme">Switch Theme</button>
+<button id="narrow">Toggle Narrow Window</button>
+<button id="plain">Set Plain Clipboard</button>
+<button id="denied">Toggle Clipboard Denied</button>
+<pre id="results"></pre>
+<div id="nodes"></div>
+<script type="module">
+const settings = new EventTarget();
+let locale = "en";
+settings.getSettingValue = (key, fallback) => key === "Comfy.Locale" ? locale : fallback;
+globalThis.fixtureApi = {
+    user:"test",
+    fetchApi:(path, options) => fetch(path, options),
+    getCustomNodesI18n:async () => Object.fromEntries(await Promise.all(["en","zh"].map(async language =>
+        [language,await (await fetch("../locales/" + language + "/main.json")).json()]))),
+};
+let clipboardText = "", denied = false, readQueue = null;
+Object.defineProperty(navigator, "clipboard", { configurable:true, value:{
+    readText:async () => {
+        if (denied) throw new Error("Clipboard access denied");
+        if (readQueue) { const value = readQueue; readQueue = null; return value; }
+        return clipboardText;
+    },
+    writeText:async text => { if (denied) throw new Error("Clipboard access denied"); clipboardText = text; },
+}});
+const nodes = [], undo = [];
+let historySteps = 0;
+const graph = {
+    incrementVersion(){}, change(){},
+    beforeChange(node){ undo.push({node,value:node.widget.getValue()}); },
+    afterChange(){historySteps++;},
+};
+globalThis.fixtureApp = {
+    ui:{settings}, graph, canvas:{setDirty(){},emitBeforeChange(){},emitAfterChange(){}},
+    extensionManager:{toast:{add(){}}},
+    registerExtension(extension){globalThis.fixtureExtension=extension;},
+};
+await import("../web/prompt_toggle_grid.js?v=20260926-variable-value-autocomplete-v1");
+const helpers = await import("../web/prompt_variables.js?v=20260926-variable-value-autocomplete-v1");
+const state = index => JSON.parse(nodes[index].widget.getValue());
+function setState(index, variables) {
+    nodes[index].widget.setValue(JSON.stringify({version:1,columns:2,variables,items:[
+        {id:"card-"+index,title:"Workflow "+(index+1),enabled:true,prompt:"{color}, fine fabric"},
+    ]}));
+}
+for(let index=0;index<2;index++) {
+    const container=document.createElement("section");container.className="node";document.querySelector("#nodes").append(container);
+    const node={id:index+1,properties:{},graph,size:[600,340],widgets:[],setSize(size){this.size=size;},
+        addDOMWidget(name,type,root,options){container.append(root);const widget={name,type,...options};
+            Object.defineProperty(widget,"value",{get:options.getValue,set:options.setValue});this.widgets.push(widget);this.widget=widget;return widget;}};
+    const {widget}=fixtureExtension.getCustomWidgets().PROMPT_WEAVER_PROMPT_GRID(node,"config",{});
+    nodes.push({node,widget,container});
+}
+setState(0,[{id:"color-1",name:"color",value:"red"},{id:"size-1",name:"size",value:""}]);
+setState(1,[{id:"color-2",name:"color",value:"blue"},{id:"keep",name:"other",value:"keep"}]);
+const tick = async () => { for(let i=0;i<8;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
+const button = text => [...document.querySelectorAll(".cpw-variable-manager button")].find(el=>el.textContent===text);
+const open = async index => { nodes[index].container.querySelector('[aria-label="Variable Manager"]').click();await tick(); };
+const close = () => document.querySelector(".cpw-variable-manager__close")?.click();
+const input = (index,field) => document.querySelectorAll(".cpw-variable-manager__row")[index].querySelector('[data-field="'+field+'"]');
+const edit = async (control,value,key="Enter",ctrl=false) => {
+    control.focus();control.value=value;control.dispatchEvent(new Event("input",{bubbles:true}));
+    control.dispatchEvent(new KeyboardEvent("keydown",{key,ctrlKey:ctrl,bubbles:true}));await tick();
+};
+const assert = (value,message) => { if(!value) throw new Error(message); };
+const suggestions = async () => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+        const options = document.querySelectorAll('.cpw-tag-autocomplete:not([hidden]) [role="option"]');
+        if (options.length) return options;
+        await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    throw new Error("No autocomplete suggestions arrived");
+};
+const typeValue = (control, value, cursor = value.length) => {
+    control.focus(); control.value = value; control.setSelectionRange(cursor, cursor);
+    control.dispatchEvent(new Event("input", { bubbles:true }));
+};
+const result=document.querySelector("#results");
+const runCase=async (name,fn)=>{ await fn();result.textContent+="PASS "+name+"\n"; };
+document.querySelector("#language").onclick=()=>{locale=locale==="en"?"zh":"en";settings.dispatchEvent(new CustomEvent("Comfy.Locale.change",{detail:{value:locale}}));};
+document.querySelector("#theme").onclick=()=>document.body.classList.toggle("light");
+document.querySelector("#narrow").onclick=()=>{const d=document.querySelector(".cpw-variable-manager");if(d)d.style.width=d.offsetWidth>500?"400px":"760px";};
+document.querySelector("#plain").onclick=()=>{clipboardText="plain text";window.dispatchEvent(new Event("focus"));};
+document.querySelector("#denied").onclick=()=>{denied=!denied;window.dispatchEvent(new Event("focus"));};
+document.querySelector("#run").onclick=async ()=>{
+    document.querySelector("#run").disabled=true;result.textContent="";
+    try {
+        close();locale="en";settings.dispatchEvent(new CustomEvent("Comfy.Locale.change",{detail:{value:locale}}));
+        clipboardText="plain text";denied=false;
+        setState(0,[{id:"color-1",name:"color",value:"red"},{id:"size-1",name:"size",value:""}]);
+        setState(1,[{id:"color-2",name:"color",value:"blue"},{id:"keep",name:"other",value:"keep"}]);
+        await open(0);
+        await runCase("single-value layout and invalid clipboard disabled",async()=>{
+            assert(document.querySelectorAll(".cpw-variable-manager textarea").length===2,"must have one value per row");
+            assert(button("Paste Variables").disabled,"plain clipboard must disable paste");
+        });
+        await runCase("copy all variables in order, including empty values",async()=>{
+            button("Copy Variables").click();await tick();
+            assert(helpers.parseVariableClipboard(clipboardText)[1].value==="","empty copied");
+            assert(!button("Paste Variables").disabled,"valid payload enables paste");
+        });
+        close();await open(1);
+        await runCase("paste merges into another workflow as exactly one history step",async()=>{
+            const before=historySteps;button("Paste Variables").click();await tick();
+            assert(historySteps===before+1,"paste must be one undo step");
+            assert(state(1).variables.length===3&&state(1).variables[0].id==="color-2","merge IDs/order");
+            assert(state(1).variables[0].value==="red"&&state(1).variables[1].value==="keep","merge values");
+            assert(state(0).variables[0].value==="red","source unchanged");
+            assert(state(1).items[0].prompt==="{color}, fine fabric","references unchanged");
+        });
+        await runCase("undo restores the complete destination list",async()=>{
+            const saved=undo.pop();saved.node.widget.setValue(saved.value);await tick();
+            assert(state(1).variables.length===2&&state(1).variables[0].value==="blue","undo list");
+        });
+        await open(1);
+        await runCase("stale enabled button revalidates changed clipboard",async()=>{
+            const before=JSON.stringify(state(1));clipboardText="now invalid";button("Paste Variables").click();await tick();
+            assert(before===JSON.stringify(state(1))&&button("Paste Variables").disabled,"no invalid paste mutation");
+        });
+        await runCase("clipboard denied stays disabled and preserves node",async()=>{
+            denied=true;window.dispatchEvent(new Event("focus"));await tick();
+            assert(button("Paste Variables").disabled,"denied paste");
+            denied=false;clipboardText=helpers.serializeVariableClipboard(state(0).variables);
+            window.dispatchEvent(new Event("focus"));await tick();
+            assert(!button("Paste Variables").disabled,"permission recovery");
+        });
+        await runCase("edit and clear one local value without changing source workflow",async()=>{
+            await edit(input(0,"value"),"green","Enter",true);
+            assert(state(1).variables[0].value==="green"&&state(0).variables[0].value==="red","local edit only");
+            document.querySelector(".cpw-variable-manager__clear-value").click();await tick();
+            assert(state(1).variables[0].value==="","empty auto-save");
+        });
+        await runCase("rename updates local references only and rejects duplicate names",async()=>{
+            await edit(input(0,"name"),"shade");
+            assert(state(1).items[0].prompt==="{shade}, fine fabric","rename references");
+            assert(state(0).items[0].prompt==="{color}, fine fabric","other workflow untouched");
+            await edit(input(0,"name"),"other");
+            assert(state(1).variables[0].name==="shade","duplicate rejected");
+            await edit(input(0,"name"),"shade","Escape");
+        });
+        await runCase("new editable row, Ctrl+Enter and keyboard sorting",async()=>{
+            button("New Variable").click();await tick();
+            let row=document.querySelector(".cpw-variable-manager__row--draft");
+            await edit(row.querySelector("input"),"extra");
+            await edit(row.querySelector("textarea"),"new","Enter",true);
+            assert(state(1).variables.at(-1).name==="extra","created");
+            const handle=document.querySelectorAll(".cpw-variable-manager__handle")[2];
+            handle.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowUp",bubbles:true}));await tick();
+            assert(state(1).variables[1].name==="extra","keyboard order saved");
+        });
+        await runCase("copy commits pending field draft and preserves manager focus",async()=>{
+            const value=input(0,"value");value.focus();value.value="draft-value";value.dispatchEvent(new Event("input",{bubbles:true}));
+            button("Copy Variables").click();await tick();
+            assert(helpers.parseVariableClipboard(clipboardText)[0].value==="draft-value","draft included");
+        });
+        await runCase("locale updates labels while keeping unsaved value and cursor",async()=>{
+            const value=input(0,"value");value.focus();value.value="unsaved";value.dispatchEvent(new Event("input",{bubbles:true}));value.setSelectionRange(2,3);
+            document.querySelector("#language").click();await tick();
+            assert(document.querySelector(".cpw-variable-manager textarea").value==="unsaved","draft preserved");
+            assert(document.activeElement.selectionStart===2,"focus retained");
+            assert(button("复制变量")&&button("粘贴变量"),"translated actions");
+            document.querySelector("#language").click();await tick();
+            await edit(input(0,"value"),"","Escape");
+        });
+        await runCase("delete referenced local variable requires second click",async()=>{
+            document.querySelector(".cpw-variable-manager__remove").click();await tick();
+            assert(state(1).variables.length===3,"first click confirmation");
+            document.querySelector(".cpw-variable-manager__remove").click();await tick();
+            assert(state(1).variables.length===2&&state(1).items[0].prompt.includes("{shade}"),"delete keeps references");
+        });
+        await runCase("closing preserves committed workflow variables; no shared requests",async()=>{
+            close();await open(1);
+            assert(document.querySelectorAll(".cpw-variable-manager textarea").length===2,"reopen local values");
+            assert(!performance.getEntriesByType("resource").some(e=>e.name.includes("/variable-library")),"no library requests");
+        });
+        await runCase("all header action buttons are exactly 31px high",async()=>{
+            const actions=[...document.querySelectorAll('.cpw-variable-manager__list-header button')];
+            assert(actions.length===3&&actions.every(el=>el.getBoundingClientRect().height===31),"equal heights");
+        });
+        await runCase("existing value autocomplete uses Danbooru and saves through normal history",async()=>{
+            const previous=state(1).variables[0].value;
+            const value=input(0,"value");typeValue(value,"re");
+            const options=await suggestions();
+            assert(options[0].textContent.includes("红色连裤袜"),"Chinese translation included");
+            assert(options[0].textContent.includes("Danbooru"),"shared provider source included");
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}));
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));await tick();
+            assert(value.value==="red pantyhose"&&state(1).variables[0].value===previous,"selection changes draft only");
+            const before=historySteps;
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",ctrlKey:true,bubbles:true}));await tick();
+            assert(state(1).variables[0].value==="red pantyhose"&&historySteps===before+1,"normal auto-save history");
+        });
+        await runCase("completion in the middle keeps following prompt words",async()=>{
+            const value=input(0,"value");typeValue(value,"base, bl, tail",8);await suggestions();
+            document.querySelector('.cpw-tag-autocomplete:not([hidden]) [role="option"]').click();await tick();
+            assert(value.value==="base, black pantyhose, tail","caret completion preserved other words");
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));await tick();
+        });
+        await runCase("IME completion waits for composition end and Escape dismisses suggestions first",async()=>{
+            const value=input(0,"value");value.focus();
+            value.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true}));
+            typeValue(value,"黑色");
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",isComposing:true,bubbles:true}));await tick();
+            assert(!document.querySelector('.cpw-tag-autocomplete:not([hidden])'),"IME input not queried early");
+            value.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true}));await suggestions();
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));await tick();
+            assert(value.value==="黑色"&&document.querySelector('.cpw-variable-manager'),"first Escape only closes autocomplete");
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));await tick();
+            assert(input(0,"value").value==="red pantyhose","second Escape cancels field draft");
+        });
+        await runCase("new-row autocomplete selects without prematurely creating the variable",async()=>{
+            button("New Variable").click();await tick();
+            const row=document.querySelector('.cpw-variable-manager__row--draft');
+            await edit(row.querySelector('input'),"clothing");
+            const value=row.querySelector('textarea');typeValue(value,"bl");await suggestions();
+            document.querySelector('.cpw-tag-autocomplete:not([hidden]) [role="option"]').click();await tick();
+            assert(value.value==="black pantyhose"&&state(1).variables.length===2,"new-row draft only");
+            value.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",ctrlKey:true,bubbles:true}));await tick();
+            assert(state(1).variables.at(-1).name==="clothing"&&state(1).variables.at(-1).value==="black pantyhose","new-row saved");
+        });
+        await runCase("manager close destroys all autocomplete popups",async()=>{
+            close();await tick();
+            assert(document.querySelectorAll('.cpw-tag-autocomplete').length===nodes.length,"manager popups removed; only card controllers remain");
+            await open(1);
+        });
+        result.textContent+="ALL 19 CASES PASSED\n";
+    } catch(error) {result.textContent+="FAIL "+error.stack;console.error(error);}
+    finally{document.querySelector("#run").disabled=false;}
+};
+</script>

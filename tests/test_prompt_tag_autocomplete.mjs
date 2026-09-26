@@ -709,7 +709,7 @@ test("provider toggles let either source work independently", async () => {
     );
 });
 
-test("prompt grid source wires autocomplete into all three requested input surfaces", async () => {
+test("prompt grid source wires autocomplete into cards, editor modes and variable values", async () => {
     const source = await readFile(new URL("../web/prompt_toggle_grid.js", import.meta.url), "utf8");
     const settingsSource = await readFile(
         new URL("../web/prompt_translation_settings.js", import.meta.url),
@@ -718,6 +718,7 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,/);
     assert.match(source, /new PromptAutocompleteController\(\s*addInput,/);
     assert.match(source, /new PromptAutocompleteController\(\s*freeTextArea,/);
+    assert.match(source, /new PromptAutocompleteController\(input, promptTagAutocompleteProvider/);
     assert.match(settingsSource, /settingId:\s*DANBOORU_SETTING_ID/);
     assert.match(settingsSource, /settingId:\s*PROMPT_ASSISTANT_SETTING_ID/);
     assert.match(settingsSource, /id:\s*AUTOCOMPLETE_SOURCE_ORDER_SETTING_ID/);
@@ -737,10 +738,10 @@ test("prompt grid source wires autocomplete into all three requested input surfa
     assert.match(source, /sourceOrder:\s*readAutocompleteSourceOrder/);
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
-    assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 3);
-    assert.equal((source.match(/getLocale: getPromptWeaverLocale/g) || []).length, 3);
+    assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 4);
+    assert.equal((source.match(/getLocale: getPromptWeaverLocale/g) || []).length, 4);
     assert.doesNotMatch(source, /getLocale: \(\) => "en"/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260926-variable-manager-v6/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20260926-variable-value-autocomplete-v1/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);

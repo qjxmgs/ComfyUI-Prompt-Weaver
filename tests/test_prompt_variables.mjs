@@ -10,6 +10,7 @@ const {
     replaceVariableReferences,
     renameVariableReferences,
     variableReferenceCount,
+    variableReferences,
 } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 
 test("variables validate NFC Unicode names, uniqueness and optional empty values", () => {
@@ -45,6 +46,121 @@ test("variable completion replaces a partial reference at the caret without dupl
     assert.equal(variableSuggestionContext("{颜", 2)?.query, "颜");
 });
 
+test("replacing a selected word with a variable preserves the following prompt word", () => {
+    const original = 'rabbit girl, pantyhose, black pantyhose, fine fabric emphasis, text "Rio" on the wall';
+    const start = original.indexOf("black");
+    for (const selected of ["black", "black "]) {
+        // Native typing replaces only the selection, including any selected trailing space.
+        const typed = original.slice(0, start) + "{" + original.slice(start + selected.length);
+        const context = variableSuggestionContext(typed, start + 1, start + 1, start);
+        assert.deepEqual(completeVariableReference(typed, context, "color"), {
+            value: original.replace("black", "{color}"),
+            cursor: start + "{color}".length + (selected.endsWith(" ") ? 1 : 0),
+        });
+    }
+});
+
+test("unclosed variable completion does not absorb ordinary text after the caret", () => {
+    const text = "before {copantyhose, fine fabric emphasis";
+    const cursor = "before {co".length;
+    const context = variableSuggestionContext(text, cursor);
+    assert.equal(context.end, cursor);
+    assert.deepEqual(completeVariableReference(text, context, "color"), {
+        value: "before {color} pantyhose, fine fabric emphasis",
+        cursor: "before {color} ".length,
+    });
+    const fresh = "before {pantyhose} after";
+    const start = fresh.indexOf("{");
+    assert.equal(variableSuggestionContext(fresh, start + 1, start + 1, start).end, start + 1);
+    assert.equal(completeVariableReference(fresh,
+        variableSuggestionContext(fresh, start + 1, start + 1, start), "color").value,
+    "before {color} pantyhose} after");
+});
+
+test("completion adds only a needed separator and still reuses an existing closing brace", () => {
+    for (const [suffix, expected] of [
+        ["pantyhose", " pantyhose"], ["中文", " 中文"], ["_word", " _word"],
+        [" pantyhose", " pantyhose"], ["\tpantyhose", "\tpantyhose"],
+        [", fine fabric", ", fine fabric"], [".", "."], ["", ""],
+    ]) {
+        const text = "{" + suffix;
+        assert.equal(completeVariableReference(text, variableSuggestionContext(text, 1), "color").value,
+            "{color}" + expected);
+    }
+    const text = "{co}pantyhose";
+    assert.deepEqual(completeVariableReference(text, variableSuggestionContext(text, 3), "color"), {
+        value: "{color} pantyhose", cursor: "{color} ".length,
+    });
+});
+
+test("variable controller respects native selection replacement in both editor input types", async () => {
+    const { VariableSuggestionController } = await import("../web/prompt_variable_ui.js");
+    const previousDocument = globalThis.document;
+    const previousWindow = globalThis.window;
+    class InputElement extends EventTarget {
+        constructor(tag = "div") {
+            super();
+            this.tagName = tag.toUpperCase();
+            this.style = {};
+            this.classList = { toggle() {} };
+            this.isConnected = false;
+        }
+        append() {}
+        replaceChildren() {}
+        setAttribute() {}
+        remove() {}
+        focus() { globalThis.document.activeElement = this; }
+    }
+    globalThis.document = { createElement: (tag) => new InputElement(tag), activeElement: null };
+    globalThis.window = new EventTarget();
+    try {
+        for (const tag of ["input", "textarea"]) {
+            for (const selected of ["black", "black "]) {
+                const input = new InputElement(tag);
+                input.value = "black pantyhose, fine fabric emphasis";
+                input.selectionStart = 0;
+                input.selectionEnd = selected.length;
+                input.focus();
+                let selections = 0;
+                const controller = new VariableSuggestionController(input, {
+                    popupParent: new InputElement(),
+                    getVariables: () => [{ name: "color", value: "red" }],
+                    onSelect(result) {
+                        input.value = result.value;
+                        input.selectionStart = input.selectionEnd = result.cursor;
+                        selections++;
+                    },
+                });
+                try {
+                    const beforeInput = new Event("beforeinput");
+                    Object.defineProperty(beforeInput, "data", { value: "{" });
+                    input.dispatchEvent(beforeInput);
+                    input.value = "{" + input.value.slice(input.selectionEnd);
+                    input.selectionStart = input.selectionEnd = 1;
+                    input.dispatchEvent(new Event("input"));
+                    // Continue filtering without absorbing the unselected word to the right.
+                    input.value = "{co" + input.value.slice(1);
+                    input.selectionStart = input.selectionEnd = 3;
+                    input.dispatchEvent(new Event("input"));
+                    const enter = new Event("keydown", { cancelable: true });
+                    Object.defineProperty(enter, "key", { value: "Enter" });
+                    input.dispatchEvent(enter);
+                    assert.equal(input.value, "{color} pantyhose, fine fabric emphasis");
+                    assert.equal(selections, 1);
+                    assert.equal(enter.defaultPrevented, true);
+                    assert.equal(controller.popup.hidden, true);
+                    assert.equal(controller.insertedReferenceStart, null);
+                } finally { controller.destroy(); }
+            }
+        }
+    } finally {
+        if (previousDocument === undefined) delete globalThis.document;
+        else globalThis.document = previousDocument;
+        if (previousWindow === undefined) delete globalThis.window;
+        else globalThis.window = previousWindow;
+    }
+});
+
 test("renaming updates only unescaped references in cards and retained tokens", () => {
     const items = [{
         id: "card", prompt: String.raw`{color}, \{color}, {other}`,
@@ -70,7 +186,12 @@ test("grid integrates variable storage, history, editor completion and locale re
     const zh = JSON.parse(await readFile(new URL("../locales/zh/main.json", import.meta.url), "utf8"));
     assert.match(grid, /manageFavoritesButton,\s*manageVariablesButton,/);
     assert.match(grid, /variables: state\?\.variables \?\? \[\]/);
-    assert.match(grid, /state\.items = renameVariableReferences\(/);
+    assert.match(grid, /mergeVariableClipboard\(state\.variables, payload, createId\)/);
+    assert.match(grid, /commit\(renderAfter, false\)/);
+    assert.match(grid, /activeVariableManager \|\| activePromptEditor/);
+    assert.doesNotMatch(grid, /getPromptVariableLibraryService|variableLibraryService|ensureVariableSnapshots/);
+    assert.match(grid, /createValueAutocomplete\(input, \{ popupParent \}\)/);
+    assert.match(grid, /new PromptAutocompleteController\(input, promptTagAutocompleteProvider/);
     assert.match(grid, /graph\?\.beforeChange\?\.\(node\)/);
     assert.match(grid, /graph\?\.afterChange\?\.\(node\)/);
     assert.match(grid, /new VariableSuggestionController\(freeTextArea/);
@@ -89,8 +210,11 @@ test("variable manager matches the compact favorite-window chrome without changi
     const en = JSON.parse(await readFile(new URL("../locales/en/main.json", import.meta.url), "utf8")).promptWeaver.ui;
     const zh = JSON.parse(await readFile(new URL("../locales/zh/main.json", import.meta.url), "utf8")).promptWeaver.ui;
     assert.match(ui, /header\.append\(heading, closeButton\)/);
+    assert.match(ui, /input\.addEventListener\("beforeinput", this\.handleBeforeInput, true\)/);
+    assert.match(ui, /this\.input\.removeEventListener\("beforeinput", this\.handleBeforeInput, true\)/);
     assert.match(ui, /dialog\.append\(header, main\)/);
-    assert.match(ui, /listHeader\.append\(listTitle, message, addButton\)/);
+    assert.match(ui, /listHeader\.append\(listTitle, message, clipboardActions\)/);
+    assert.doesNotMatch(ui, /importButton|importPanel|onImport|data-locale-aria-key/);
     assert.match(ui, /listSection\.append\(listHeader, columnHeader, list\)/);
     assert.match(ui, /setMessage\("Variable added\."[^\n]*dismissAfterMs: 3000/);
     assert.match(ui, /clearTimeout\(messageTimer\);[\s\S]*messageTimer = setTimeout\(\(\) => setMessage\(""\), dismissAfterMs\)/);
@@ -98,15 +222,17 @@ test("variable manager matches the compact favorite-window chrome without changi
     assert.match(ui, /main\.append\(listSection\)/);
     assert.doesNotMatch(ui, /addPanel|addName|addValue/);
     assert.match(ui, /const row = element\("div", "cpw-variable-manager__row cpw-variable-manager__row--draft"\)/);
-    assert.match(ui, /const id = onAdd\(draft\.name, draft\.value\)/);
+    assert.match(ui, /id = await onAdd\(draft\.name, draft\.value, draft\.revision\)/);
     assert.match(ui, /else if \(draft\) cancelDraft\(\)/);
-    assert.match(ui, /onReorder\(draggedId, variable\.id, after\)/);
+    assert.match(ui, /onReorder\(sourceId, variable\.id, after, revision\)/);
     assert.match(ui, /event\.key === "ArrowUp"/);
     assert.match(ui, /prompt-weaver-variable-manager-geometry-v2/);
     assert.match(ui, /prompt-weaver-variable-manager-geometry-v1/);
     assert.match(css, /\.cpw-variable-manager__main\s*\{[^}]*overflow-y:\s*auto/s);
     assert.match(css, /\.cpw-variable-manager__list\s*\{[^}]*overflow:\s*auto/s);
-    assert.match(css, /@container \(max-width: 720px\)/);
+    assert.match(css, /@container \(max-width: 500px\)/);
+    assert.match(css, /grid-template-columns: 24px minmax\(100px, 160px\) minmax\(0, 1fr\) 36px/);
+    assert.doesNotMatch(ui, /snapshotStatus|snapshot-update|onUpdateSnapshot/);
     assert.match(css, /\.cpw-variable-manager__list-header\s*\{[^}]*justify-content:\s*space-between/s);
     assert.match(css, /\.cpw-variable-manager__message\s*\{[^}]*flex:\s*1 1 auto/s);
     assert.match(css, /\.cpw-variable-manager__message--success\s*\{[^}]*color:\s*color-mix\(in srgb, #45b978 65%, var\(--cpw-vm-text\)\)/s);
@@ -127,9 +253,10 @@ test("variable manager matches the compact favorite-window chrome without changi
     }
     assert.match(ui, /const valueCell = element\("div", "cpw-variable-manager__value-cell"\)/);
     assert.match(ui, /clearValue\.addEventListener\("click",/);
-    assert.match(ui, /onUpdate\(variable\.id, "value", ""\)/);
+    assert.match(ui, /await commitField\(variable, field\)/);
     assert.match(ui, /clearValue\.disabled = true;[\s\S]*value\.focus\(\)/);
-    assert.match(ui, /clearValue\.setAttribute\("aria-label", t\("Clear variable value"\)\)/);
+    assert.match(ui, /clearValue\.setAttribute\("aria-label", t\(key\)\)/);
+    assert.match(ui, /start: active\.selectionStart, end: active\.selectionEnd/);
     assert.match(css, /\.cpw-variable-manager__input\s*\{[^}]*resize:\s*none/s);
     assert.match(css, /\.cpw-variable-manager__value-cell\s*\{[^}]*border:\s*1px/);
     assert.match(css, /\.cpw-variable-manager__value-cell \.cpw-variable-manager__value\s*\{[^}]*border:\s*0/s);
@@ -141,4 +268,24 @@ test("variable manager matches the compact favorite-window chrome without changi
     assert.equal(en["Manage variables for this grid node. Add, edit, and drag to reorder."], undefined);
     assert.equal(zh["Drag the left handle to reorder. Changes are saved automatically."], undefined);
     assert.doesNotMatch(ui, /sortBy|createdAt|sortOrder/);
+    assert.match(ui, /attachValueAutocomplete\(input\)/);
+    assert.match(ui, /attachValueAutocomplete\(value\)/);
+    assert.match(ui, /for \(const controller of valueAutocompleteControllers\) controller\.destroy\(\)/);
+    assert.match(ui, /for \(const controller of valueAutocompleteControllers\) controller\.refreshLocale\(\)/);
+    assert.match(ui, /event\.defaultPrevented \|\| event\.isComposing/);
+    assert.match(css, /\.cpw-variable-manager__list-header \.cpw-variable-manager__button\s*\{[^}]*height:\s*31px;[^}]*min-height:\s*31px/s);
+    assert.doesNotMatch(css, /\.cpw-variable-manager__import/);
+    for (const key of ["Import from Current Node", "Import Variables", "Keep Shared Value", "Import with Another Name"]) {
+        assert.equal(en[key], undefined);
+        assert.equal(zh[key], undefined);
+    }
+});
+test("clipboard buttons validate fresh clipboard data, clean up listeners, and use one value", async () => {
+    const ui = await readFile(new URL("../web/prompt_variable_ui.js", import.meta.url), "utf8");
+    assert.match(ui, /clipboardActions.append\(copyButton, pasteButton, addButton\)/);
+    assert.match(ui, /parseVariableClipboard\(await navigator.clipboard.readText\(\)\)/);
+    assert.match(ui, /pasteButton.disabled = !clipboardPayload/);
+    assert.match(ui, /await onPaste\(payload\)/);
+    assert.match(ui, /clearInterval\(clipboardTimer\)/);
+    assert.doesNotMatch(ui, /getSnapshots|onSetSnapshotValue|copyValue|syncArrows|Shared Variable Value|Current Workflow Variable Value/);
 });

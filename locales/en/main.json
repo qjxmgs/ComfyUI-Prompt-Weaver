@@ -467,7 +467,6 @@
       "Actions": "Actions",
       "Enter variable name": "Enter variable name",
       "Enter variable value": "Enter variable value",
-      "Add Variable": "Add Variable",
       "Variable name": "Variable name",
       "Variable value": "Variable value",
       "Clear variable value": "Clear variable value",
@@ -475,10 +474,8 @@
       "Variable updated.": "Variable updated.",
       "Variable added.": "Variable added.",
       "Variable deleted.": "Variable deleted.",
-      "{count} cards reference this variable. Click Delete again to confirm.": "{count} cards reference this variable. Click Delete again to confirm.",
       "Delete variable": "Delete variable",
       "Drag to reorder variable; use arrow keys for keyboard sorting": "Drag to reorder variable; use arrow keys for keyboard sorting",
-      "Delete": "Delete",
       "Variables": "Variables",
       "No matching variables.": "No matching variables.",
       "Undefined variable": "Undefined variable",
@@ -486,7 +483,18 @@
       "Variable values must be strings of at most 10,000 characters.": "Variable values must be strings of at most 10,000 characters.",
       "variables must be an array of at most 100 entries": "variables must be an array of at most 100 entries",
       "Each variable needs a unique ID and an NFC name.": "Each variable needs a unique ID and an NFC name.",
-      "Variable names must be unique.": "Variable names must be unique."
+      "Variable names must be unique.": "Variable names must be unique.",
+      "Copy Variables": "Copy Variables",
+      "Paste Variables": "Paste Variables",
+      "Copy all variables to the clipboard": "Copy all variables to the clipboard",
+      "Paste variables from the clipboard": "Paste variables from the clipboard",
+      "Variables copied.": "Variables copied.",
+      "Variables pasted.": "Variables pasted.",
+      "The clipboard does not contain valid Prompt Weaver variables.": "The clipboard does not contain valid Prompt Weaver variables.",
+      "This variable is referenced by {count} cards. Click Delete again to confirm.": "This variable is referenced by {count} cards. Click Delete again to confirm.",
+      "This variable no longer exists. Reopen the variable manager.": "This variable no longer exists. Reopen the variable manager.",
+      "Close the card editor before editing variables.": "Close the card editor before editing variables.",
+      "The workflow variables changed. Review the latest values and retry.": "The workflow variables changed. Review the latest values and retry."
     }
   }
 }

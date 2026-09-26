@@ -716,12 +716,13 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .cpw-variable-manager__columns,
 .cpw-variable-manager__row {
     display: grid;
-    grid-template-columns: 30px minmax(0, 0.9fr) minmax(0, 1.2fr) 40px;
+    grid-template-columns: 24px minmax(100px, 160px) minmax(0, 1fr) 36px;
     align-items: center;
     gap: 8px;
 }
@@ -737,6 +738,18 @@
 }
 
 .cpw-variable-manager__column-action { text-align: center; }
+
+.cpw-variable-manager__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.cpw-variable-manager__field { min-width: 0; }
+.cpw-variable-manager__field-label { display: none; }
+
 
 .cpw-variable-manager__list-section {
     min-height: 120px;
@@ -780,6 +793,7 @@
 }
 
 .cpw-variable-manager__input::placeholder { color: var(--cpw-vm-muted); }
+.cpw-variable-manager__input:disabled { color: var(--cpw-vm-muted); opacity: 0.65; }
 
 .cpw-variable-manager__input:focus-visible {
     outline: 2px solid var(--cpw-vm-accent);
@@ -851,6 +865,14 @@
     color: #fff;
     background: #286ad9;
     font-weight: 600;
+    white-space: nowrap;
+}
+
+.cpw-variable-manager__list-header .cpw-variable-manager__button {
+    box-sizing: border-box;
+    height: 31px;
+    min-height: 31px;
+    padding: 0 10px;
     white-space: nowrap;
 }
 
@@ -1017,12 +1039,15 @@
     text-align: center;
 }
 
-@container (max-width: 720px) {
+@container (max-width: 500px) {
     .cpw-variable-manager__main { gap: 8px; padding: 10px; }
     .cpw-variable-manager__columns { display: none; }
-    .cpw-variable-manager__row { grid-template-columns: 30px minmax(0, 1fr) 40px; }
-    .cpw-variable-manager__row .cpw-variable-manager__value-cell { grid-column: 2 / 3; grid-row: 2; }
-    .cpw-variable-manager__row .cpw-variable-manager__remove { grid-column: 3; grid-row: 1; }
+    .cpw-variable-manager__row { grid-template-columns: 24px minmax(0, 1fr) 28px; gap: 6px; }
+    .cpw-variable-manager__row > input { grid-column: 2; grid-row: 1; }
+    .cpw-variable-manager__row .cpw-variable-manager__actions,
+    .cpw-variable-manager__row > .cpw-variable-manager__remove { grid-column: 3; grid-row: 1; }
+    .cpw-variable-manager__field--value { grid-column: 2 / 4; grid-row: 2; }
+    .cpw-variable-manager__field-label { display: block; margin-bottom: 4px; color: var(--cpw-vm-muted); font-size: 11px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

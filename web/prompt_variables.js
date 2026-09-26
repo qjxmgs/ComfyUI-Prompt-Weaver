@@ -47,7 +47,7 @@ function escapedAt(text, index) {
     return slashes % 2 === 1;
 }
 
-export function variableSuggestionContext(value, selectionStart, selectionEnd = selectionStart) {
+export function variableSuggestionContext(value, selectionStart, selectionEnd = selectionStart, insertedReferenceStart = null) {
     const text = typeof value === "string" ? value : "";
     const cursor = Math.max(0, Math.min(text.length, Number(selectionStart) || 0));
     if (selectionEnd !== selectionStart) return null;
@@ -56,8 +56,12 @@ export function variableSuggestionContext(value, selectionStart, selectionEnd = 
     if (!match || escapedAt(text, match.index)) return null;
     const prefix = match[1];
     if (prefix && !NAME_PATTERN.test(prefix)) return null;
-    let end = cursor + (/^[_\p{L}\p{N}]*/u.exec(text.slice(cursor))?.[0].length ?? 0);
-    if (text[end] === "}") end += 1;
+    // An unclosed reference must never consume the next ordinary prompt word.
+    // Only an existing, closed reference may include its name suffix after the caret.
+    const suffixEnd = cursor + (/^[_\p{L}\p{N}]*/u.exec(text.slice(cursor))?.[0].length ?? 0);
+    let end = cursor;
+    if (text[cursor] === "}") end += 1;
+    else if (insertedReferenceStart !== match.index && text[suffixEnd] === "}") end = suffixEnd + 1;
     return { start: match.index, end, query: prefix, cursor };
 }
 
@@ -65,9 +69,11 @@ export function completeVariableReference(value, context, name) {
     const text = typeof value === "string" ? value : "";
     const normalizedName = normalizeVariableName(name);
     if (!context || text[context.start] !== "{") return null;
-    const replacement = `{${normalizedName}}`;
+    const suffix = text.slice(context.end);
+    const separator = /^[_\p{L}\p{N}]/u.test(suffix) ? " " : "";
+    const replacement = `{${normalizedName}}${separator}`;
     return {
-        value: text.slice(0, context.start) + replacement + text.slice(context.end),
+        value: text.slice(0, context.start) + replacement + suffix,
         cursor: context.start + replacement.length,
     };
 }
@@ -101,4 +107,57 @@ export function variableReferenceCount(items, name) {
             replaceVariableReferences(token.text, name, "") !== token.text
         ))
     )).length;
+}
+
+export function variableReferences(items) {
+    const names = new Set();
+    for (const item of items) {
+        for (const text of [item.prompt ?? "", ...(item.prompt_tokens ?? []).map((token) => token.text)]) {
+            for (const match of String(text).matchAll(REFERENCE_PATTERN)) {
+                if (escapedAt(text, match.index)) continue;
+                try { names.add(normalizeVariableName(match[1])); } catch { /* Not a variable reference. */ }
+            }
+        }
+    }
+    return names;
+}
+
+// Clipboard payloads intentionally contain no workflow IDs or shared-library links.
+export const VARIABLE_CLIPBOARD_FORMAT = "prompt-weaver-variables";
+export const MAX_VARIABLE_CLIPBOARD_LENGTH = 8 * 1024 * 1024;
+
+export function serializeVariableClipboard(variables) {
+    const entries = normalizeVariables(variables).map(({ name, value }) => ({ name, value }));
+    return JSON.stringify({ format: VARIABLE_CLIPBOARD_FORMAT, version: 1, variables: entries });
+}
+
+export function parseVariableClipboard(text) {
+    if (typeof text !== "string" || text.length > MAX_VARIABLE_CLIPBOARD_LENGTH) {
+        throw new Error("The clipboard does not contain valid Prompt Weaver variables.");
+    }
+    let payload;
+    try { payload = JSON.parse(text); } catch {
+        throw new Error("The clipboard does not contain valid Prompt Weaver variables.");
+    }
+    if (!payload || payload.format !== VARIABLE_CLIPBOARD_FORMAT || payload.version !== 1
+        || !Array.isArray(payload.variables) || !payload.variables.length || payload.variables.length > MAX_VARIABLES) {
+        throw new Error("The clipboard does not contain valid Prompt Weaver variables.");
+    }
+    const variables = normalizeVariables(payload.variables.map((entry, index) => ({
+        id: String(index), name: entry?.name, value: entry?.value,
+    })));
+    return variables.map(({ name, value }) => ({ name, value }));
+}
+
+export function mergeVariableClipboard(current, payload, createId) {
+    const entries = parseVariableClipboard(JSON.stringify({
+        format: VARIABLE_CLIPBOARD_FORMAT, version: 1, variables: payload,
+    }));
+    const result = normalizeVariables(current);
+    for (const entry of entries) {
+        const index = result.findIndex((v) => v.name === entry.name);
+        if (index < 0) result.push({ id: createId(), ...entry });
+        else result[index] = { ...result[index], value: entry.value };
+    }
+    return normalizeVariables(result);
 }

@@ -11,3 +11,4 @@ node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+deploy_to_comfyui.py

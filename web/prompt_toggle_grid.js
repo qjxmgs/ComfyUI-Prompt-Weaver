@@ -81,14 +81,17 @@ import {
 } from "./prompt_tag_autocomplete.js?v=20260923-sqlite-filter-v1";
 import {
     normalizeVariables,
+    variableSuggestionContext,
+    normalizeVariableName,
+    validateVariableValue,
     renameVariableReferences,
     variableReferenceCount,
-    variableSuggestionContext,
-} from "./prompt_variables.js?v=20260925-variables-v1";
+    mergeVariableClipboard,
+} from "./prompt_variables.js?v=20260926-variable-value-autocomplete-v1";
 import {
     openPromptVariableManager,
     VariableSuggestionController,
-} from "./prompt_variable_ui.js?v=20260926-variable-manager-v6";
+} from "./prompt_variable_ui.js?v=20260926-variable-value-autocomplete-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -729,7 +732,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260926-variable-manager-v6", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260926-variable-value-autocomplete-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -929,6 +932,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     promptCardLibraryService.refresh().catch((error) => {
         console.warn("[Prompt Weaver] Could not load favorite cards", error);
     });
+    let variableRevision = 0;
 
     function syncMasterToggle() {
         const items = state?.items ?? [];
@@ -1016,6 +1020,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function commit(renderAfter = false, captureHistory = true) {
         if (!state || disposed) return;
+        variableRevision += 1;
         if (!archiveAssociationInitialized) editedBeforeArchiveInitialization = true;
         const previousValue = serializedValue;
         serializedValue = JSON.stringify(state);
@@ -1024,10 +1029,11 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (renderAfter) render();
         notifyWidgetChanged(node, widget, inputName, serializedValue, previousValue, captureHistory);
         reconcileArchiveSelection();
+        activeVariableManager?.refresh?.();
     }
 
     function closeVariableManager() {
-        activeVariableManager?.close();
+        activeVariableManager?.close({ force: true });
         activeVariableManager = null;
         manageVariablesButton.setAttribute("aria-expanded", "false");
     }
@@ -1046,7 +1052,16 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function openVariableManager() {
-        if (!state || activeVariableManager) return;
+        if (!state || disposed || activeVariableManager || activePromptEditor) return;
+        const managerState = state;
+        const assertEditable = (revision) => {
+            if (disposed || state !== managerState || activePromptEditor) {
+                throw new Error("Close the card editor before editing variables.");
+            }
+            if (revision !== undefined && revision !== variableRevision) {
+                throw new Error("The workflow variables changed. Review the latest values and retry.");
+            }
+        };
         closePromptCardLibraryMenu(false);
         closeItemContextMenu();
         for (const controller of cardAutocompleteControllers) {
@@ -1056,46 +1071,61 @@ function createPromptGridWidget(node, inputName, inputData) {
         activeVariableManager = openPromptVariableManager({
             opener: manageVariablesButton,
             getVariables: () => state?.variables ?? [],
-            referenceCount: (name) => variableReferenceCount(state?.items ?? [], name),
-            onAdd(name, value) {
-                const id = createId();
-                const updated = normalizeVariables([
-                    ...state.variables,
-                    { id, name: name.normalize("NFC"), value },
-                ]);
-                commitVariableMutation(() => { state.variables = updated; });
-                return id;
-            },
-            onUpdate(id, field, value) {
-                const current = state.variables.find((entry) => entry.id === id);
-                if (!current) return;
-                const next = field === "name" ? value.normalize("NFC") : value;
-                if (next === current[field]) return;
-                const updated = normalizeVariables(state.variables.map((entry) => (
-                    entry.id === id ? { ...entry, [field]: next } : entry
-                )));
-                commitVariableMutation(() => {
-                    if (field === "name") {
-                        state.items = renameVariableReferences(state.items, current.name, next);
-                    }
-                    state.variables = updated;
-                }, field === "name");
-            },
-            onDelete(id) {
-                if (!state.variables.some((entry) => entry.id === id)) return;
-                commitVariableMutation(() => {
-                    state.variables = state.variables.filter((entry) => entry.id !== id);
+            getRevision: () => variableRevision,
+            getReferenceCount: (name) => variableReferenceCount(state.items, name),
+            createValueAutocomplete(input, { popupParent }) {
+                return new PromptAutocompleteController(input, promptTagAutocompleteProvider, {
+                    popupParent,
+                    getLocale: getPromptWeaverLocale,
+                    getLimit: readAutocompleteLimit,
+                    getAnchorRect: () => textareaCaretClientRect(input),
+                    getExistingPrompt: () => input.value,
+                    popupHorizontalInset: 10,
+                    suppressInitialFocusSearch: true,
                 });
             },
-            onReorder(sourceId, targetId, after) {
-                const source = state.variables.find((entry) => entry.id === sourceId);
-                if (!source || sourceId === targetId) return;
-                const reordered = state.variables.filter((entry) => entry.id !== sourceId);
-                const targetIndex = reordered.findIndex((entry) => entry.id === targetId);
-                if (targetIndex < 0) return;
-                reordered.splice(targetIndex + (after ? 1 : 0), 0, source);
-                if (reordered.every((entry, index) => entry.id === state.variables[index].id)) return;
-                commitVariableMutation(() => { state.variables = reordered; });
+            onAdd(name, value, revision) {
+                assertEditable(revision);
+                const id = createId();
+                const variables = normalizeVariables([...state.variables,
+                    { id, name: normalizeVariableName(name), value: validateVariableValue(value) }]);
+                commitVariableMutation(() => { state.variables = variables; }, true);
+                return id;
+            },
+            onUpdate(id, field, value, revision) {
+                assertEditable(revision);
+                const current = state.variables.find((v) => v.id === id);
+                if (!current) throw new Error("This variable no longer exists. Reopen the variable manager.");
+                const nextValue = field === "name" ? normalizeVariableName(value) : validateVariableValue(value);
+                const variables = normalizeVariables(state.variables.map((v) => v.id === id ? { ...v, [field]: nextValue } : v));
+                if (current[field] === nextValue) return;
+                commitVariableMutation(() => {
+                    state.variables = variables;
+                    if (field === "name") state.items = renameVariableReferences(state.items, current.name, nextValue);
+                }, true);
+            },
+            onDelete(id, revision) {
+                assertEditable(revision);
+                commitVariableMutation(() => {
+                    state.variables = state.variables.filter((v) => v.id !== id);
+                }, true);
+            },
+            onReorder(sourceId, targetId, after, revision) {
+                assertEditable(revision);
+                const entries = [...state.variables];
+                const index = entries.findIndex((v) => v.id === sourceId);
+                if (index < 0 || sourceId === targetId) return;
+                const [source] = entries.splice(index, 1);
+                const target = entries.findIndex((v) => v.id === targetId);
+                if (target < 0) return;
+                entries.splice(target + (after ? 1 : 0), 0, source);
+                commitVariableMutation(() => { state.variables = entries; }, true);
+            },
+            onPaste(payload) {
+                assertEditable();
+                const variables = mergeVariableClipboard(state.variables, payload, createId);
+                if (JSON.stringify(variables) === JSON.stringify(state.variables)) return;
+                commitVariableMutation(() => { state.variables = variables; }, true);
             },
             onClose() {
                 activeVariableManager = null;
@@ -2791,6 +2821,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         retainUnselected,
         promptTokens,
         favoriteId,
+        variables,
     }) {
         if (!state) return false;
         const index = state.items.findIndex((item) => item.id === id);
@@ -2802,12 +2833,14 @@ function createPromptGridWidget(node, inputName, inputData) {
             : null;
         const currentFavoriteId = normalizePromptCardFavoriteId(currentItem.favorite_id);
         const nextFavoriteId = normalizePromptCardFavoriteId(favoriteId);
+        const nextVariables = normalizeVariables(variables ?? state.variables);
         if (
             currentItem.title === title
             && currentItem.prompt === prompt
             && currentRetainUnselected === retainUnselected
             && JSON.stringify(currentPromptTokens) === JSON.stringify(promptTokens)
             && currentFavoriteId === nextFavoriteId
+            && JSON.stringify(nextVariables) === JSON.stringify(state.variables)
         ) return false;
         const {
             retain_unselected: _discardedRetainUnselected,
@@ -2824,6 +2857,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             ...(nextFavoriteId ? { favorite_id: nextFavoriteId } : {}),
         };
         state.items[index] = nextItem;
+        state.variables = nextVariables;
         commit(false, true);
         return true;
     }
@@ -3511,6 +3545,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         let promptRequiresRebuild = false;
         let promptFontSize = readPromptEditorFontSize();
         let editorFavoriteId = normalizePromptCardFavoriteId(currentItem?.favorite_id);
+        let editorVariableDraft = normalizeVariables(state?.variables ?? []);
+        const editorVariableSuggestions = () => editorVariableDraft;
         let submitting = false;
         const editorHistory = new PromptEditorHistory();
         let pendingTextHistory = null;
@@ -4130,7 +4166,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 const token = tokens[Number(button.dataset.promptTokenIndex)] || "";
                 const translationLine = button.querySelector(".cpw-prompt-editor__token-translation");
                 const variableName = referencedVariable(token);
-                const variable = (state?.variables ?? []).find((entry) => entry.name === variableName);
+                const variable = editorVariableSuggestions().find((entry) => entry.name === variableName);
                 if (translationLine) translationLine.textContent = variableName
                     ? (variable?.value ?? t("Undefined variable")) : "—";
                 button.title = token;
@@ -4317,7 +4353,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 );
                 variableSuggestionController = new VariableSuggestionController(freeTextArea, {
                     popupParent: overlay,
-                    getVariables: () => state?.variables ?? [],
+                    getVariables: editorVariableSuggestions,
                     getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                     onOpen: () => {
                         editorAutocompleteController?.cancelPending();
@@ -4458,7 +4494,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 );
                 variableSuggestionController = new VariableSuggestionController(addInput, {
                     popupParent: overlay,
-                    getVariables: () => state?.variables ?? [],
+                    getVariables: editorVariableSuggestions,
                     getAnchorRect: () => textareaCaretClientRect(addInput),
                     onOpen: () => {
                         editorAutocompleteController?.cancelPending();
@@ -4610,6 +4646,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 selected: [...tokenState.selected],
                 activePrompt,
                 promptRequiresRebuild: Boolean(promptRequiresRebuild),
+                variables: editorVariableDraft.map((v) => ({ ...v })),
             };
         };
         const recordPromptContentChange = (previousSnapshot) => {
@@ -4660,6 +4697,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             editorAutocompleteController = null;
             tokens = [...snapshot.tokens];
             selected = [...snapshot.selected];
+            editorVariableDraft = normalizeVariables(snapshot.variables ?? state?.variables ?? []);
             freePromptText = snapshot.activePrompt;
             promptRequiresRebuild = Boolean(snapshot.promptRequiresRebuild)
                 || snapshot.activePrompt !== originalPrompt;
@@ -4895,6 +4933,10 @@ function createPromptGridWidget(node, inputName, inputData) {
             onClose: options.onClose,
             cancelPendingAdd: cleanupPromptEditor,
             refreshLocale: refreshPromptEditorLocale,
+            refreshVariables() {
+                variableSuggestionController?.refresh();
+                resolvePromptTokenTranslations();
+            },
         };
         window.addEventListener("resize", handlePromptEditorViewportResize);
         globalThis.addEventListener(
@@ -4986,6 +5028,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 }
                 return;
             }
+            let nextVariables;
+            try {
+                nextVariables = normalizeVariables(state.variables);
+            } catch (error) { setAddStatus(t(error.message)); return; }
             closePromptEditor();
             const gridTitleInput = promptInput
                 .closest(".cpw-prompt-grid__card")
@@ -4998,6 +5044,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 retainUnselected,
                 promptTokens,
                 favoriteId: editorFavoriteId,
+                variables: nextVariables,
             });
         });
         const handlePromptEditorKeyDown = (event) => {

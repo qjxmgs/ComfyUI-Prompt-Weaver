@@ -69,6 +69,8 @@ class PluginRegistrationTests(unittest.TestCase):
         ):
             spec.loader.exec_module(module)
 
+        self.assertFalse(any("/variable-library" in path for _, path, _ in routes.registered))
+        self.assertFalse(hasattr(module, "_variable_library_store"))
         node_class = module.NODE_CLASS_MAPPINGS["PromptWeaverPromptToggleGrid"]
         self.assertEqual(node_class.__name__, "PromptWeaverPromptToggleGrid")
         self.assertEqual(

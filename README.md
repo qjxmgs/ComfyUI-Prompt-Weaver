@@ -11,7 +11,7 @@ The plugin has no additional Python or JavaScript dependencies.
 
 ## Recent updates
 
-- Grid-scoped variables can be managed in the toolbar and inserted into card prompts with `{name}`; the node substitutes their values on each run.
+- Workflow-local variables support `{name}` completion and validated copy/paste between workflows.
 - Custom controls, dialogs, tooltips, and accessibility labels now follow ComfyUI's English or Simplified Chinese locale through the official locale resources; open interfaces update when the language changes.
 - The card editor has a **Clear** action for its current prompt draft, with undo/redo support. The card title and editor settings are preserved.
 - Danbooru autocomplete uses one selected SQLite dictionary, either a manually downloaded copy or an imported local copy. A configurable minimum post count (default **100**, minimum **10**) controls the active suggestion set and displays its size; dictionary updates remain manual.
@@ -174,15 +174,21 @@ Source choice is stored per ComfyUI user. Thresholds use `PromptWeaver.Autocompl
 
 All dictionary writes retain the local-only server-listen guard. Only threshold-qualified rows enter autocomplete memory (two candidate sets maximum); statistics reuse a frequency histogram, while translations query the full SQLite by primary key. Direct matches precede fuzzy scans, which run only if needed.
 
-### Grid variables
+### Workflow variables
 
-Use the **Variable Manager** icon beside Favorite Cards in a grid node's toolbar to define ordered name/value pairs for that node. **New Variable** adds an editable row to the list; enter a valid name, then leave the row or press Ctrl+Enter in its value field to save. Escape cancels the new row.
+Use the **Variable Manager** icon beside Favorite Cards to manage variables saved in the current grid node's `config.variables`. Each variable has one value; no shared library is loaded or written. Other grid nodes and workflows remain independent. Switching or restoring an archive retains this node's variables.
 
-Edit, drag to reorder, or delete existing variables in the manager. Each completed change is saved with the node and can be undone through the ComfyUI canvas history. Variable definitions travel with the workflow, but are not part of favorite-card or global-archive snapshots. Switching archives keeps the node's variables.
+**New Variable** adds an editable row. Enter a name, then leave the row or press Ctrl+Enter in the value field to save. Edit names on Enter or blur, values on Ctrl+Enter or blur; Escape cancels the current input. Values may be empty and can be cleared with the internal × button. Drag or use the handle's arrow keys to reorder. Successful edits save to the node immediately and support canvas undo. Renaming also updates unescaped references in this node's cards and retained tokens. Deleting a referenced variable requires confirmation and leaves its references for repair.
 
-In the card editor, type `{` in the tag-add field or Text Mode to open variable suggestions. Continue typing a name to filter them, then use the mouse or arrow keys and Enter to insert a complete reference such as `{color}`. Tab still switches editor modes; Escape dismisses suggestions first. A variable tag previews its current value instead of a Danbooru translation.
+**Copy Variables** copies all names and values in order as dedicated Prompt Weaver clipboard data. Open another workflow's manager and use **Paste Variables**: matching names get the pasted values; other existing variables are retained, and new names are appended. Pasting validates the whole list before changing anything and is one canvas undo step; it does not rewrite prompt references. The paste button is enabled only when the clipboard contains valid variable data. Clipboard access requires a secure browser context and permission; if reading is unavailable or denied, the button stays disabled. Unsaved field edits are included when copying, but paste replaces drafts only after it succeeds.
 
-When the node runs, references in **enabled card prompts** are replaced once with their current values. A value containing another `{name}` remains literal; `prefix_prompt` is never expanded. Write `\{color}` for a literal `{color}`. An undefined reference in an enabled card stops the node with an error; disabled cards are ignored. Renaming a variable updates unescaped references in this node's cards and retained tokens. Deleting a referenced variable requires confirmation and leaves those references in place for repair. Names are case-sensitive NFC Unicode identifiers (letter or underscore first, then letters, digits or underscores); limits are 100 variables, 64 characters per name, and 10,000 characters per value. Values may be empty, and the clear button inside a value field saves an empty value immediately.
+Variable value fields, including new rows, use the same Prompt autocomplete as the card editor: Danbooru and Prompt Assistant sources, source ordering, minimum post count and result limit all follow the existing settings. Select with the mouse or arrow keys and Enter; Escape dismisses suggestions before cancelling the field edit. A selection stays in the draft until normal blur or Ctrl+Enter saving.
+
+Type `{` in the card editor's tag-add field or Text Mode to suggest this node's variables. Use the mouse or arrow keys and Enter to insert `{color}`. Tab switches modes; Escape dismisses suggestions first. Variable tags preview their values instead of requesting Danbooru translations. Undefined manually entered references are not automatically created.
+
+Execution expands references in **enabled card prompts** once, using only the submitted workflow variables. Variable values and `prefix_prompt` are not recursively expanded. Write `\{color}` for literal `{color}`. Missing enabled references stop the node; disabled cards are ignored. Favorites and global archives carry references, not variable definitions.
+
+Names are case-sensitive NFC Unicode identifiers (letter or underscore first, then letters, digits or underscores). A node allows up to 100 variables, 64 characters per name and 10,000 characters per value. Older saved node variables remain available; former shared-library files are not read, changed or deleted.
 
 ## Favorite Cards
 
@@ -377,6 +383,8 @@ node --test tests/*.mjs
 ```
 
 Tests cover node configuration parsing, registration and routes, archive storage and ordering, the two-level prompt-card library, prompt-grid interaction, favorite insertion and deduplication, the prompt editor, dual-source autocomplete, dictionary validation and fallback, official locale resources, English UI fallback, and legacy data compatibility.
+
+Optional real DOM variable tests: run `python tests/workflow_variables_browser_server.py` and open [the regression page](http://127.0.0.1:8776/tests/workflow_variables_browser.html). It uses isolated workflow fixtures, not a running ComfyUI instance.
 
 ## License
 
