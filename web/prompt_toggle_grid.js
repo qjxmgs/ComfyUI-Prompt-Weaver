@@ -76,8 +76,19 @@ import {
     normalizeAutocompleteSourceOrder,
     promptTokenHasHanText,
     promptTokenLookupText,
+    resolvePromptCompletionContext,
     textareaCaretClientRect,
 } from "./prompt_tag_autocomplete.js?v=20260923-sqlite-filter-v1";
+import {
+    normalizeVariables,
+    renameVariableReferences,
+    variableReferenceCount,
+    variableSuggestionContext,
+} from "./prompt_variables.js?v=20260925-variables-v1";
+import {
+    openPromptVariableManager,
+    VariableSuggestionController,
+} from "./prompt_variable_ui.js?v=20260926-variable-manager-v6";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -261,6 +272,7 @@ function createDefaultConfig() {
     return {
         version: CONFIG_VERSION,
         columns: DEFAULT_COLUMNS,
+        variables: [],
         items: Array.from({ length: DEFAULT_CARD_COUNT }, (_, index) => ({
             id: `prompt-${index + 1}`,
             enabled: true,
@@ -281,7 +293,7 @@ function normalizeConfigValue(value) {
     }
     if (typeof value === "string" && !value.trim()) {
         return {
-            state: { version: CONFIG_VERSION, columns: DEFAULT_COLUMNS, items: [] },
+            state: { version: CONFIG_VERSION, columns: DEFAULT_COLUMNS, variables: [], items: [] },
             serialized: value,
         };
     }
@@ -305,13 +317,20 @@ function normalizeConfigValue(value) {
         throw configError(t("Unsupported version {version}", { version: String(version) }));
     }
     if (!Array.isArray(raw.items)) throw configError(t("items must be an array"));
+    let variables;
+    try {
+        variables = normalizeVariables(raw.variables === undefined ? [] : raw.variables);
+    } catch (error) {
+        throw configError(t(error.message));
+    }
 
     const columns = Number.isInteger(raw.columns)
         && raw.columns >= MIN_COLUMNS
         && raw.columns <= MAX_COLUMNS
         ? raw.columns
         : DEFAULT_COLUMNS;
-    let normalized = columns !== raw.columns;
+    let normalized = columns !== raw.columns || (raw.variables !== undefined
+        && JSON.stringify(variables) !== JSON.stringify(raw.variables));
     const usedIds = new Set();
     const items = raw.items.map((item, index) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -417,7 +436,7 @@ function normalizeConfigValue(value) {
                 : {}),
         };
     });
-    const state = { ...raw, version: CONFIG_VERSION, columns, items };
+    const state = { ...raw, version: CONFIG_VERSION, columns, variables, items };
     const serialized = typeof value === "string" && !normalized
         ? value
         : JSON.stringify(state);
@@ -710,7 +729,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260923-sqlite-filter-v3", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260926-variable-manager-v6", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -810,6 +829,16 @@ function createPromptGridWidget(node, inputName, inputData) {
         "span",
         "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--favorite-manage",
     ));
+    const manageVariablesButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-action cpw-prompt-grid__variable-manage",
+    );
+    manageVariablesButton.type = "button";
+    manageVariablesButton.setAttribute("aria-haspopup", "dialog");
+    manageVariablesButton.append(element(
+        "span",
+        "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--variable-manage",
+    ));
     quickSaveArchiveButton.type = "button";
     restoreArchiveButton.type = "button";
     manageArchivesButton.type = "button";
@@ -824,12 +853,14 @@ function createPromptGridWidget(node, inputName, inputData) {
     setArchiveActionLabel(restoreArchiveButton, t("Restore"));
     setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
     setArchiveActionLabel(manageFavoritesButton, t("Favorite Cards Manager"));
+    setArchiveActionLabel(manageVariablesButton, t("Variable Manager"));
     archiveGroup.append(
         archiveSelect,
         quickSaveArchiveButton,
         restoreArchiveButton,
         manageArchivesButton,
         manageFavoritesButton,
+        manageVariablesButton,
     );
 
     const leadingControls = element("div", "cpw-prompt-grid__leading-controls");
@@ -872,6 +903,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let activePromptCardLibraryMenu = null;
     let activeItemContextMenu = null;
     let activeArchiveManager = null;
+    let activeVariableManager = null;
     let activeArchiveConfirmation = null;
     let archives = [];
     let activeArchiveId = DEFAULT_ARCHIVE_ID;
@@ -930,6 +962,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         setArchiveActionLabel(restoreArchiveButton, t("Restore"));
         setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
         setArchiveActionLabel(manageFavoritesButton, t("Favorite Cards Manager"));
+        setArchiveActionLabel(manageVariablesButton, t("Variable Manager"));
         addButton.textContent = t("+ Add Card");
         syncMasterToggle();
         errorTitle.textContent = t("Configuration could not be read");
@@ -964,6 +997,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         activePromptCardLibraryMenu?.refreshLocale?.();
         renderArchiveSelect();
         activeArchiveManager?.refreshLocale?.();
+        activeVariableManager?.refreshLocale?.();
         if (!activePromptEditor && !activeArchiveManager && !activeArchiveConfirmation) render();
     }
 
@@ -990,6 +1024,85 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (renderAfter) render();
         notifyWidgetChanged(node, widget, inputName, serializedValue, previousValue, captureHistory);
         reconcileArchiveSelection();
+    }
+
+    function closeVariableManager() {
+        activeVariableManager?.close();
+        activeVariableManager = null;
+        manageVariablesButton.setAttribute("aria-expanded", "false");
+    }
+
+    function commitVariableMutation(mutate, renderAfter = false) {
+        const graph = node.graph ?? app.graph;
+        app.canvas?.emitBeforeChange?.();
+        graph?.beforeChange?.(node);
+        try {
+            mutate();
+            commit(renderAfter, false);
+        } finally {
+            graph?.afterChange?.(node);
+            app.canvas?.emitAfterChange?.();
+        }
+    }
+
+    function openVariableManager() {
+        if (!state || activeVariableManager) return;
+        closePromptCardLibraryMenu(false);
+        closeItemContextMenu();
+        for (const controller of cardAutocompleteControllers) {
+            controller.cancelPending();
+            controller.close();
+        }
+        activeVariableManager = openPromptVariableManager({
+            opener: manageVariablesButton,
+            getVariables: () => state?.variables ?? [],
+            referenceCount: (name) => variableReferenceCount(state?.items ?? [], name),
+            onAdd(name, value) {
+                const id = createId();
+                const updated = normalizeVariables([
+                    ...state.variables,
+                    { id, name: name.normalize("NFC"), value },
+                ]);
+                commitVariableMutation(() => { state.variables = updated; });
+                return id;
+            },
+            onUpdate(id, field, value) {
+                const current = state.variables.find((entry) => entry.id === id);
+                if (!current) return;
+                const next = field === "name" ? value.normalize("NFC") : value;
+                if (next === current[field]) return;
+                const updated = normalizeVariables(state.variables.map((entry) => (
+                    entry.id === id ? { ...entry, [field]: next } : entry
+                )));
+                commitVariableMutation(() => {
+                    if (field === "name") {
+                        state.items = renameVariableReferences(state.items, current.name, next);
+                    }
+                    state.variables = updated;
+                }, field === "name");
+            },
+            onDelete(id) {
+                if (!state.variables.some((entry) => entry.id === id)) return;
+                commitVariableMutation(() => {
+                    state.variables = state.variables.filter((entry) => entry.id !== id);
+                });
+            },
+            onReorder(sourceId, targetId, after) {
+                const source = state.variables.find((entry) => entry.id === sourceId);
+                if (!source || sourceId === targetId) return;
+                const reordered = state.variables.filter((entry) => entry.id !== sourceId);
+                const targetIndex = reordered.findIndex((entry) => entry.id === targetId);
+                if (targetIndex < 0) return;
+                reordered.splice(targetIndex + (after ? 1 : 0), 0, source);
+                if (reordered.every((entry, index) => entry.id === state.variables[index].id)) return;
+                commitVariableMutation(() => { state.variables = reordered; });
+            },
+            onClose() {
+                activeVariableManager = null;
+                manageVariablesButton.setAttribute("aria-expanded", "false");
+            },
+        });
+        manageVariablesButton.setAttribute("aria-expanded", "true");
     }
 
     function currentSnapshot() {
@@ -1372,7 +1485,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 (index) => cardTitle(index),
             )
             : archive.snapshot;
-        const normalized = normalizeConfigValue(JSON.stringify(configFromArchiveSnapshot(snapshot)));
+        const normalized = normalizeConfigValue(JSON.stringify({
+            ...configFromArchiveSnapshot(snapshot),
+            variables: state?.variables ?? [],
+        }));
         state = normalized.state;
         parseError = null;
         setActiveArchive(archive.id, { persistGlobal });
@@ -3379,6 +3495,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         let addDraft = "";
         let addBlurTimer = 0;
         let editorAutocompleteController = null;
+        let variableSuggestionController = null;
         let tokenTranslationAbortController = null;
         let tokenTranslationGeneration = 0;
         let editorDragSession = null;
@@ -4008,10 +4125,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         const resolvePromptTokenTranslations = async () => {
             cancelPromptTokenTranslations();
             if (freeMode || !tokens.length) return;
+            const referencedVariable = (token) => /^\{([_\p{L}][_\p{L}\p{N}]*)\}$/u.exec(token)?.[1] ?? null;
             for (const button of tokenList.querySelectorAll(".cpw-prompt-editor__token")) {
                 const token = tokens[Number(button.dataset.promptTokenIndex)] || "";
                 const translationLine = button.querySelector(".cpw-prompt-editor__token-translation");
-                if (translationLine) translationLine.textContent = "—";
+                const variableName = referencedVariable(token);
+                const variable = (state?.variables ?? []).find((entry) => entry.name === variableName);
+                if (translationLine) translationLine.textContent = variableName
+                    ? (variable?.value ?? t("Undefined variable")) : "—";
                 button.title = token;
                 button.setAttribute("aria-label", token);
             }
@@ -4021,6 +4142,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             const pending = [];
             for (let index = 0; index < tokens.length; index += 1) {
                 const token = tokens[index];
+                if (referencedVariable(token)) continue;
                 if (promptTokenHasHanText(token)) continue;
                 const lookupText = promptTokenLookupText(token);
                 if (lookupText) pending.push({ index, lookupText, token });
@@ -4073,6 +4195,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             cancelPromptTokenTranslations();
             editorAutocompleteController?.destroy();
             editorAutocompleteController = null;
+            variableSuggestionController?.destroy();
+            variableSuggestionController = null;
             tokenList.replaceChildren();
             addInput = null;
             addButton = null;
@@ -4162,6 +4286,11 @@ function createPromptGridWidget(node, inputName, inputData) {
                     {
                         getLocale: getPromptWeaverLocale,
                         getLimit: readAutocompleteLimit,
+                        getContext: () => variableSuggestionContext(
+                            freeTextArea.value, freeTextArea.selectionStart, freeTextArea.selectionEnd,
+                        ) ? { start: 0, end: 0, query: "" } : resolvePromptCompletionContext(
+                            freeTextArea.value, freeTextArea.selectionStart, freeTextArea.selectionEnd,
+                        ),
                         getAnchorRect: () => textareaCaretClientRect(freeTextArea),
                         getExistingPrompt: () => freeTextArea?.value || "",
                         popupHorizontalInset: 10,
@@ -4186,6 +4315,24 @@ function createPromptGridWidget(node, inputName, inputData) {
                     "cpw-tag-autocomplete--favorite-update",
                     favoriteUpdateMode,
                 );
+                variableSuggestionController = new VariableSuggestionController(freeTextArea, {
+                    popupParent: overlay,
+                    getVariables: () => state?.variables ?? [],
+                    getAnchorRect: () => textareaCaretClientRect(freeTextArea),
+                    onOpen: () => {
+                        editorAutocompleteController?.cancelPending();
+                        editorAutocompleteController?.close();
+                    },
+                    onSelect(result) {
+                        const historySnapshot = takeTextHistorySnapshot(freeTextArea)
+                            ?? capturePromptContentSnapshot();
+                        freeTextArea.value = result.value;
+                        freeTextArea.setSelectionRange(result.cursor, result.cursor);
+                        freePromptText = result.value;
+                        renderActivePromptCount();
+                        recordPromptContentChange(historySnapshot);
+                    },
+                });
                 if (focusFreeText) {
                     queueMicrotask(() => {
                         freeTextArea?.focus();
@@ -4283,6 +4430,11 @@ function createPromptGridWidget(node, inputName, inputData) {
                     {
                         getLocale: getPromptWeaverLocale,
                         getLimit: readAutocompleteLimit,
+                        getContext: () => variableSuggestionContext(
+                            addInput.value, addInput.selectionStart, addInput.selectionEnd,
+                        ) ? { start: 0, end: 0, query: "" } : resolvePromptCompletionContext(
+                            addInput.value, addInput.selectionStart, addInput.selectionEnd,
+                        ),
                         getExistingPrompt: () => tokens.join(", "),
                         onSelect(record) {
                             clearAddBlurTimer();
@@ -4304,6 +4456,24 @@ function createPromptGridWidget(node, inputName, inputData) {
                     "cpw-tag-autocomplete--favorite-update",
                     favoriteUpdateMode,
                 );
+                variableSuggestionController = new VariableSuggestionController(addInput, {
+                    popupParent: overlay,
+                    getVariables: () => state?.variables ?? [],
+                    getAnchorRect: () => textareaCaretClientRect(addInput),
+                    onOpen: () => {
+                        editorAutocompleteController?.cancelPending();
+                        editorAutocompleteController?.close();
+                    },
+                    onSelect(result) {
+                        const historySnapshot = takeTextHistorySnapshot(addInput)
+                            ?? capturePromptContentSnapshot();
+                        addInput.value = result.value;
+                        addInput.setSelectionRange(result.cursor, result.cursor);
+                        addDraft = result.value;
+                        syncClearPromptButton();
+                        recordPromptContentChange(historySnapshot);
+                    },
+                });
                 addInput.addEventListener("keydown", (event) => {
                     if (event.isComposing || event.defaultPrevented) return;
                     if (event.key === "Enter") {
@@ -4516,6 +4686,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 closePromptCardLibraryMenu(true);
                 return true;
             }
+            if (variableSuggestionController?.dismiss?.()) return true;
             if (editorAutocompleteController?.dismiss?.()) return true;
             if (cancelPromptEditorResize()) return true;
             if (cancelPromptEditorDrag()) return true;
@@ -4578,6 +4749,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             suppressTokenClick = false;
             editorAutocompleteController?.destroy();
             editorAutocompleteController = null;
+            variableSuggestionController?.destroy();
+            variableSuggestionController = null;
             setAddStatus("");
 
             if (enabled) {
@@ -4712,6 +4885,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 addButton.setAttribute("aria-label", t("Add prompt"));
             }
             editorAutocompleteController?.refreshLocale();
+            variableSuggestionController?.refreshLocale();
         };
         activePromptEditor = {
             overlay,
@@ -5054,6 +5228,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     restoreArchiveButton.addEventListener("click", restoreActiveArchive);
     manageArchivesButton.addEventListener("click", openArchiveManager);
     manageFavoritesButton.addEventListener("click", openFavoriteManager);
+    manageVariablesButton.addEventListener("click", openVariableManager);
     resetButton.addEventListener("click", () => {
         state = createDefaultConfig();
         parseError = null;
@@ -5128,6 +5303,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (dragSession) endPointerDrag(true);
             if (activeArchiveConfirmation) closeArchiveConfirmation(false);
             closeArchiveManager();
+            closeVariableManager();
             readValue(value);
             reconcileLoadedArchiveAssociation();
             render();
@@ -5142,6 +5318,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (activePromptEditor) closePromptEditor(false);
         if (activeArchiveConfirmation) closeArchiveConfirmation(false);
         closeArchiveManager();
+        closeVariableManager();
         if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
         if (sizeReconcileFrame) cancelAnimationFrame(sizeReconcileFrame);
         clearFavoriteRefreshTimers();

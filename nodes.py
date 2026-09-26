@@ -1,8 +1,15 @@
 import json
+import re
+import unicodedata
 
 
 CONFIG_WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID"
 CONFIG_VERSION = 1
+MAX_VARIABLES = 100
+MAX_VARIABLE_NAME_LENGTH = 64
+MAX_VARIABLE_VALUE_LENGTH = 10_000
+MAX_EXPANDED_PROMPT_LENGTH = 1_048_576
+_VARIABLE_REFERENCE = re.compile(r"\{([^{}]+)\}")
 
 DEFAULT_CONFIG = json.dumps(
     {
@@ -31,12 +38,75 @@ def _reject_nonstandard_json_constant(value):
     raise _config_error(f"invalid JSON constant {value!r}")
 
 
+def _valid_variable_name(name):
+    if not name or len(name) > MAX_VARIABLE_NAME_LENGTH:
+        return False
+    first = name[0]
+    if first != "_" and not unicodedata.category(first).startswith("L"):
+        return False
+    return all(
+        character == "_" or unicodedata.category(character)[0] in ("L", "N")
+        for character in name[1:]
+    )
+
+
+def _parse_variables(value):
+    if not isinstance(value, list) or len(value) > MAX_VARIABLES:
+        raise _config_error(f"'variables' must be an array of at most {MAX_VARIABLES} entries")
+    names = set()
+    ids = set()
+    variables = {}
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise _config_error(f"'variables[{index}]' must be an object")
+        identifier = entry.get("id")
+        name = entry.get("name")
+        variable_value = entry.get("value")
+        if not isinstance(identifier, str) or not identifier or len(identifier) > 128 or identifier in ids:
+            raise _config_error(f"'variables[{index}].id' must be a unique non-empty string")
+        if not isinstance(name, str) or not _valid_variable_name(name) or unicodedata.normalize("NFC", name) != name or name in names:
+            raise _config_error(f"'variables[{index}].name' must be a unique NFC variable name")
+        if not isinstance(variable_value, str) or len(variable_value) > MAX_VARIABLE_VALUE_LENGTH:
+            raise _config_error(f"'variables[{index}].value' must be a string of at most {MAX_VARIABLE_VALUE_LENGTH} characters")
+        ids.add(identifier)
+        names.add(name)
+        variables[name] = variable_value
+    return variables
+
+
+def _expand_variables(prompt, variables):
+    result = []
+    last = 0
+    for match in _VARIABLE_REFERENCE.finditer(prompt):
+        name = unicodedata.normalize("NFC", match.group(1))
+        if not _valid_variable_name(name):
+            continue
+        prefix = prompt[last:match.start()]
+        slash_count = 0
+        position = match.start() - 1
+        while position >= 0 and prompt[position] == "\\":
+            slash_count += 1
+            position -= 1
+        if slash_count % 2:
+            result.extend((prefix[:-1], match.group(0)))
+        else:
+            if name not in variables:
+                raise _config_error(f"undefined variable {{{name}}}")
+            result.extend((prefix, variables[name]))
+        last = match.end()
+    result.append(prompt[last:])
+    expanded = "".join(result)
+    if len(expanded) > MAX_EXPANDED_PROMPT_LENGTH:
+        raise _config_error("expanded prompt exceeds 1 MiB")
+    return expanded
+
+
 def _parse_config(config):
     if not isinstance(config, str):
         raise _config_error("expected a JSON string")
 
     if not config.strip():
-        return []
+        return {}, []
 
     try:
         data = json.loads(config, parse_constant=_reject_nonstandard_json_constant)
@@ -61,6 +131,7 @@ def _parse_config(config):
     items = data.get("items")
     if not isinstance(items, list):
         raise _config_error("'items' must be an array")
+    variables = _parse_variables(data.get("variables", []))
 
     parsed_items = []
     for index, item in enumerate(items):
@@ -106,7 +177,7 @@ def _parse_config(config):
 
         parsed_items.append((enabled, prompt))
 
-    return parsed_items
+    return variables, parsed_items
 
 
 def _clean_prompt(prompt):
@@ -229,10 +300,11 @@ def combine_prompt_grid_config(config, prefix_prompt=""):
         raise _config_error("'prefix_prompt' must be a string")
 
     prompts = []
-    for enabled, prompt in _parse_config(config):
+    variables, parsed_items = _parse_config(config)
+    for enabled, prompt in parsed_items:
         if not enabled:
             continue
-        cleaned = _clean_prompt(prompt)
+        cleaned = _clean_prompt(_expand_variables(prompt, variables))
         if cleaned:
             prompts.append(cleaned)
 
@@ -240,8 +312,12 @@ def combine_prompt_grid_config(config, prefix_prompt=""):
     # supplied. Once a prefix participates, normalize both sources with the
     # same top-level token rules as the prompt editor and keep the first copy.
     if not _split_prompt_tokens(prefix_prompt):
-        return ", ".join(prompts)
-    return _deduplicated_prompt([prefix_prompt, *prompts])
+        result = ", ".join(prompts)
+    else:
+        result = _deduplicated_prompt([prefix_prompt, *prompts])
+    if len(result) > MAX_EXPANDED_PROMPT_LENGTH:
+        raise _config_error("expanded prompt exceeds 1 MiB")
+    return result
 
 
 class PromptWeaverPromptToggleGrid:

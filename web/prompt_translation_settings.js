@@ -241,7 +241,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260923-sqlite-filter-v3",
+        "./prompt_toggle_grid.css?v=20260926-variable-manager-v6",
         import.meta.url,
     ).href;
     document.head.append(link);

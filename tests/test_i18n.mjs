@@ -9,6 +9,9 @@ const resources = {
             ui: {
                 "Card {index}": "Card {index}",
                 "Text Mode": "Text Mode",
+                "New Variable": "New Variable",
+                "Variable List ({count})": "Variable List ({count})",
+                "Actions": "Actions",
                 "{count} column": "{count} column",
                 "{count} columns": "{count} columns",
             },
@@ -19,6 +22,9 @@ const resources = {
             ui: {
                 "Card {index}": "卡片 {index}",
                 "Text Mode": "文本模式",
+                "New Variable": "新建变量",
+                "Variable List ({count})": "变量列表（{count}）",
+                "Actions": "操作",
                 "{count} column": "{count} 列",
                 "{count} columns": "{count} 列",
             },
@@ -78,10 +84,14 @@ test("official ComfyUI locale resources load once and follow live locale changes
     assert.equal(messages.getPromptWeaverLocale(), "zh");
     assert.equal(messages.t("Text Mode"), "文本模式");
     assert.equal(messages.t("Card {index}", { index: 2 }), "卡片 2");
+    assert.equal(messages.t("New Variable"), "新建变量");
+    assert.equal(messages.t("Variable List ({count})", { count: 4 }), "变量列表（4）");
+    assert.equal(messages.t("Actions"), "操作");
 
     app.changeLocale("en");
     assert.equal(messages.getPromptWeaverLocale(), "en");
     assert.equal(messages.t("Text Mode"), "Text Mode");
+    assert.equal(messages.t("New Variable"), "New Variable");
     assert.ok(seenLocales.includes("zh"));
     assert.ok(seenLocales.includes("en"));
     unsubscribe();

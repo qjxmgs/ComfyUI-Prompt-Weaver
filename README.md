@@ -11,6 +11,7 @@ The plugin has no additional Python or JavaScript dependencies.
 
 ## Recent updates
 
+- Grid-scoped variables can be managed in the toolbar and inserted into card prompts with `{name}`; the node substitutes their values on each run.
 - Custom controls, dialogs, tooltips, and accessibility labels now follow ComfyUI's English or Simplified Chinese locale through the official locale resources; open interfaces update when the language changes.
 - The card editor has a **Clear** action for its current prompt draft, with undo/redo support. The card title and editor settings are preserved.
 - Danbooru autocomplete uses one selected SQLite dictionary, either a manually downloaded copy or an imported local copy. A configurable minimum post count (default **100**, minimum **10**) controls the active suggestion set and displays its size; dictionary updates remain manual.
@@ -172,6 +173,16 @@ Errors preserve the previous valid data and selection. The downloaded Git blob a
 Source choice is stored per ComfyUI user. Thresholds use `PromptWeaver.Autocomplete.MinPostCount` and are sent as `min_post_count` to status/search; exact resolution is unfiltered. The source-switch endpoint is `POST /prompt-weaver/tag-autocomplete/source` with `downloaded` or `local`.
 
 All dictionary writes retain the local-only server-listen guard. Only threshold-qualified rows enter autocomplete memory (two candidate sets maximum); statistics reuse a frequency histogram, while translations query the full SQLite by primary key. Direct matches precede fuzzy scans, which run only if needed.
+
+### Grid variables
+
+Use the **Variable Manager** icon beside Favorite Cards in a grid node's toolbar to define ordered name/value pairs for that node. **New Variable** adds an editable row to the list; enter a valid name, then leave the row or press Ctrl+Enter in its value field to save. Escape cancels the new row.
+
+Edit, drag to reorder, or delete existing variables in the manager. Each completed change is saved with the node and can be undone through the ComfyUI canvas history. Variable definitions travel with the workflow, but are not part of favorite-card or global-archive snapshots. Switching archives keeps the node's variables.
+
+In the card editor, type `{` in the tag-add field or Text Mode to open variable suggestions. Continue typing a name to filter them, then use the mouse or arrow keys and Enter to insert a complete reference such as `{color}`. Tab still switches editor modes; Escape dismisses suggestions first. A variable tag previews its current value instead of a Danbooru translation.
+
+When the node runs, references in **enabled card prompts** are replaced once with their current values. A value containing another `{name}` remains literal; `prefix_prompt` is never expanded. Write `\{color}` for a literal `{color}`. An undefined reference in an enabled card stops the node with an error; disabled cards are ignored. Renaming a variable updates unescaped references in this node's cards and retained tokens. Deleting a referenced variable requires confirmation and leaves those references in place for repair. Names are case-sensitive NFC Unicode identifiers (letter or underscore first, then letters, digits or underscores); limits are 100 variables, 64 characters per name, and 10,000 characters per value. Values may be empty, and the clear button inside a value field saves an empty value immediately.
 
 ## Favorite Cards
 

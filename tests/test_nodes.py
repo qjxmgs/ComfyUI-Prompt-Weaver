@@ -167,6 +167,71 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
         )
         self.assertEqual(self.combine(config), "masterpiece, red hair")
 
+    def test_variables_expand_enabled_cards_only_and_preserve_prefix(self):
+        config = json.dumps({
+            "variables": [
+                {"id": "v1", "name": "颜色", "value": "red, blue"},
+                {"id": "v2", "name": "color_2", "value": "{颜色} literal"},
+            ],
+            "items": [
+                {"enabled": True, "prompt": "dress: {颜色}; {color_2}"},
+                {"enabled": False, "prompt": "{missing}"},
+            ],
+        }, ensure_ascii=False)
+        self.assertEqual(
+            self.combine(config, "prefix {颜色}"),
+            "prefix {颜色}, dress: red, blue; {颜色} literal",
+        )
+        self.assertEqual(
+            self.combine(config),
+            "dress: red, blue; {颜色} literal",
+        )
+
+    def test_variable_escaping_and_missing_reference(self):
+        config = json.dumps({
+            "variables": [{"id": "v1", "name": "color", "value": "blue"}],
+            "items": [{"enabled": True, "prompt": r"\{color}, {color}"}],
+        })
+        self.assertEqual(self.combine(config), "{color}, blue")
+        missing = json.dumps({"items": [{"enabled": True, "prompt": "{missing}"}]})
+        with self.assertRaisesRegex(ValueError, r"undefined variable \{missing\}"):
+            self.combine(missing)
+
+    def test_empty_variable_value_expands_to_empty_text(self):
+        config = json.dumps({
+            "variables": [{"id": "v1", "name": "color", "value": ""}],
+            "items": [{"enabled": True, "prompt": "before {color} after"}],
+        })
+        self.assertEqual(self.combine(config), "before  after")
+
+    def test_variable_validation_and_legacy_compatibility(self):
+        self.assertEqual(self.combine(json.dumps({"items": [{"enabled": True, "prompt": "legacy"}]})), "legacy")
+        invalid = [
+            [{"id": "1", "name": "1bad", "value": "x"}],
+            [{"id": "1", "name": "e\u0301", "value": "x"}],
+            [{"id": "1", "name": "valid", "value": None}],
+            [{"id": "1", "name": "x", "value": "a"}, {"id": "2", "name": "x", "value": "b"}],
+            [{"id": "1", "name": "x", "value": "a"}, {"id": "1", "name": "y", "value": "b"}],
+        ]
+        for variables in invalid:
+            with self.subTest(variables=variables), self.assertRaisesRegex(ValueError, "variables\\["):
+                self.combine(json.dumps({"variables": variables, "items": []}, ensure_ascii=False))
+        with self.assertRaisesRegex(ValueError, "variables.*array"):
+            self.combine(json.dumps({"variables": None, "items": []}))
+        with self.assertRaisesRegex(ValueError, "at most 100"):
+            self.combine(json.dumps({
+                "variables": [
+                    {"id": str(index), "name": f"variable_{index}", "value": "x"}
+                    for index in range(101)
+                ],
+                "items": [],
+            }))
+        with self.assertRaisesRegex(ValueError, "at most 10000"):
+            self.combine(json.dumps({
+                "variables": [{"id": "1", "name": "x", "value": "a" * 10_001}],
+                "items": [],
+            }))
+
     def test_missing_version_defaults_to_v1_and_columns_is_ignored(self):
         config = json.dumps(
             {
