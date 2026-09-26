@@ -184,7 +184,7 @@ Use the **Variable Manager** icon beside Favorite Cards to manage variables save
 
 Variable value fields, including new rows, use the same Prompt autocomplete as the card editor: Danbooru and Prompt Assistant sources, source ordering, minimum post count and result limit all follow the existing settings. Select with the mouse or arrow keys and Enter; Escape dismisses suggestions before cancelling the field edit. A selection stays in the draft until normal blur or Ctrl+Enter saving.
 
-Type `{` in the card editor's tag-add field or Text Mode to suggest this node's variables. Use the mouse or arrow keys and Enter to insert `{color}`. Tab switches modes; Escape dismisses suggestions first. Variable tags preview their values instead of requesting Danbooru translations. Undefined manually entered references are not automatically created.
+Type `{` in the card editor's tag-add field or Text Mode to suggest this node's variables. Use the mouse or arrow keys and Enter to insert `{color}`. Tab switches modes; Escape dismisses suggestions first. Any tag containing variables previews its fully substituted text on the second line (for example, `{color} shirt` becomes `red shirt`) instead of requesting Danbooru translations. Undefined references remain visible with a warning and are not automatically created.
 
 Execution expands references in **enabled card prompts** once, using only the submitted workflow variables. Variable values and `prefix_prompt` are not recursively expanded. Write `\{color}` for literal `{color}`. Missing enabled references stop the node; disabled cards are ignored. Favorites and global archives carry references, not variable definitions.
 

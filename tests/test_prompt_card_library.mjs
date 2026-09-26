@@ -500,7 +500,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
     assert.match(gridSource, /prompt_card_library\.js\?v=20260923-sqlite-filter-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260926-variable-value-autocomplete-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260926-variable-token-preview-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);

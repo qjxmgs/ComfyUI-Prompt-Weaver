@@ -47,8 +47,8 @@ globalThis.fixtureApp = {
     extensionManager:{toast:{add(){}}},
     registerExtension(extension){globalThis.fixtureExtension=extension;},
 };
-await import("../web/prompt_toggle_grid.js?v=20260926-variable-value-autocomplete-v1");
-const helpers = await import("../web/prompt_variables.js?v=20260926-variable-value-autocomplete-v1");
+await import("../web/prompt_toggle_grid.js?v=20260926-variable-token-preview-v1");
+const helpers = await import("../web/prompt_variables.js?v=20260926-variable-token-preview-v1");
 const state = index => JSON.parse(nodes[index].widget.getValue());
 function setState(index, variables) {
     nodes[index].widget.setValue(JSON.stringify({version:1,columns:2,variables,items:[
@@ -235,7 +235,26 @@ document.querySelector("#run").onclick=async ()=>{
             assert(document.querySelectorAll('.cpw-tag-autocomplete').length===nodes.length,"manager popups removed; only card controllers remain");
             await open(1);
         });
-        result.textContent+="ALL 19 CASES PASSED\n";
+        await runCase("editor second lines preview complete variable tokens without rewriting prompts",async()=>{
+            close();await tick();
+            const prompt="office lady, {color} shirt, {legwear}, black {legwear}, {color} {legwear}, {missing}";
+            nodes[1].widget.setValue(JSON.stringify({version:1,columns:2,variables:[
+                {id:"preview-color",name:"color",value:"red"},
+                {id:"preview-legwear",name:"legwear",value:"thighhighs"},
+            ],items:[{id:"preview-card",title:"Preview",enabled:true,prompt}]}));
+            nodes[1].container.querySelector('.cpw-prompt-grid__prompt-edit').click();await tick();
+            const tokenButtons=[...document.querySelectorAll('.cpw-prompt-editor__token')];
+            const lines=tokenButtons.map(el=>el.querySelector('.cpw-prompt-editor__token-translation').textContent);
+            assert(lines.slice(1,5).join('|')==="red shirt|thighhighs|black thighhighs|red thighhighs","complete second-line previews");
+            assert(lines[5].includes("Undefined variable")&&lines[5].includes("{missing}"),"missing variable warning");
+            assert(tokenButtons[1].title.includes("red shirt")&&tokenButtons[1].getAttribute('aria-label').includes("red shirt"),"accessible preview");
+            assert(state(1).items[0].prompt===prompt,"stored prompt remains untouched");
+            document.querySelector('#language').click();await tick();
+            assert(tokenButtons[5].textContent.includes("未定义变量"),"open preview warning follows Chinese locale");
+            assert(tokenButtons[1].textContent.includes("red shirt")&&state(1).items[0].prompt===prompt,"locale keeps previews and prompt");
+            document.querySelector('#language').click();await tick();
+        });
+        result.textContent+="ALL 20 CASES PASSED\n";
     } catch(error) {result.textContent+="FAIL "+error.stack;console.error(error);}
     finally{document.querySelector("#run").disabled=false;}
 };

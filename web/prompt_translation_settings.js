@@ -241,7 +241,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260926-variable-value-autocomplete-v1",
+        "./prompt_toggle_grid.css?v=20260926-variable-token-preview-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

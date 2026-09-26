@@ -1,5 +1,5 @@
 import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
-import { MAX_VARIABLES, completeVariableReference, variableSuggestionContext, serializeVariableClipboard, parseVariableClipboard } from "./prompt_variables.js?v=20260926-variable-value-autocomplete-v1";
+import { MAX_VARIABLES, completeVariableReference, variableSuggestionContext, serializeVariableClipboard, parseVariableClipboard } from "./prompt_variables.js?v=20260926-variable-token-preview-v1";
 
 const GEOMETRY_KEY = "prompt-weaver-variable-manager-geometry-v2";
 const LEGACY_GEOMETRY_KEY = "prompt-weaver-variable-manager-geometry-v1";

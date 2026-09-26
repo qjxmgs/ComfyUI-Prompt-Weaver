@@ -11,7 +11,26 @@ const {
     renameVariableReferences,
     variableReferenceCount,
     variableReferences,
+    previewVariableReferences,
 } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+
+test("variable previews expand complete mixed tokens in one pass without changing the source", () => {
+    const variables = [{ name: "color", value: "red" }, { name: "legwear", value: "thighhighs" },
+        { name: "empty", value: "" }, { name: "nested", value: "{color}" }, { name: "颜色", value: "blue" }];
+    for (const [text, expected] of [["{color} shirt", "red shirt"], ["black {legwear}", "black thighhighs"],
+        ["{color} {legwear}", "red thighhighs"], ["{legwear}", "thighhighs"],
+        ["{empty} shirt", " shirt"], ["{nested}", "{color}"], ["{颜色}", "blue"]]) {
+        assert.deepEqual(previewVariableReferences(text, variables), { hasVariables: true, text: expected, missing: [] });
+    }
+    assert.deepEqual(previewVariableReferences("{color} {unknown}", variables),
+        { hasVariables: true, text: "red {unknown}", missing: ["unknown"] });
+    assert.deepEqual(previewVariableReferences(String.raw`\{color} {legwear}`, variables),
+        { hasVariables: true, text: "{color} thighhighs", missing: [] });
+    assert.equal(previewVariableReferences(String.raw`\{color}`, variables).hasVariables, false);
+    assert.equal(previewVariableReferences("plain shirt {not a variable}", variables).hasVariables, false);
+    assert.equal(previewVariableReferences(String.raw`\\{color}`, variables).text, String.raw`\\red`);
+    assert.match(source, /export function previewVariableReferences/);
+});
 
 test("variables validate NFC Unicode names, uniqueness and optional empty values", () => {
     assert.deepEqual(normalizeVariables([{ id: "1", name: "颜色_2", value: "red" }]), [

@@ -87,11 +87,12 @@ import {
     renameVariableReferences,
     variableReferenceCount,
     mergeVariableClipboard,
-} from "./prompt_variables.js?v=20260926-variable-value-autocomplete-v1";
+    previewVariableReferences,
+} from "./prompt_variables.js?v=20260926-variable-token-preview-v1";
 import {
     openPromptVariableManager,
     VariableSuggestionController,
-} from "./prompt_variable_ui.js?v=20260926-variable-value-autocomplete-v1";
+} from "./prompt_variable_ui.js?v=20260926-variable-token-preview-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -732,7 +733,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260926-variable-value-autocomplete-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260926-variable-token-preview-v1", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -4161,16 +4162,18 @@ function createPromptGridWidget(node, inputName, inputData) {
         const resolvePromptTokenTranslations = async () => {
             cancelPromptTokenTranslations();
             if (freeMode || !tokens.length) return;
-            const referencedVariable = (token) => /^\{([_\p{L}][_\p{L}\p{N}]*)\}$/u.exec(token)?.[1] ?? null;
+            const previews = tokens.map((token) => previewVariableReferences(token, editorVariableSuggestions()));
             for (const button of tokenList.querySelectorAll(".cpw-prompt-editor__token")) {
                 const token = tokens[Number(button.dataset.promptTokenIndex)] || "";
                 const translationLine = button.querySelector(".cpw-prompt-editor__token-translation");
-                const variableName = referencedVariable(token);
-                const variable = editorVariableSuggestions().find((entry) => entry.name === variableName);
-                if (translationLine) translationLine.textContent = variableName
-                    ? (variable?.value ?? t("Undefined variable")) : "—";
-                button.title = token;
-                button.setAttribute("aria-label", token);
+                const preview = previews[Number(button.dataset.promptTokenIndex)];
+                const previewText = preview.hasVariables
+                    ? preview.text + (preview.missing.length
+                        ? ` (${t("Undefined variable")}: ${preview.missing.map((name) => `{${name}}`).join(", ")})` : "")
+                    : "—";
+                if (translationLine) translationLine.textContent = previewText;
+                button.title = preview.hasVariables ? `${token}\n${previewText}` : token;
+                button.setAttribute("aria-label", preview.hasVariables ? `${token}, ${previewText}` : token);
             }
             const generation = tokenTranslationGeneration;
             const controller = new AbortController();
@@ -4178,7 +4181,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             const pending = [];
             for (let index = 0; index < tokens.length; index += 1) {
                 const token = tokens[index];
-                if (referencedVariable(token)) continue;
+                if (previews[index].hasVariables) continue;
                 if (promptTokenHasHanText(token)) continue;
                 const lookupText = promptTokenLookupText(token);
                 if (lookupText) pending.push({ index, lookupText, token });
@@ -4924,6 +4927,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             }
             editorAutocompleteController?.refreshLocale();
             variableSuggestionController?.refreshLocale();
+            if (!freeMode) void resolvePromptTokenTranslations();
         };
         activePromptEditor = {
             overlay,

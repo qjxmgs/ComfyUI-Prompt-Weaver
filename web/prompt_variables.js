@@ -47,6 +47,34 @@ function escapedAt(text, index) {
     return slashes % 2 === 1;
 }
 
+// Match Python's one-pass expansion without modifying the editor's source tokens.
+export function previewVariableReferences(text, variables) {
+    const source = typeof text === "string" ? text : "";
+    const values = new Map(variables.map(({ name, value }) => [name, value]));
+    const missing = new Set();
+    const result = [];
+    let last = 0;
+    let hasVariables = false;
+    for (const match of source.matchAll(REFERENCE_PATTERN)) {
+        const name = match[1].normalize("NFC");
+        if ([...name].length > MAX_VARIABLE_NAME_LENGTH || !NAME_PATTERN.test(name)) continue;
+        const prefix = source.slice(last, match.index);
+        if (escapedAt(source, match.index)) {
+            result.push(prefix.slice(0, -1), match[0]);
+        } else {
+            hasVariables = true;
+            if (values.has(name)) result.push(prefix, values.get(name));
+            else {
+                missing.add(name);
+                result.push(prefix, match[0]);
+            }
+        }
+        last = match.index + match[0].length;
+    }
+    result.push(source.slice(last));
+    return { hasVariables, text: result.join(""), missing: [...missing] };
+}
+
 export function variableSuggestionContext(value, selectionStart, selectionEnd = selectionStart, insertedReferenceStart = null) {
     const text = typeof value === "string" ? value : "";
     const cursor = Math.max(0, Math.min(text.length, Number(selectionStart) || 0));
