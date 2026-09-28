@@ -11,6 +11,7 @@ The plugin has no additional Python or JavaScript dependencies.
 
 ## Recent updates
 
+- Favorite categories can now supply a random card on each browser-initiated run. The live workflow keeps the category choice, while the submitted prompt and image-embedded workflow contain the same fixed draw.
 - Workflow-local variables support `{name}` completion and validated copy/paste between workflows.
 - Custom controls, dialogs, tooltips, and accessibility labels now follow ComfyUI's English or Simplified Chinese locale through the official locale resources; open interfaces update when the language changes.
 - The card editor has a **Clear** action for its current prompt draft, with undo/redo support. The card title and editor settings are preserved.
@@ -41,6 +42,8 @@ The desktop application currently installs the plugin only when the target direc
 - `web/prompt_weaver_i18n.js`
 - `web/prompt_grid_archives.js`, `web/prompt_grid_reorder.js`, and `web/prompt_card_library.js`
 - `web/prompt_editor_tokens.js`, `web/prompt_editor_window.js`, `web/prompt_assistant_tags.js`, and `web/prompt_tag_autocomplete.js`
+
+The random favorite category button also requires `web/assets/icons/ic_random.png`; copy the complete `web/assets` directory when upgrading from an archive.
 
 ## Sample workflow
 
@@ -79,7 +82,7 @@ Screenshots show the Simplified Chinese UI; interface text follows the language 
 Each card contains:
 
 - An enable switch.
-- An editable title used only for identification; it is not included in the output.
+- A title used only for identification; it is not included in the output. Random favorite mode temporarily shows the category name and makes the title read-only.
 - A fixed single-line prompt field and a tag-editor button.
 - Drag-to-reorder from any non-interactive blank area with live displacement animation. Blank areas use a grab cursor, and `Esc` restores the original order while dragging.
 - Card color and deletion actions in the card context menu. Delete expands in place to a Confirm/Cancel row before removing any card; right-clicking a text field keeps the browser's native menu.
@@ -202,10 +205,6 @@ Each grid card embeds a dropdown arrow at the right edge of its title field. It 
 
 The open primary and secondary branch stays highlighted, and each favorite title shows its active output-prompt count.
 
-The separate random icon on either category row selects that entire category: a primary category includes cards in all its secondary categories, while a secondary category includes only its own cards. In random mode, the title field displays the selected category name instead of the stored card title; the title, Prompt field, and editor are read-only, while the enabled switch remains usable. The lit random icon exits random mode and restores the stored title. Choosing one favorite card also exits random mode.
-
-On each browser-initiated run, Prompt Weaver refreshes the current user's favorite library and chooses each eligible card with equal probability. The live canvas and saved Workflow keep the category choice, while the API Prompt and that run's image-embedded Workflow contain the same fixed chosen card. Reloading the image Workflow therefore produces an ordinary fixed card. If the category is empty, missing, or unavailable, the run uses the card's original Prompt (or skips that card if it is empty) and shows a non-blocking warning. API/background runs without the browser also use the original Prompt. Archives preserve the category choice; changing favorites later affects the next browser run, not an earlier image.
-
 Hovering or keyboard-focusing a favorite shows a subdued, translucent, wrapping two-part prompt tooltip: normalized English output first, followed by Chinese translations resolved through the enabled autocomplete sources and their configured priority. The Chinese line uses full-width Chinese commas between top-level tokens, while missing translations retain the corresponding English token.
 
 Moving away from the favorite keeps the current three-level branch open but hides the tooltip once that card is neither hovered nor focused; hovering another favorite shows its tooltip, and an outside click or `Esc` closes the cascade.
@@ -219,13 +218,27 @@ Choosing a favorite updates the current grid card:
 
 Selecting the same favorite again reloads its latest saved prompt data without changing the card color.
 
-After every favorite selection and each random-mode entry, category change, or exit, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead.
+After every favorite selection, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead.
 
 The cascade automatically flips and clamps to the viewport and supports arrow keys, Home, End, Enter/Space, `Esc`, and outside-click dismissal.
 
 [![Three-level favorite selection menu opened from a grid card](./web/assets/images/cpw_card_switch.jpg)](./web/assets/images/cpw_card_switch.jpg)
 
-*Switch a grid card to a saved favorite through the category menu.*
+*Switch a grid card to a saved favorite through the category menu. This screenshot predates the random buttons described below.*
+
+### Randomize a favorite category
+
+1. Open a grid card's favorite dropdown.
+2. Click the dice icon on a primary or secondary category row, immediately to the left of the expand arrow. Clicking the category name or arrow still opens its submenu.
+3. Queue the workflow from the ComfyUI browser. Each run draws a fresh favorite from the selected category.
+
+A primary category includes every card in its secondary categories; a secondary category includes only its own cards. The card's title field shows the selected category name without changing the stored title. The lit random icon indicates the mode. The title, Prompt field, and editor are read-only, while the enabled switch remains usable.
+
+Click the lit icon to exit random mode and restore the stored title, or choose one specific favorite to switch to a fixed card. Entering or changing random mode sweeps the title and Prompt from left to right; exiting sweeps back from right to left immediately. Reduced-motion environments use a brief static highlight.
+
+On each browser-initiated run, Prompt Weaver refreshes the current user's favorite library and chooses each eligible card with equal probability. The live canvas and saved Workflow keep the category choice. The submitted API Prompt and that run's image-embedded Workflow contain the same fixed chosen card; reloading the image Workflow therefore produces an ordinary fixed card. Archives preserve the category choice, and later library changes affect only future browser runs.
+
+If the category is empty, deleted, or cannot be loaded, that run uses the card's original Prompt (or skips the card if it is empty) and shows a non-blocking warning. API/background runs without the browser also use the original Prompt rather than accessing another user's favorite library.
 
 ### Manage favorite cards
 
@@ -360,13 +373,14 @@ In an API-format prompt, `inputs.config` must be a JSON-encoded **string**, not 
 }
 ```
 
-A non-empty configuration with invalid JSON, an invalid root, invalid `version`/`items`/`enabled`/`prompt`/`retain_unselected`/`prompt_tokens` types, or an unsupported version prevents Python execution. The frontend additionally validates card IDs, titles, colors, optional `favorite_id` UUIDs, and retained-token entries. A corrupt value is preserved and the node displays **Reset to Default**. An invalid column count affects layout only and is restored to two columns.
+A non-empty configuration with invalid JSON, an invalid root, invalid `version`/`items`/`enabled`/`prompt`/`retain_unselected`/`prompt_tokens` types, or an unsupported version prevents Python execution. The frontend additionally validates card IDs, titles, colors, optional `favorite_id` UUIDs, optional `random_favorite_category` references, and retained-token entries. A corrupt value is preserved and the node displays **Reset to Default**. An invalid column count affects layout only and is restored to two columns.
 
 ## Persistence and compatibility
 
 - Grid state is saved with the workflow and supports reopening, copy, and paste on the normal canvas.
 - `prompt` always contains only the active text used for node output. Optional `retain_unselected` and `prompt_tokens` fields preserve editor state in workflows and archives; inactive tokens are validated but never appended to Python output.
 - Optional `favorite_id` links a workflow card to a user-library snapshot. It participates in workflow/archive persistence and dirty-state fingerprints but is ignored by Python execution; a missing library record never changes the saved prompt.
+- Optional `random_favorite_category` stores a category UUID and its `primary` or `secondary` level in the workflow and archives. Browser queueing replaces it in that run's submitted copies with one fixed favorite; Python execution uses the saved Prompt as a fallback when no browser performs the draw.
 - The desktop parser can recover the actual enabled prompts from either an API Prompt or UI-only Workflow embedded in image metadata.
 - Images already indexed with an empty parse result are not automatically rescanned. Use **Reparse this image** in the desktop application to bypass the old metadata cache.
 - Version 1 supports normal canvas nodes. Promoted subgraph parameters, App Mode, archive folders/tags/search, cloud sync, timed autosave, configurable separators, prefixes/suffixes, and card weights are outside the current compatibility contract.
@@ -386,9 +400,11 @@ python -m unittest discover -s tests -p "test_*.py" -v
 node --test tests/*.mjs
 ```
 
-Tests cover node configuration parsing, registration and routes, archive storage and ordering, the two-level prompt-card library, prompt-grid interaction, favorite insertion and deduplication, the prompt editor, dual-source autocomplete, dictionary validation and fallback, official locale resources, English UI fallback, and legacy data compatibility.
+Tests cover node configuration parsing, registration and routes, archive storage and ordering, the two-level prompt-card library, prompt-grid interaction, random-category selection and fixed queue snapshots, favorite insertion and deduplication, the prompt editor, dual-source autocomplete, dictionary validation and fallback, official locale resources, English UI fallback, and legacy data compatibility.
 
 Optional real DOM variable tests: run `python tests/workflow_variables_browser_server.py` and open [the regression page](http://127.0.0.1:8776/tests/workflow_variables_browser.html). It uses isolated workflow fixtures, not a running ComfyUI instance.
+
+The same isolated server also hosts [random favorite UI tests](http://127.0.0.1:8776/tests/random_favorites_browser.html), including category-menu hit targets, queue snapshots, and the exit animation.
 
 ## License
 
