@@ -1,5 +1,6 @@
 """Isolated frontend fixture; no ComfyUI installation, database or user data."""
 import json
+import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -29,7 +30,19 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/extensions":
             return self.respond([])
         if path == "/prompt-weaver/prompt-card-library":
-            return self.respond({"format_version": 1, "revision": 0, "categories": [], "cards": []})
+            if "random_fixture" not in parse_qs(urlparse(self.path).query):
+                return self.respond({"format_version": 1, "revision": 0, "categories": [], "cards": []})
+            return self.respond({"format_version": 1, "revision": 1, "categories": [
+                {"id": "11111111-1111-4111-8111-111111111111", "parent_id": None,
+                 "name": "People", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+                {"id": "22222222-2222-4222-8222-222222222222", "parent_id": "11111111-1111-4111-8111-111111111111",
+                 "name": "Common", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+            ], "cards": [
+                {"id": "33333333-3333-4333-8333-333333333333", "category_id": "22222222-2222-4222-8222-222222222222",
+                 "title": "Red", "prompt": "red hair", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+                {"id": "44444444-4444-4444-8444-444444444444", "category_id": "22222222-2222-4222-8222-222222222222",
+                 "title": "Blue", "prompt": "blue hair", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+            ]})
         if path == "/prompt-weaver/prompt-grid-archives":
             return self.respond({"format_version": 1, "revision": 0, "archives": [], "selected_archive_id": None})
         if path == "/prompt-weaver/tag-autocomplete/status":
@@ -47,8 +60,8 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("127.0.0.1", 8776), Handler)
-    print("http://127.0.0.1:8776/tests/workflow_variables_browser.html", flush=True)
+    server = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 8776), Handler)
+    print(f"http://127.0.0.1:{server.server_port}/tests/workflow_variables_browser.html", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

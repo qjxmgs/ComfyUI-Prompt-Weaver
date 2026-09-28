@@ -198,9 +198,13 @@ Empty categories can be deleted directly; deleting a branch that contains favori
 
 ### Switch a grid card to a favorite
 
-Each grid card embeds a dropdown arrow at the right edge of its title field. It opens a read-only Primary Category → Secondary Category → Favorite Card cascade: pointing at a category opens its submenu, and choosing a favorite switches the current grid card to that saved prompt snapshot.
+Each grid card embeds a dropdown arrow at the right edge of its title field. It opens a read-only Primary Category → Secondary Category → Favorite Card cascade: pointing at a category opens its submenu when there is room; in narrow windows, click to advance without overlapping the random buttons. Choosing a favorite switches the current grid card to that saved prompt snapshot.
 
 The open primary and secondary branch stays highlighted, and each favorite title shows its active output-prompt count.
+
+The separate random icon on either category row selects that entire category: a primary category includes cards in all its secondary categories, while a secondary category includes only its own cards. In random mode, the title field displays the selected category name instead of the stored card title; the title, Prompt field, and editor are read-only, while the enabled switch remains usable. The lit random icon exits random mode and restores the stored title. Choosing one favorite card also exits random mode.
+
+On each browser-initiated run, Prompt Weaver refreshes the current user's favorite library and chooses each eligible card with equal probability. The live canvas and saved Workflow keep the category choice, while the API Prompt and that run's image-embedded Workflow contain the same fixed chosen card. Reloading the image Workflow therefore produces an ordinary fixed card. If the category is empty, missing, or unavailable, the run uses the card's original Prompt (or skips that card if it is empty) and shows a non-blocking warning. API/background runs without the browser also use the original Prompt. Archives preserve the category choice; changing favorites later affects the next browser run, not an earlier image.
 
 Hovering or keyboard-focusing a favorite shows a subdued, translucent, wrapping two-part prompt tooltip: normalized English output first, followed by Chinese translations resolved through the enabled autocomplete sources and their configured priority. The Chinese line uses full-width Chinese commas between top-level tokens, while missing translations retain the corresponding English token.
 
@@ -215,7 +219,7 @@ Choosing a favorite updates the current grid card:
 
 Selecting the same favorite again reloads its latest saved prompt data without changing the card color.
 
-After every selection, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead.
+After every favorite selection and each random-mode entry, category change, or exit, a one-shot shine sweeps across the visible title and prompt text areas; reduced-motion environments use a brief static highlight instead.
 
 The cascade automatically flips and clamps to the viewport and supports arrow keys, Home, End, Enter/Space, `Esc`, and outside-click dismissal.
 

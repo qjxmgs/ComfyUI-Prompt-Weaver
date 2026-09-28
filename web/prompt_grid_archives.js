@@ -36,9 +36,17 @@ export function normalizePromptCardFavoriteId(value) {
         : null;
 }
 
+export function normalizeRandomFavoriteCategory(value) {
+    const id = normalizePromptCardFavoriteId(value?.id);
+    return id && (value?.level === "primary" || value?.level === "secondary")
+        ? { id, level: value.level }
+        : null;
+}
+
 function archiveItem(item) {
     const color = normalizePromptGridItemColor(item?.color);
     const favoriteId = normalizePromptCardFavoriteId(item?.favorite_id);
+    const randomCategory = normalizeRandomFavoriteCategory(item?.random_favorite_category);
     const retainUnselected = item?.retain_unselected !== false;
     const promptTokens = retainUnselected && Array.isArray(item?.prompt_tokens)
         ? item.prompt_tokens
@@ -58,6 +66,7 @@ function archiveItem(item) {
         prompt: item.prompt,
         ...(color ? { color } : {}),
         ...(favoriteId ? { favorite_id: favoriteId } : {}),
+        ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
         ...(!retainUnselected ? { retain_unselected: false } : {}),
         ...(hasInactiveTokens ? { prompt_tokens: promptTokens } : {}),
     };
@@ -139,12 +148,14 @@ function gridSemantics(snapshot) {
         items: snapshot.items.map((item, index) => {
             const color = normalizePromptGridItemColor(item?.color);
             const favoriteId = normalizePromptCardFavoriteId(item?.favorite_id);
+            const randomCategory = normalizeRandomFavoriteCategory(item?.random_favorite_category);
             return {
                 enabled: item.enabled,
                 title: pristineDefault ? `__prompt_weaver_default_${index + 1}__` : item.title,
                 prompt: item.prompt,
                 ...(color ? { color } : {}),
                 ...(favoriteId ? { favorite_id: favoriteId } : {}),
+                ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
                 ...(item.retain_unselected === false ? { retain_unselected: false } : {}),
                 ...(Array.isArray(item.prompt_tokens) && item.prompt_tokens.some((entry) => !entry.selected)
                     ? {

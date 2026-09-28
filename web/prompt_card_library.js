@@ -1,7 +1,8 @@
 import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
-} from "./prompt_grid_archives.js?v=20260923-sqlite-filter-v1";
+    normalizeRandomFavoriteCategory,
+} from "./prompt_grid_archives.js?v=20260928-random-favorites-v7";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
 import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
 
@@ -344,6 +345,7 @@ export function replacePromptGridItemWithFavorite(item, favorite) {
         retain_unselected: _discardedRetainUnselected,
         prompt_tokens: _discardedPromptTokens,
         favorite_id: _discardedFavoriteId,
+        random_favorite_category: _discardedRandomCategory,
         ...preserved
     } = item && typeof item === "object" ? item : {};
     const favoriteId = normalizePromptCardFavoriteId(favorite?.id);
@@ -358,6 +360,65 @@ export function replacePromptGridItemWithFavorite(item, favorite) {
         ...(currentColor ? { color: currentColor } : {}),
         ...(favoriteId ? { favorite_id: favoriteId } : {}),
     };
+}
+
+export function favoriteCardsInRandomCategory(library, selection) {
+    const randomCategory = normalizeRandomFavoriteCategory(selection);
+    if (!randomCategory || !Array.isArray(library?.categories) || !Array.isArray(library?.cards)) return [];
+    const category = library.categories.find((entry) => entry.id === randomCategory.id);
+    if (!category || (randomCategory.level === "primary") !== (category.parent_id === null)) return [];
+    const categoryIds = randomCategory.level === "primary"
+        ? new Set(library.categories.filter((entry) => entry.parent_id === category.id).map((entry) => entry.id))
+        : new Set([category.id]);
+    return library.cards.filter((card) => categoryIds.has(card.category_id));
+}
+
+export function resolveRandomFavoriteConfig(config, library, random = Math.random) {
+    let missing = false;
+    const items = config.items.map((item) => {
+        const selection = normalizeRandomFavoriteCategory(item.random_favorite_category);
+        if (!selection) return item;
+        const { random_favorite_category: _discarded, ...fallback } = item;
+        const candidates = favoriteCardsInRandomCategory(library, selection);
+        if (!candidates.length) {
+            missing = true;
+            return fallback;
+        }
+        const index = Math.min(candidates.length - 1, Math.max(0, Math.floor(random() * candidates.length)));
+        return replacePromptGridItemWithFavorite(fallback, candidates[index]);
+    });
+    return { config: { ...config, items }, missing };
+}
+
+export function materializeRandomFavoriteExecution(result, library, random = Math.random) {
+    let missing = false;
+    let incompatible = false;
+    const workflowNodes = new Map((result?.workflow?.nodes ?? []).map((node) => [String(node.id), node]));
+    for (const [nodeId, outputNode] of Object.entries(result?.output ?? {})) {
+        if (outputNode?.class_type !== "PromptWeaverPromptToggleGrid") continue;
+        const original = outputNode.inputs?.config;
+        if (typeof original !== "string") continue;
+        let config;
+        try {
+            config = JSON.parse(original);
+        } catch {
+            continue;
+        }
+        if (!Array.isArray(config?.items) || !config.items.some((item) => item.random_favorite_category)) continue;
+        const workflowNode = workflowNodes.get(String(nodeId));
+        const values = workflowNode?.widgets_values;
+        const index = Array.isArray(values) ? values.indexOf(original) : -1;
+        if (index < 0) {
+            incompatible = true;
+            continue;
+        }
+        const selected = resolveRandomFavoriteConfig(config, library, random);
+        const fixed = JSON.stringify(selected.config);
+        values[index] = fixed;
+        outputNode.inputs.config = fixed;
+        missing ||= selected.missing;
+    }
+    return { missing, incompatible };
 }
 
 export function promptCardFavoritePath(library, favoriteId) {
@@ -674,6 +735,7 @@ export function getPromptCardLibraryService(api) {
 
 export function promptCardCascadePanelPosition({
     anchorRect,
+    parentPanelRect = null,
     width,
     height,
     viewportWidth,
@@ -690,8 +752,11 @@ export function promptCardCascadePanelPosition({
     let x;
     let y;
     if (submenu) {
-        const right = (Number(anchor.right) || 0) + safeGap;
-        const left = (Number(anchor.left) || 0) - panelWidth - safeGap;
+        // Category rows include a separate random button. The submenu must be
+        // placed beyond the *whole* parent panel, not just its text button.
+        const parent = parentPanelRect ?? anchor;
+        const right = (Number(parent.right) || 0) + safeGap;
+        const left = (Number(parent.left) || 0) - panelWidth - safeGap;
         x = right + panelWidth + safeMargin <= viewportWidth ? right : left;
         y = Number(anchor.top) || 0;
     } else {
@@ -748,6 +813,7 @@ export function openPromptCardFavoriteCascade({
     service,
     anchor,
     onChooseCard = null,
+    onChooseCategory = null,
     resolvePromptTip = null,
     onClose = null,
 }) {
@@ -861,6 +927,10 @@ export function openPromptCardFavoriteCascade({
             const expanded = selected && panels[level + 1]?._promptCardCascadeAnchor === button;
             button.classList.toggle("cpw-prompt-card-cascade__item--selected", selected);
             button.setAttribute("aria-expanded", String(expanded));
+            const row = button.closest(".cpw-prompt-card-cascade__category-row");
+            row?.classList.toggle("cpw-prompt-card-cascade__category-row--selected", selected);
+            const expandButton = row?.querySelector(".cpw-prompt-card-cascade__expand");
+            expandButton?.setAttribute("aria-expanded", String(expanded));
         }
     };
 
@@ -904,6 +974,7 @@ export function openPromptCardFavoriteCascade({
         const rect = panel.getBoundingClientRect();
         const position = promptCardCascadePanelPosition({
             anchorRect,
+            parentPanelRect: panels[Number(panel.dataset.level) - 1]?.getBoundingClientRect(),
             width: rect.width,
             height: rect.height,
             viewportWidth: window.innerWidth,
@@ -914,12 +985,29 @@ export function openPromptCardFavoriteCascade({
         panel.style.top = `${Math.round(position.y)}px`;
     };
 
+    const updatePanelVisibility = () => {
+        const rects = panels.map((panel) => panel.getBoundingClientRect());
+        panels.forEach((panel, index) => {
+            const rect = rects[index];
+            const covered = rects.some((later, laterIndex) => laterIndex > index
+                && rect.left < later.right && later.left < rect.right
+                && rect.top < later.bottom && later.top < rect.bottom);
+            panel.classList.toggle("cpw-prompt-card-cascade__panel--covered", covered);
+        });
+        panels.forEach((panel, index) => {
+            panel.classList.toggle("cpw-prompt-card-cascade__panel--show-back", index > 0
+                && panels[index - 1].classList.contains("cpw-prompt-card-cascade__panel--covered")
+                && !panel.classList.contains("cpw-prompt-card-cascade__panel--covered"));
+        });
+    };
+
     const repositionPanels = () => {
         if (!anchor?.isConnected) {
             close({ restoreFocus: false });
             return;
         }
         for (const panel of panels) positionPanel(panel);
+        updatePanelVisibility();
         positionFavoriteTooltip();
     };
 
@@ -932,12 +1020,23 @@ export function openPromptCardFavoriteCascade({
             ? "Primary Categories"
             : (level === 1 ? "Secondary Categories" : "My Favorites")));
         panel._promptCardCascadeAnchor = panelAnchor;
+        if (level > 0) {
+            const back = element("button", "cpw-prompt-card-cascade__back", `‹ ${t(level === 1
+                ? "Primary Categories" : "Secondary Categories")}`);
+            back.type = "button";
+            back.addEventListener("click", () => {
+                removePanelsFrom(level);
+                repositionPanels();
+                panelAnchor?.focus?.();
+            });
+            panel.append(back);
+        }
         panel.addEventListener("pointerenter", () => {
             if (level < 2) hideFavoriteTooltip();
         });
         panel.addEventListener("keydown", (event) => {
             const items = [...panel.querySelectorAll(
-                ".cpw-prompt-card-cascade__item:not([disabled]), .cpw-prompt-card-cascade__favorite-delete:not([disabled])",
+                ".cpw-prompt-card-cascade__panel--show-back .cpw-prompt-card-cascade__back, .cpw-prompt-card-cascade__item:not([disabled]), .cpw-prompt-card-cascade__random:not([disabled]), .cpw-prompt-card-cascade__expand:not([disabled]), .cpw-prompt-card-cascade__favorite-delete:not([disabled])",
             )];
             const current = items.indexOf(document.activeElement);
             let nextIndex = null;
@@ -966,6 +1065,7 @@ export function openPromptCardFavoriteCascade({
                 event.stopPropagation();
                 const parentButton = panel._promptCardCascadeAnchor;
                 removePanelsFrom(level);
+                repositionPanels();
                 parentButton?.focus?.();
                 return;
             } else if ((event.key === "Enter" || event.key === " ") && current >= 0) {
@@ -981,7 +1081,7 @@ export function openPromptCardFavoriteCascade({
         });
         root.append(panel);
         panels.push(panel);
-        queueMicrotask(() => positionPanel(panel));
+        queueMicrotask(repositionPanels);
         return panel;
     };
 
@@ -1000,14 +1100,69 @@ export function openPromptCardFavoriteCascade({
         button.dataset.categoryId = category.id;
         button.dataset.cascadeLevel = String(level);
         button.setAttribute("aria-expanded", "false");
-        button.append(
-            element("span", "cpw-prompt-card-cascade__label", category.name),
-            element("span", "cpw-prompt-card-cascade__chevron", "›"),
-        );
+        button.append(element("span", "cpw-prompt-card-cascade__label", category.name));
         button._promptCardOpenSubmenu = openSubmenu;
-        button.addEventListener("pointerenter", openSubmenu);
+        const hoverOpenSubmenu = () => {
+            const parentPanel = button.closest(".cpw-prompt-card-cascade__panel");
+            if (!parentPanel) return;
+            const panelWidth = Math.min(196, Math.max(0, window.innerWidth - 12));
+            const position = promptCardCascadePanelPosition({
+                anchorRect: button.getBoundingClientRect(),
+                parentPanelRect: parentPanel.getBoundingClientRect(),
+                width: panelWidth,
+                height: 0,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                submenu: true,
+            });
+            // Hover must not hide a category's random action before the user
+            // can click it. In a cramped viewport, require an explicit click.
+            const coversAncestor = panels.slice(0, level + 1).some((ancestor) => {
+                const rect = ancestor.getBoundingClientRect();
+                return position.x < rect.right && rect.left < position.x + panelWidth;
+            });
+            if (!coversAncestor) openSubmenu();
+        };
+        button.addEventListener("pointerenter", hoverOpenSubmenu);
+        button._promptCardHoverSubmenu = hoverOpenSubmenu;
         button.addEventListener("click", openSubmenu);
         return button;
+    };
+
+    const categoryRow = (category, level, openSubmenu) => {
+        const row = element("div", "cpw-prompt-card-cascade__category-row");
+        row.setAttribute("role", "none");
+        const button = categoryButton(category, level, openSubmenu);
+        const randomButton = element("button", "cpw-prompt-card-cascade__random");
+        randomButton.type = "button";
+        randomButton.setAttribute("role", "menuitem");
+        randomButton.dataset.categoryId = category.id;
+        randomButton.dataset.cascadeLevel = String(level);
+        const label = t("Choose a random card from {category}", { category: category.name });
+        randomButton.title = label;
+        randomButton.setAttribute("aria-label", label);
+        randomButton.append(element("span", "cpw-prompt-card-cascade__random-icon"));
+        randomButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            onChooseCategory?.({ id: category.id, level: level === 0 ? "primary" : "secondary" });
+            close({ restoreFocus: false });
+        });
+        const expandButton = element("button", "cpw-prompt-card-cascade__expand");
+        expandButton.type = "button";
+        expandButton.setAttribute("role", "menuitem");
+        expandButton.setAttribute("aria-haspopup", "menu");
+        expandButton.setAttribute("aria-expanded", "false");
+        expandButton.dataset.categoryId = category.id;
+        expandButton.dataset.cascadeLevel = String(level);
+        const expandLabel = t("Open {category}", { category: category.name });
+        expandButton.title = expandLabel;
+        expandButton.setAttribute("aria-label", expandLabel);
+        expandButton.append(element("span", "cpw-prompt-card-cascade__chevron", "›"));
+        expandButton._promptCardOpenSubmenu = openSubmenu;
+        expandButton.addEventListener("pointerenter", button._promptCardHoverSubmenu);
+        expandButton.addEventListener("click", openSubmenu);
+        row.append(button, randomButton, expandButton);
+        return { row, button };
     };
 
     const favoriteRow = (card) => {
@@ -1099,7 +1254,7 @@ export function openPromptCardFavoriteCascade({
             panel.append(emptyRow(t("There are no favorite cards in this category.")));
         }
         deleteController.sync();
-        positionPanel(panel);
+        repositionPanels();
     };
 
     const openSecondaryPanel = (primary, button, { preserveFavoriteError = false } = {}) => {
@@ -1113,13 +1268,14 @@ export function openPromptCardFavoriteCascade({
             for (const category of categories) {
                 let categoryNode = null;
                 const openSubmenu = () => openFavoritePanel(category, categoryNode);
-                categoryNode = categoryButton(category, 1, openSubmenu);
-                panel.append(categoryNode);
+                const result = categoryRow(category, 1, openSubmenu);
+                categoryNode = result.button;
+                panel.append(result.row);
             }
         } else {
             panel.append(emptyRow(t("There are no secondary categories.")));
         }
-        positionPanel(panel);
+        repositionPanels();
     };
 
     const renderPrimaryPanel = ({ focus = false, error = null } = {}) => {
@@ -1140,14 +1296,15 @@ export function openPromptCardFavoriteCascade({
                 for (const category of categories) {
                     let categoryNode = null;
                     const openSubmenu = () => openSecondaryPanel(category, categoryNode);
-                    categoryNode = categoryButton(category, 0, openSubmenu);
-                    panel.append(categoryNode);
+                    const result = categoryRow(category, 0, openSubmenu);
+                    categoryNode = result.button;
+                    panel.append(result.row);
                 }
             } else {
                 panel.append(emptyRow(t("There are no primary categories.")));
             }
         }
-        positionPanel(panel);
+        repositionPanels();
         if (focus) queueMicrotask(() => panel.querySelector("button:not([disabled])")?.focus());
     };
 
@@ -1212,6 +1369,8 @@ export function openPromptCardFavoriteCascade({
     const refreshLocale = () => {
         if (closed) return;
         const focusedCategoryId = document.activeElement?.dataset?.categoryId ?? null;
+        const focusedRandom = document.activeElement?.classList?.contains("cpw-prompt-card-cascade__random") ?? false;
+        const focusedExpand = document.activeElement?.classList?.contains("cpw-prompt-card-cascade__expand") ?? false;
         const focusedFavoriteId = document.activeElement
             ?.closest?.("[data-favorite-card-id]")
             ?.dataset?.favoriteCardId ?? null;
@@ -1223,7 +1382,7 @@ export function openPromptCardFavoriteCascade({
         const nextFocus = focusedFavoriteId
             ? root.querySelector(`[data-favorite-card-id="${focusedFavoriteId}"] .cpw-prompt-card-cascade__item--favorite`)
             : focusedCategoryId
-                ? root.querySelector(`[data-category-id="${focusedCategoryId}"]`)
+                ? root.querySelector(`${focusedRandom ? ".cpw-prompt-card-cascade__random" : focusedExpand ? ".cpw-prompt-card-cascade__expand" : ".cpw-prompt-card-cascade__item"}[data-category-id="${focusedCategoryId}"]`)
                 : null;
         nextFocus?.focus?.({ preventScroll: true });
     };

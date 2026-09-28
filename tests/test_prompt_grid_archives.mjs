@@ -142,6 +142,18 @@ test("favorite links survive archive round trips and participate in dirty state"
     assert.equal(snapshotFromState(linkedState).items[0].favorite_id, undefined);
 });
 
+test("random favorite categories survive archive round trips and change dirty state", () => {
+    const randomState = structuredClone(state);
+    randomState.items[0].random_favorite_category = {
+        id: "33333333-3333-4333-8333-333333333333",
+        level: "primary",
+    };
+    const saved = snapshotFromState(randomState);
+    assert.deepEqual(configFromArchiveSnapshot(saved).items[0].random_favorite_category,
+        randomState.items[0].random_favorite_category);
+    assert.notEqual(semanticFingerprint(saved), semanticFingerprint(snapshotFromState(state)));
+});
+
 test("semantic fingerprints ignore internal ids but preserve visible order and state", () => {
     const left = snapshotFromState(state);
     const right = structuredClone(left);
@@ -502,6 +514,8 @@ test("prompt grid toolbar uses one accessible three-state master toggle", async 
 });
 
 test("toolbar and favorite icon assets are valid PNG files", async () => {
+    const randomIcon = await readFile(new URL("../web/assets/icons/ic_random.png", import.meta.url));
+    assert.deepEqual([...randomIcon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
     for (const fileName of ["ic_save.png", "ic_restore.png", "ic_manage.png"]) {
         const png = await readFile(
             new URL(`../web/assets/icons/${fileName}`, import.meta.url),

@@ -22,7 +22,7 @@ const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_grid_archives.js?v=20260923-sqlite-filter-v1", archiveUrl)
+    .replace("./prompt_grid_archives.js?v=20260928-random-favorites-v7", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
     .replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
@@ -43,6 +43,9 @@ const {
     promptCardFavoritePath,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
+    favoriteCardsInRandomCategory,
+    resolveRandomFavoriteConfig,
+    materializeRandomFavoriteExecution,
     setPromptCardLibraryControlsBusy,
 } = await import(favoriteUrl);
 
@@ -50,6 +53,62 @@ const PRIMARY_ID = "11111111-1111-4111-8111-111111111111";
 const SECONDARY_ID = "22222222-2222-4222-8222-222222222222";
 const CARD_ID = "33333333-3333-4333-8333-333333333333";
 const CREATED_AT = "2026-08-30T00:00:00.000Z";
+
+test("random category candidates respect category levels and each draw creates a fixed execution snapshot", () => {
+    const secondBranch = "44444444-4444-4444-8444-444444444444";
+    const otherCard = "55555555-5555-4555-8555-555555555555";
+    const library = libraryPayload();
+    library.categories.push({ id: secondBranch, parent_id: PRIMARY_ID, name: "other" });
+    library.cards.push({ ...library.cards[0], id: otherCard, category_id: secondBranch, title: "second", prompt: "blue hair" });
+    const primary = { id: PRIMARY_ID, level: "primary" };
+    const secondary = { id: SECONDARY_ID, level: "secondary" };
+    assert.equal(favoriteCardsInRandomCategory(library, primary).length, 2);
+    assert.deepEqual(favoriteCardsInRandomCategory(library, secondary).map((card) => card.id), [CARD_ID]);
+    assert.deepEqual(favoriteCardsInRandomCategory(library, { id: otherCard, level: "primary" }), []);
+    const original = { version: 1, columns: 2, items: [
+        { id: "grid-1", enabled: true, title: "original", prompt: "fallback", color: "green", random_favorite_category: primary },
+        { id: "grid-2", enabled: false, title: "disabled", prompt: "old", random_favorite_category: secondary },
+    ] };
+    const first = resolveRandomFavoriteConfig(original, library, () => 0);
+    const second = resolveRandomFavoriteConfig(original, library, () => 0.999999);
+    assert.equal(first.config.items[0].prompt, "1girl");
+    assert.equal(second.config.items[0].prompt, "blue hair");
+    assert.equal(first.config.items[0].color, "green");
+    assert.equal(first.config.items[0].id, "grid-1");
+    assert.equal(first.config.items[0].enabled, true);
+    assert.equal(first.config.items[0].random_favorite_category, undefined);
+    assert.deepEqual(original.items[0].random_favorite_category, primary);
+    const fallback = resolveRandomFavoriteConfig(original, null);
+    assert.equal(fallback.missing, true);
+    assert.equal(fallback.config.items[0].prompt, "fallback");
+    assert.equal(fallback.config.items[0].random_favorite_category, undefined);
+
+    const serialized = JSON.stringify(original);
+    const payload = { output: { "7": { class_type: "PromptWeaverPromptToggleGrid", inputs: { config: serialized } } },
+        workflow: { nodes: [{ id: 7, widgets_values: [serialized] }] } };
+    assert.deepEqual(materializeRandomFavoriteExecution(payload, library, () => 0), { missing: false, incompatible: false });
+    assert.equal(payload.output["7"].inputs.config, payload.workflow.nodes[0].widgets_values[0]);
+    assert.equal(JSON.parse(payload.output["7"].inputs.config).items[0].favorite_id, CARD_ID);
+    assert.equal(JSON.parse(serialized).items[0].random_favorite_category.level, "primary");
+});
+
+test("missing or moved categories fall back and incompatible Workflow metadata is left untouched", () => {
+    const selection = { id: SECONDARY_ID, level: "secondary" };
+    const config = { version: 1, items: [
+        { id: "grid", enabled: true, title: "original", prompt: "fallback", random_favorite_category: selection },
+    ] };
+    const library = libraryPayload();
+    library.cards[0].category_id = "66666666-6666-4666-8666-666666666666";
+    const result = resolveRandomFavoriteConfig(config, library);
+    assert.equal(result.missing, true);
+    assert.equal(result.config.items[0].prompt, "fallback");
+    const serialized = JSON.stringify(config);
+    const payload = { output: { "9": { class_type: "PromptWeaverPromptToggleGrid", inputs: { config: serialized } } },
+        workflow: { nodes: [{ id: 9, widgets_values: ["unrelated"] }] } };
+    assert.deepEqual(materializeRandomFavoriteExecution(payload, library), { missing: false, incompatible: true });
+    assert.equal(payload.output["9"].inputs.config, serialized);
+    assert.equal(payload.workflow.nodes[0].widgets_values[0], "unrelated");
+});
 
 function libraryPayload() {
     return {
@@ -465,6 +524,24 @@ test("cascade panels open below the title and flip submenus at the viewport edge
         viewportHeight: 400,
         submenu: true,
     }), { x: 100, y: 40 });
+    assert.deepEqual(promptCardCascadePanelPosition({
+        anchorRect: { left: 10, right: 168, top: 40, bottom: 71 },
+        parentPanelRect: { left: 6, right: 202, top: 34, bottom: 250 },
+        width: 196,
+        height: 180,
+        viewportWidth: 600,
+        viewportHeight: 400,
+        submenu: true,
+    }), { x: 206, y: 40 });
+    assert.deepEqual(promptCardCascadePanelPosition({
+        anchorRect: { left: 330, right: 488, top: 40, bottom: 71 },
+        parentPanelRect: { left: 326, right: 522, top: 34, bottom: 250 },
+        width: 196,
+        height: 180,
+        viewportWidth: 600,
+        viewportHeight: 400,
+        submenu: true,
+    }), { x: 126, y: 40 });
 });
 
 test("cascade prompt tips prefer available space and stay inside the viewport", () => {
@@ -495,15 +572,31 @@ test("frontend integrates compact card and editor actions with responsive cascad
         new URL("../web/prompt_toggle_grid.css", import.meta.url),
         "utf8",
     );
-    assert.match(gridSource, /titleShell\.append\(title, favoriteSwitchButton\)/);
+    assert.match(gridSource, /titleShell\.append\(title\)/);
+    assert.match(gridSource, /titleShell\.append\(favoriteSwitchButton\)/);
+    assert.match(gridSource, /cpw-prompt-grid__random-mode/);
+    assert.match(gridSource, /prompt\.readOnly = Boolean\(randomCategory\)/);
+    assert.match(gridSource, /title\.value = randomCategory \? randomCategoryName\(randomCategory\) : item\.title/);
+    assert.match(gridSource, /title\.readOnly = Boolean\(randomCategory\)/);
+    assert.match(gridSource, /pendingFavoriteRefreshDirections\.set\(itemId, "forward"\);\s*commit\(true, true\)/);
+    assert.match(gridSource, /pendingFavoriteRefreshDirections\.set\(itemId, "reverse"\);\s*commit\(true, true\)/);
+    assert.match(gridSource, /pendingFavoriteRefreshDirections\.set\(itemId, current\.random_favorite_category \? "reverse" : "forward"\)/);
+    assert.match(gridSource, /onChooseCategory: \(selection\) => chooseRandomFavoriteCategory/);
+    assert.match(gridSource, /materializeRandomFavoriteExecution\(payload, library\)/);
+    assert.match(favoriteSource, /cpw-prompt-card-cascade__random/);
+    assert.match(favoriteSource, /row\.append\(button, randomButton, expandButton\)/);
+    assert.match(favoriteSource, /expandButton\._promptCardOpenSubmenu = openSubmenu/);
+    assert.match(favoriteSource, /expandButton\.addEventListener\("click", openSubmenu\)/);
+    assert.match(favoriteSource, /\.cpw-prompt-card-cascade__expand:not\(\[disabled\]\)/);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__random,\s*\.cpw-prompt-card-cascade__expand\s*\{\s*flex:\s*0 0 30px/);
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260923-sqlite-filter-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260926-variable-token-preview-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20260928-random-favorites-v7/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260928-random-favorites-v7/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
-    assert.match(gridSource, /pendingFavoriteRefreshItems\.add\(itemId\)[\s\S]*commit\(true, true\)/);
+    assert.match(gridSource, /queueMicrotask\(\(\) => playFavoriteRefreshAnimation\(item\.id, card, refreshDirection\)\)/);
     assert.match(gridSource, /footer\.append\(modeActions\);[\s\S]*if \(!favoriteUpdateMode\) footer\.append\(favoriteActions\);[\s\S]*footer\.append\(commitActions\)/);
     assert.doesNotMatch(gridSource, /const selectionActions = element/);
     assert.match(gridSource, /const currentEditorFavoriteSnapshot = \(\) => \{/);
@@ -513,6 +606,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /export function openPromptCardFavoriteCascade/);
     assert.match(favoriteSource, /splitPromptTokens\(value\?\.prompt\)\.length/);
     assert.match(favoriteSource, /cpw-prompt-card-cascade__item--selected/);
+    assert.match(favoriteSource, /row\?\.classList\.toggle\("cpw-prompt-card-cascade__category-row--selected", selected\)/);
     assert.match(favoriteSource, /button\.setAttribute\("aria-expanded", String\(expanded\)\)/);
     assert.match(favoriteSource, /cpw-prompt-card-cascade__favorite-count/);
     assert.match(favoriteSource, /FAVORITE_DELETE_CONFIRM_MS = 3_000/);
@@ -646,6 +740,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-grid__favorite-switch\s*\{[^}]*position:\s*absolute;[^}]*right:\s*1px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__panel\s*\{[^}]*position:\s*fixed;[^}]*width:\s*min\(196px,/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__item--selected/);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__category-row--selected\s*\{[^}]*background:\s*color-mix/s);
+    assert.match(cssSource, /\.cpw-prompt-card-cascade__category-row--selected \.cpw-prompt-card-cascade__item--selected[^}]*background:\s*transparent/s);
     assert.match(cssSource, /\.cpw-prompt-card-cascade__favorite-row\s*\{[^}]*position:\s*relative;/s);
     assert.match(cssSource, /\.cpw-prompt-card-favorite-delete\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px;[^}]*border-radius:\s*4px;[^}]*color:\s*var\(--error-text,/s);
     assert.match(cssSource, /\.cpw-prompt-card-favorite-delete:hover:not\(:disabled\)[\s\S]*\.cpw-prompt-card-favorite-delete--armed\s*\{[^}]*color:\s*#fff;[^}]*background:\s*color-mix/s);
@@ -662,6 +758,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /@keyframes cpw-prompt-grid-favorite-shine/);
     assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed \.cpw-prompt-grid__title-shell::after/);
     assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed \.cpw-prompt-grid__prompt-row::after/);
+    assert.match(cssSource, /\.cpw-prompt-grid__card--favorite-refreshed-reverse \.cpw-prompt-grid__title-shell::after,[\s\S]*animation:\s*cpw-prompt-grid-favorite-shine-return 720ms/);
+    assert.match(cssSource, /@keyframes cpw-prompt-grid-favorite-shine-return\s*\{\s*0%\s*\{\s*opacity:\s*0\.82;\s*transform:\s*translateX\(45%\)/);
     assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*190px\s+190px\s+minmax\(240px,\s*1fr\);/s);
     assert.doesNotMatch(cssSource, /\.cpw-prompt-card-library--assign \.cpw-prompt-card-library__panels\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr;/s);

@@ -186,6 +186,8 @@ def validate_snapshot(value):
         color = item.get("color")
         has_favorite_id = "favorite_id" in item
         favorite_id = item.get("favorite_id")
+        has_random_category = "random_favorite_category" in item
+        random_category = item.get("random_favorite_category")
         has_retain_unselected = "retain_unselected" in item
         retain_unselected = item.get("retain_unselected", True)
         has_prompt_tokens = "prompt_tokens" in item
@@ -210,6 +212,21 @@ def validate_snapshot(value):
             except (ValueError, TypeError, AttributeError) as error:
                 raise ArchiveValidationError(
                     f"snapshot items[{index}].favorite_id must be a UUID string"
+                ) from error
+        if has_random_category:
+            if not isinstance(random_category, dict) or random_category.get("level") not in (
+                    "primary", "secondary"):
+                raise ArchiveValidationError(
+                    f"snapshot items[{index}].random_favorite_category is invalid"
+                )
+            try:
+                random_category = {
+                    "id": str(uuid.UUID(random_category.get("id"))),
+                    "level": random_category["level"],
+                }
+            except (ValueError, TypeError, AttributeError) as error:
+                raise ArchiveValidationError(
+                    f"snapshot items[{index}].random_favorite_category.id must be a UUID string"
                 ) from error
         if has_retain_unselected and not isinstance(retain_unselected, bool):
             raise ArchiveValidationError(
@@ -254,6 +271,8 @@ def validate_snapshot(value):
             normalized_item["color"] = color
         if has_favorite_id:
             normalized_item["favorite_id"] = favorite_id
+        if has_random_category:
+            normalized_item["random_favorite_category"] = random_category
         if retain_unselected is False:
             normalized_item["retain_unselected"] = False
         elif any(not token["selected"] for token in normalized_prompt_tokens):

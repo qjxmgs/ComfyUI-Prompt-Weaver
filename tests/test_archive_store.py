@@ -159,6 +159,21 @@ class ArchiveStoreTests(unittest.TestCase):
         colored_value = snapshot("colored")
         colored_value["items"][0]["color"] = "pink"
         self.assertEqual(validate_snapshot(colored_value), colored_value)
+        random_value = snapshot("random")
+        random_value["items"][0]["random_favorite_category"] = {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "level": "secondary",
+        }
+        self.assertEqual(validate_snapshot(random_value), random_value)
+        invalid_random = snapshot("invalid-random")
+        invalid_random["items"][0]["random_favorite_category"] = {
+            "id": "bad", "level": "primary",
+        }
+        with self.assertRaises(ArchiveValidationError):
+            validate_snapshot(invalid_random)
+        invalid_random["items"][0]["random_favorite_category"] = None
+        with self.assertRaises(ArchiveValidationError):
+            validate_snapshot(invalid_random)
         retained_value = snapshot("retained")
         retained_value["items"][0]["prompt_tokens"] = [
             {"text": "prompt retained", "selected": True},

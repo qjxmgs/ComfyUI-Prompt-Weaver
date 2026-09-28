@@ -17,12 +17,13 @@ import {
     normalizeArchiveNodeSize,
     normalizeArchiveManagerSelection,
     normalizePromptCardFavoriteId,
+    normalizeRandomFavoriteCategory,
     normalizePromptGridItemColor,
     resolveArchiveInitialization,
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260923-sqlite-filter-v1";
+} from "./prompt_grid_archives.js?v=20260928-random-favorites-v7";
 import {
     getPromptCardLibraryService,
     favoriteCardBilingualPrompt,
@@ -30,7 +31,8 @@ import {
     openPromptCardLibraryMenu,
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
-} from "./prompt_card_library.js?v=20260923-sqlite-filter-v1";
+    materializeRandomFavoriteExecution,
+} from "./prompt_card_library.js?v=20260928-random-favorites-v7";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
@@ -392,6 +394,14 @@ function normalizeConfigValue(value) {
             throw configError(t("items[{index}].favorite_id must be a UUID string", { index }));
         }
         if (hasFavoriteId && favoriteId !== item.favorite_id) normalized = true;
+        const hasRandomCategory = Object.prototype.hasOwnProperty.call(item, "random_favorite_category");
+        const randomCategory = normalizeRandomFavoriteCategory(item.random_favorite_category);
+        if (hasRandomCategory && !randomCategory) {
+            throw configError(t("items[{index}].random_favorite_category is invalid", { index }));
+        }
+        if (hasRandomCategory && JSON.stringify(randomCategory) !== JSON.stringify(item.random_favorite_category)) {
+            normalized = true;
+        }
 
         let id = typeof item.id === "string" && item.id.trim() ? item.id : createId();
         if (usedIds.has(id)) throw configError(t("items[{index}].id duplicates another card", { index }));
@@ -403,6 +413,7 @@ function normalizeConfigValue(value) {
         const {
             color: _discardedColor,
             favorite_id: _discardedFavoriteId,
+            random_favorite_category: _discardedRandomCategory,
             retain_unselected: _discardedRetainUnselected,
             prompt_tokens: _discardedPromptTokens,
             ...itemWithoutEditorState
@@ -434,6 +445,7 @@ function normalizeConfigValue(value) {
             prompt,
             ...(color ? { color } : {}),
             ...(favoriteId ? { favorite_id: favoriteId } : {}),
+            ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && normalizedTokenStates
                 ? { prompt_tokens: normalizedTokenStates }
@@ -733,7 +745,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260926-variable-token-preview-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20260928-random-favorites-v7", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -928,7 +940,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     const cardAutocompleteControllers = new Set();
     const reorderAnimations = new WeakMap();
     const archiveReorderAnimations = new WeakMap();
-    const pendingFavoriteRefreshItems = new Set();
+    const pendingFavoriteRefreshDirections = new Map();
     const favoriteRefreshTimers = new Map();
     promptCardLibraryService.refresh().catch((error) => {
         console.warn("[Prompt Weaver] Could not load favorite cards", error);
@@ -954,6 +966,32 @@ function createPromptGridWidget(node, inputName, inputData) {
             toggleState === "mixed" ? "mixed" : String(toggleState === "on"),
         );
     }
+
+    function randomCategoryName(selection) {
+        return promptCardLibraryService.library.categories.find(
+            (category) => category.id === selection?.id,
+        )?.name ?? t("selected category");
+    }
+
+    function refreshRandomCategoryLabels() {
+        for (const button of root.querySelectorAll(".cpw-prompt-grid__random-mode")) {
+            const card = button.closest(".cpw-prompt-grid__card");
+            const item = state?.items.find((candidate) => candidate.id === card?.dataset.itemId);
+            const categoryName = randomCategoryName(item?.random_favorite_category);
+            const label = t("Random favorite from {category}. Click to exit random mode", { category: categoryName });
+            button.title = label;
+            button.setAttribute("aria-label", label);
+            const title = card?.querySelector(".cpw-prompt-grid__title");
+            if (title?.readOnly) {
+                title.value = categoryName;
+                const titleLabel = t("Random favorite category: {category}", { category: categoryName });
+                title.title = titleLabel;
+                title.setAttribute("aria-label", titleLabel);
+            }
+        }
+    }
+
+    const unsubscribeFavoriteLabels = promptCardLibraryService.subscribe(refreshRandomCategoryLabels);
 
     function refreshLocale() {
         if (disposed) return;
@@ -986,11 +1024,14 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (promptInput) {
                 promptInput.placeholder = t("Enter a prompt…");
                 promptInput.setAttribute("aria-label", t("Prompt content"));
+                if (promptInput.readOnly) promptInput.title = t("Random mode: prompt editing is disabled");
             }
             const editButton = card.querySelector(".cpw-prompt-grid__prompt-edit");
             if (editButton) {
-                editButton.title = t("Split and select prompts");
-                editButton.setAttribute("aria-label", t("Open the prompt tag editor"));
+                editButton.title = t(editButton.disabled
+                    ? "Random mode: prompt editing is disabled" : "Split and select prompts");
+                editButton.setAttribute("aria-label", t(editButton.disabled
+                    ? "Random mode: prompt editing is disabled" : "Open the prompt tag editor"));
             }
         }
         for (const button of root.querySelectorAll(".cpw-prompt-grid__favorite-switch")) {
@@ -998,6 +1039,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             button.title = label;
             button.setAttribute("aria-label", label);
         }
+        refreshRandomCategoryLabels();
         activePromptEditor?.refreshLocale?.();
         activePromptCardLibraryMenu?.refreshLocale?.();
         renderArchiveSelect();
@@ -2721,16 +2763,17 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteRefreshTimers.clear();
     }
 
-    function playFavoriteRefreshAnimation(itemId, card = cardElements.get(itemId)) {
+    function playFavoriteRefreshAnimation(itemId, card = cardElements.get(itemId), direction = "forward") {
         if (!card?.isConnected) return;
         const previousTimer = favoriteRefreshTimers.get(itemId);
         if (previousTimer) clearTimeout(previousTimer);
-        card.classList.remove("cpw-prompt-grid__card--favorite-refreshed");
+        card.classList.remove("cpw-prompt-grid__card--favorite-refreshed", "cpw-prompt-grid__card--favorite-refreshed-reverse");
         void card.offsetWidth;
         card.classList.add("cpw-prompt-grid__card--favorite-refreshed");
+        card.classList.toggle("cpw-prompt-grid__card--favorite-refreshed-reverse", direction === "reverse");
         favoriteRefreshTimers.set(itemId, setTimeout(() => {
             favoriteRefreshTimers.delete(itemId);
-            card.classList.remove("cpw-prompt-grid__card--favorite-refreshed");
+            card.classList.remove("cpw-prompt-grid__card--favorite-refreshed", "cpw-prompt-grid__card--favorite-refreshed-reverse");
         }, 900));
     }
 
@@ -2788,14 +2831,41 @@ function createPromptGridWidget(node, inputName, inputData) {
             === normalizePromptCardFavoriteId(next.favorite_id);
         const sameSnapshot = JSON.stringify(promptCardFavoriteSnapshot(current))
             === JSON.stringify(promptCardFavoriteSnapshot(next));
-        if (sameFavorite && sameSnapshot) {
+        if (sameFavorite && sameSnapshot && !current.random_favorite_category) {
             playFavoriteRefreshAnimation(itemId);
             return false;
         }
         state.items[index] = next;
-        pendingFavoriteRefreshItems.add(itemId);
+        pendingFavoriteRefreshDirections.set(itemId, current.random_favorite_category ? "reverse" : "forward");
         commit(true, true);
         return true;
+    }
+
+    function chooseRandomFavoriteCategory(itemId, selection) {
+        if (!state) return;
+        const index = state.items.findIndex((item) => item.id === itemId);
+        const randomCategory = normalizeRandomFavoriteCategory(selection);
+        if (index < 0 || !randomCategory) return;
+        if (JSON.stringify(state.items[index].random_favorite_category) === JSON.stringify(randomCategory)) {
+            playFavoriteRefreshAnimation(itemId);
+            queueMicrotask(() => cardElements.get(itemId)?.querySelector(".cpw-prompt-grid__random-mode")?.focus());
+            return;
+        }
+        state.items[index] = { ...state.items[index], random_favorite_category: randomCategory };
+        pendingFavoriteRefreshDirections.set(itemId, "forward");
+        commit(true, true);
+        queueMicrotask(() => cardElements.get(itemId)?.querySelector(".cpw-prompt-grid__random-mode")?.focus());
+    }
+
+    function exitRandomFavoriteCategory(itemId) {
+        if (!state) return;
+        const index = state.items.findIndex((item) => item.id === itemId);
+        if (index < 0 || !state.items[index].random_favorite_category) return;
+        const { random_favorite_category: _discarded, ...item } = state.items[index];
+        state.items[index] = item;
+        pendingFavoriteRefreshDirections.set(itemId, "reverse");
+        commit(true, true);
+        queueMicrotask(() => cardElements.get(itemId)?.querySelector(".cpw-prompt-grid__title")?.focus());
     }
 
     function openCardFavoriteSwitchMenu(itemId, button) {
@@ -2806,6 +2876,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             anchor: button,
             resolvePromptTip: resolveFavoriteCardPromptTip,
             onChooseCard: (favorite) => switchItemToFavorite(itemId, favorite),
+            onChooseCategory: (selection) => chooseRandomFavoriteCategory(itemId, selection),
             onClose: () => {
                 if (activePromptCardLibraryMenu === controller) activePromptCardLibraryMenu = null;
                 button.setAttribute("aria-expanded", "false");
@@ -5119,11 +5190,16 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function createCard(item) {
         const card = element("article", "cpw-prompt-grid__card");
+        card.dataset.itemId = item.id;
         cardElements.set(item.id, card);
         card.classList.toggle("cpw-prompt-grid__card--disabled", !item.enabled);
+        const randomCategory = normalizeRandomFavoriteCategory(item.random_favorite_category);
+        card.classList.toggle("cpw-prompt-grid__card--random", Boolean(randomCategory));
         applyCardColor(card, item.color);
-        if (pendingFavoriteRefreshItems.delete(item.id)) {
-            queueMicrotask(() => playFavoriteRefreshAnimation(item.id, card));
+        const refreshDirection = pendingFavoriteRefreshDirections.get(item.id);
+        if (refreshDirection) {
+            pendingFavoriteRefreshDirections.delete(item.id);
+            queueMicrotask(() => playFavoriteRefreshAnimation(item.id, card, refreshDirection));
         }
 
         const header = element("div", "cpw-prompt-grid__card-header");
@@ -5137,9 +5213,14 @@ function createPromptGridWidget(node, inputName, inputData) {
 
         const title = element("input", "cpw-prompt-grid__title");
         title.type = "text";
-        title.value = item.title;
+        title.value = randomCategory ? randomCategoryName(randomCategory) : item.title;
+        title.readOnly = Boolean(randomCategory);
         title.placeholder = t("Card title");
-        title.setAttribute("aria-label", t("Card title"));
+        const titleLabel = randomCategory
+            ? t("Random favorite category: {category}", { category: title.value })
+            : t("Card title");
+        title.setAttribute("aria-label", titleLabel);
+        if (randomCategory) title.title = titleLabel;
 
         const titleShell = element("div", "cpw-prompt-grid__title-shell");
         const favoriteSwitchButton = element("button", "cpw-prompt-grid__favorite-switch");
@@ -5150,18 +5231,40 @@ function createPromptGridWidget(node, inputName, inputData) {
         favoriteSwitchButton.title = favoriteSwitchLabel;
         favoriteSwitchButton.setAttribute("aria-label", favoriteSwitchLabel);
         favoriteSwitchButton.append(element("span", "cpw-prompt-grid__favorite-switch-icon"));
-        titleShell.append(title, favoriteSwitchButton);
+        titleShell.append(title);
+        if (randomCategory) {
+            const randomButton = element("button", "cpw-prompt-grid__random-mode");
+            randomButton.type = "button";
+            randomButton.append(element("span", "cpw-prompt-grid__random-mode-icon"));
+            const categoryName = randomCategoryName(randomCategory);
+            const label = t("Random favorite from {category}. Click to exit random mode", { category: categoryName });
+            randomButton.title = label;
+            randomButton.setAttribute("aria-label", label);
+            randomButton.addEventListener("click", () => exitRandomFavoriteCategory(item.id));
+            titleShell.append(randomButton);
+        }
+        titleShell.append(favoriteSwitchButton);
         header.append(toggleLabel, titleShell);
 
         const prompt = element("input", "cpw-prompt-grid__prompt");
         prompt.type = "text";
         prompt.value = item.prompt;
+        prompt.readOnly = Boolean(randomCategory);
+        if (randomCategory) {
+            prompt.setAttribute("aria-readonly", "true");
+            prompt.title = t("Random mode: prompt editing is disabled");
+        }
         prompt.placeholder = t("Enter a prompt…");
         prompt.setAttribute("aria-label", t("Prompt content"));
         const promptEditButton = element("button", "cpw-prompt-grid__prompt-edit", "✎");
         promptEditButton.type = "button";
         promptEditButton.title = t("Split and select prompts");
         promptEditButton.setAttribute("aria-label", t("Open the prompt tag editor"));
+        promptEditButton.disabled = Boolean(randomCategory);
+        if (randomCategory) {
+            promptEditButton.title = t("Random mode: prompt editing is disabled");
+            promptEditButton.setAttribute("aria-label", promptEditButton.title);
+        }
         const promptRow = element("div", "cpw-prompt-grid__prompt-row");
         promptRow.append(prompt, promptEditButton);
         card.append(header, promptRow);
@@ -5170,20 +5273,24 @@ function createPromptGridWidget(node, inputName, inputData) {
             card.classList.toggle("cpw-prompt-grid__card--disabled", !toggle.checked);
             updateItem(item.id, { enabled: toggle.checked });
         });
-        title.addEventListener("input", () => updateItem(item.id, { title: title.value }, false));
+        title.addEventListener("input", () => {
+            if (!randomCategory) updateItem(item.id, { title: title.value }, false);
+        });
         prompt.addEventListener("input", () => updateItem(item.id, { prompt: prompt.value }, false));
         title.addEventListener("change", captureCanvasState);
         prompt.addEventListener("change", captureCanvasState);
-        cardAutocompleteControllers.add(new PromptAutocompleteController(
-            prompt,
-            promptTagAutocompleteProvider,
-            {
-                getLocale: getPromptWeaverLocale,
-                getLimit: readAutocompleteLimit,
-                getExistingPrompt: () => prompt.value,
-                completionSeparator: ", ",
-            },
-        ));
+        if (!randomCategory) {
+            cardAutocompleteControllers.add(new PromptAutocompleteController(
+                prompt,
+                promptTagAutocompleteProvider,
+                {
+                    getLocale: getPromptWeaverLocale,
+                    getLimit: readAutocompleteLimit,
+                    getExistingPrompt: () => prompt.value,
+                    completionSeparator: ", ",
+                },
+            ));
+        }
         promptEditButton.addEventListener("click", () => openPromptEditor(prompt, item.id, promptEditButton));
         favoriteSwitchButton.addEventListener("click", () => (
             openCardFavoriteSwitchMenu(item.id, favoriteSwitchButton)
@@ -5373,7 +5480,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (heightFitFrame) cancelAnimationFrame(heightFitFrame);
         if (sizeReconcileFrame) cancelAnimationFrame(sizeReconcileFrame);
         clearFavoriteRefreshTimers();
-        pendingFavoriteRefreshItems.clear();
+        pendingFavoriteRefreshDirections.clear();
         sizeObserver?.disconnect();
         for (const controller of cardAutocompleteControllers) controller.destroy();
         cardAutocompleteControllers.clear();
@@ -5383,6 +5490,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         archiveSelect.customSelect.destroy();
         promptGridArchiveControllers.delete(node);
         promptGridLocaleControllers.delete(localeController);
+        unsubscribeFavoriteLabels();
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;
@@ -5406,6 +5514,41 @@ function createPromptGridWidget(node, inputName, inputData) {
 
 app.registerExtension({
     name: "ComfyUIPromptWeaver.PromptToggleGrid",
+    setup() {
+        // graphToPrompt has already serialized the live canvas before this call.
+        // Patch only the queue payload so its API config and image Workflow share
+        // one fixed draw; widget.serializeValue cannot access the Workflow copy.
+        const originalQueuePrompt = api.queuePrompt;
+        api.queuePrompt = async function (number, payload, ...rest) {
+            const hasRandomCards = Object.values(payload?.output ?? {}).some((entry) => (
+                entry?.class_type === "PromptWeaverPromptToggleGrid"
+                && typeof entry.inputs?.config === "string"
+                && entry.inputs.config.includes('"random_favorite_category"')
+            ));
+            if (hasRandomCards) {
+                let library = null;
+                let loadFailed = false;
+                try {
+                    library = await getPromptCardLibraryService(api).refresh(true);
+                } catch (error) {
+                    loadFailed = true;
+                    console.warn("[Prompt Weaver] Could not refresh favorites for random cards", error);
+                }
+                const { missing, incompatible } = materializeRandomFavoriteExecution(payload, library);
+                if (loadFailed || missing || incompatible) {
+                    app.extensionManager?.toast?.add?.({
+                        severity: "warn",
+                        summary: t("Random favorite unavailable"),
+                        detail: t(incompatible
+                            ? "The random card could not be fixed in this Workflow. The original prompt was used."
+                            : "A category is empty, missing, or could not be loaded. The original prompt was used."),
+                        life: 4000,
+                    });
+                }
+            }
+            return originalQueuePrompt.call(this, number, payload, ...rest);
+        };
+    },
     loadedGraphNode(node) {
         if (node?.comfyClass === "PromptWeaverPromptToggleGrid"
             || node?.type === "PromptWeaverPromptToggleGrid") {

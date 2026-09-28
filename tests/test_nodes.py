@@ -18,6 +18,18 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
     def combine(self, config, prefix_prompt=""):
         return NODES.PromptWeaverPromptToggleGrid().combine(config, prefix_prompt)[0]
 
+    def test_random_category_without_browser_uses_original_prompt_only(self):
+        config = json.dumps({"version": 1, "items": [
+            {"enabled": True, "prompt": "original {color}",
+             "random_favorite_category": {
+                 "id": "11111111-1111-4111-8111-111111111111", "level": "primary"}},
+            {"enabled": True, "prompt": "",
+             "random_favorite_category": {
+                 "id": "22222222-2222-4222-8222-222222222222", "level": "secondary"}},
+            {"enabled": False, "prompt": "disabled"},
+        ], "variables": [{"id": "v", "name": "color", "value": "red"}]})
+        self.assertEqual(self.combine(config), "original red")
+
     def test_shared_library_link_does_not_affect_snapshot_only_execution(self):
         config = json.dumps({"version": 1, "variables": [
             {"id": "legacy", "name": "color", "value": "red", "library_id": "11111111-1111-4111-8111-111111111111"},

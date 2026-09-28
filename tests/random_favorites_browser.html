@@ -1,0 +1,251 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Random Favorite Category QA</title>
+<link rel="stylesheet" href="../web/prompt_toggle_grid.css">
+<style>
+body { background: #171717; color: #ddd; font: 13px system-ui; margin: 16px; }
+[data-fixture-theme="light"] {
+    --comfy-menu-bg: #f6f7fa;
+    --input-text: #22252a;
+    --descrip-text: #58606d;
+    --border-color: #b6bdc8;
+    --p-primary-color: #5848d4;
+}
+[data-fixture-theme="light"] body { background: #eef0f4; color: #22252a; }
+#node { width: 700px; height: 350px; border: 1px solid #888; margin: 16px 0; }
+#results { white-space: pre-wrap; }
+</style>
+<button id="run">Run random favorite tests</button>
+<button id="theme" type="button">Toggle fixture theme</button>
+<div id="node"></div>
+<pre id="results"></pre>
+<script type="module">
+const settings = new EventTarget();
+settings.getSettingValue = (key, fallback) => key === "Comfy.Locale" ? "en" : fallback;
+globalThis.fixtureApi = {
+    user: "test",
+    fetchApi: (path, options) => fetch(
+        path === "/prompt-weaver/prompt-card-library" ? path + "?random_fixture=1" : path,
+        options,
+    ),
+    getCustomNodesI18n: async () => Object.fromEntries(await Promise.all(["en", "zh"].map(async language =>
+        [language, await (await fetch("../locales/" + language + "/main.json")).json()]))),
+    queuePrompt: async (_number, payload) => payload,
+};
+const graph = { incrementVersion() {}, change() {} };
+globalThis.fixtureApp = {
+    ui: { settings }, graph, canvas: { setDirty() {} },
+    extensionManager: { toast: { add() {} } },
+    registerExtension(extension) { globalThis.fixtureExtension = extension; },
+};
+await import("../web/prompt_toggle_grid.js?v=20260928-random-favorites-v7");
+fixtureExtension.setup();
+const node = {
+    id: 7, properties: {}, graph, size: [700, 350], widgets: [],
+    setSize(size) { this.size = size; },
+    addDOMWidget(name, type, root, options) {
+        document.querySelector("#node").append(root);
+        const widget = { name, type, ...options };
+        Object.defineProperty(widget, "value", { get: options.getValue, set: options.setValue });
+        this.widgets.push(widget);
+        return widget;
+    },
+};
+const { widget } = fixtureExtension.getCustomWidgets().PROMPT_WEAVER_PROMPT_GRID(node, "config", {});
+widget.setValue(JSON.stringify({ version: 1, columns: 2, variables: [], items: [
+    { id: "card", enabled: true, title: "Original", prompt: "fallback", color: "green" },
+] }));
+const tick = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+const assert = (value, message) => { if (!value) throw new Error(message); };
+document.querySelector("#theme").onclick = () => {
+    document.documentElement.dataset.fixtureTheme = document.documentElement.dataset.fixtureTheme === "light" ? "dark" : "light";
+};
+const result = document.querySelector("#results");
+const runCase = async (name, fn) => { await fn(); result.textContent += `PASS ${name}\n`; };
+document.querySelector("#run").onclick = async () => {
+    document.querySelector("#run").disabled = true;
+    result.textContent = "";
+    try {
+        await tick();
+        await runCase("cascade panels do not cover random buttons", async () => {
+            document.querySelector(".cpw-prompt-grid__favorite-switch").click();
+            await tick();
+            const primaryRandom = document.querySelector('.cpw-prompt-card-cascade__random[data-cascade-level="0"]');
+            const primaryExpand = document.querySelector('.cpw-prompt-card-cascade__expand[data-cascade-level="0"]');
+            const primaryRow = primaryRandom.closest(".cpw-prompt-card-cascade__category-row");
+            assert([...primaryRow.children].map((child) => child.className).every((name, index) =>
+                name.includes(["__item", "__random", "__expand"][index])), "primary category actions are out of order");
+            const primaryHit = primaryRandom.getBoundingClientRect();
+            assert(primaryRandom.contains(document.elementFromPoint(
+                primaryHit.left + primaryHit.width / 2, primaryHit.top + primaryHit.height / 2,
+            )), "primary random button cannot be reached before expanding");
+            const primaryExpandHit = primaryExpand.getBoundingClientRect();
+            assert(primaryExpand.contains(document.elementFromPoint(
+                primaryExpandHit.left + primaryExpandHit.width / 2, primaryExpandHit.top + primaryExpandHit.height / 2,
+            )), "primary expand button cannot be reached");
+            primaryExpand.click();
+            await tick();
+            assert(primaryRow.classList.contains("cpw-prompt-card-cascade__category-row--selected"),
+                "primary category is not selected across the full row");
+            assert(getComputedStyle(primaryRow).backgroundColor !== "rgba(0, 0, 0, 0)",
+                "primary selection has no row background");
+            assert(getComputedStyle(primaryRow.firstElementChild).backgroundColor === "rgba(0, 0, 0, 0)",
+                "primary name has a separate selection background");
+            const panels = document.querySelectorAll(".cpw-prompt-card-cascade__panel");
+            const first = panels[0].getBoundingClientRect();
+            const second = panels[1].getBoundingClientRect();
+            if (panels[0].classList.contains("cpw-prompt-card-cascade__panel--covered")) {
+                assert(panels[1].querySelector(".cpw-prompt-card-cascade__back").offsetHeight > 0,
+                    "covered primary panel has no return action");
+            } else {
+                assert(first.right + 3 <= second.left || second.right + 3 <= first.left,
+                    "visible primary and secondary panels overlap");
+                const hit = primaryRandom.getBoundingClientRect();
+                assert(primaryRandom.contains(document.elementFromPoint(hit.left + hit.width / 2, hit.top + hit.height / 2)),
+                    "primary random button is covered");
+            }
+            const secondaryRandom = panels[1].querySelector(".cpw-prompt-card-cascade__random");
+            const secondaryExpand = panels[1].querySelector(".cpw-prompt-card-cascade__expand");
+            const secondaryRow = secondaryRandom.closest(".cpw-prompt-card-cascade__category-row");
+            assert([...secondaryRow.children].map((child) => child.className).every((name, index) =>
+                name.includes(["__item", "__random", "__expand"][index])), "secondary category actions are out of order");
+            const secondaryExpandHit = secondaryExpand.getBoundingClientRect();
+            assert(secondaryExpand.contains(document.elementFromPoint(
+                secondaryExpandHit.left + secondaryExpandHit.width / 2, secondaryExpandHit.top + secondaryExpandHit.height / 2,
+            )), "secondary expand button cannot be reached");
+            secondaryExpand.click();
+            await tick();
+            assert(secondaryRow.classList.contains("cpw-prompt-card-cascade__category-row--selected"),
+                "secondary category is not selected across the full row");
+            assert(getComputedStyle(secondaryRow).backgroundColor !== "rgba(0, 0, 0, 0)",
+                "secondary selection has no row background");
+            assert(getComputedStyle(secondaryRow.firstElementChild).backgroundColor === "rgba(0, 0, 0, 0)",
+                "secondary name has a separate selection background");
+            if (panels[1].classList.contains("cpw-prompt-card-cascade__panel--covered")) {
+                assert(document.querySelector('.cpw-prompt-card-cascade__panel[data-level="2"] .cpw-prompt-card-cascade__back').offsetHeight > 0,
+                    "covered secondary panel has no return action");
+            } else {
+                const secondHit = secondaryRandom.getBoundingClientRect();
+                assert(secondaryRandom.contains(document.elementFromPoint(
+                    secondHit.left + secondHit.width / 2, secondHit.top + secondHit.height / 2,
+                )), "secondary random button is covered");
+            }
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            await tick();
+        });
+        await runCase("category selection and read-only prompt", async () => {
+            document.querySelector(".cpw-prompt-grid__favorite-switch").click();
+            await tick();
+            const random = document.querySelector('.cpw-prompt-card-cascade__random[data-cascade-level="0"]');
+            assert(random, "primary random button absent");
+            random.click();
+            await tick();
+            assert(document.querySelector(".cpw-prompt-grid__prompt").readOnly, "prompt remains editable");
+            assert(document.querySelector(".cpw-prompt-grid__prompt-edit").disabled, "editor button remains enabled");
+            assert(document.querySelector(".cpw-prompt-grid__random-mode"), "active icon absent");
+            const title = document.querySelector(".cpw-prompt-grid__title");
+            assert(title.value === "People" && title.readOnly, "primary category name is not shown");
+            assert(JSON.parse(widget.getValue()).items[0].title === "Original", "random mode changed the saved card title");
+            assert(document.querySelector(".cpw-prompt-grid__card--favorite-refreshed"), "random selection has no shine effect");
+            assert(!document.querySelector(".cpw-prompt-grid__card--favorite-refreshed-reverse"),
+                "entering random mode reversed the shine");
+        });
+        await runCase("queue snapshots are fixed without changing the canvas", async () => {
+            const original = widget.getValue();
+            const previousRandom = Math.random;
+            try {
+                for (const [draw, expected] of [[0, "red hair"], [0.99999, "blue hair"]]) {
+                    Math.random = () => draw;
+                    const payload = { output: { "7": { class_type: "PromptWeaverPromptToggleGrid", inputs: { config: original } } },
+                        workflow: { nodes: [{ id: 7, widgets_values: [original] }] } };
+                    await fixtureApi.queuePrompt(0, payload);
+                    const fixed = JSON.parse(payload.output["7"].inputs.config);
+                    assert(fixed.items[0].prompt === expected, "wrong random choice");
+                    assert(!fixed.items[0].random_favorite_category, "execution is still random");
+                    assert(payload.output["7"].inputs.config === payload.workflow.nodes[0].widgets_values[0],
+                        "API Prompt and Workflow differ");
+                    assert(widget.getValue() === original, "canvas was changed by queueing");
+                }
+            } finally { Math.random = previousRandom; }
+        });
+        await runCase("switching random categories refreshes the displayed title", async () => {
+            document.querySelector(".cpw-prompt-grid__favorite-switch").click();
+            await tick();
+            document.querySelector('.cpw-prompt-card-cascade__item[data-cascade-level="0"]').click();
+            await tick();
+            document.querySelector('.cpw-prompt-card-cascade__random[data-cascade-level="1"]').click();
+            await tick();
+            assert(document.querySelector(".cpw-prompt-grid__title").value === "Common", "secondary category name is not shown");
+            assert(JSON.parse(widget.getValue()).items[0].title === "Original", "switching categories changed the saved card title");
+            assert(document.querySelector(".cpw-prompt-grid__card--favorite-refreshed"), "category switch has no shine effect");
+        });
+        await runCase("active icon exits random mode", async () => {
+            document.querySelector(".cpw-prompt-grid__random-mode").click();
+            await Promise.resolve();
+            const immediateCard = document.querySelector(".cpw-prompt-grid__card--favorite-refreshed-reverse");
+            assert(immediateCard, "reverse shine was not started on exit");
+            const immediateTitle = getComputedStyle(immediateCard.querySelector(".cpw-prompt-grid__title-shell"), "::after");
+            const immediatePrompt = getComputedStyle(immediateCard.querySelector(".cpw-prompt-grid__prompt-row"), "::after");
+            if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                assert(Number(immediateTitle.opacity) >= 0.7 && Number(immediatePrompt.opacity) >= 0.7,
+                    "reverse shine is not visible immediately");
+                assert(immediateTitle.animationDelay === "0s" && immediatePrompt.animationDelay === "0s",
+                    "reverse shine starts with a delay");
+            }
+            await tick();
+            assert(!document.querySelector(".cpw-prompt-grid__random-mode"), "random icon still active");
+            assert(!document.querySelector(".cpw-prompt-grid__prompt").readOnly, "prompt still read-only");
+            const title = document.querySelector(".cpw-prompt-grid__title");
+            assert(title.value === "Original" && !title.readOnly, "original title was not restored");
+            const card = document.querySelector(".cpw-prompt-grid__card--favorite-refreshed-reverse");
+            assert(card, "exiting random mode has no reverse shine effect");
+            if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                assert(getComputedStyle(card.querySelector(".cpw-prompt-grid__title-shell"), "::after").animationName === "cpw-prompt-grid-favorite-shine-return",
+                    "exit title shine uses the wrong timeline");
+                assert(getComputedStyle(card.querySelector(".cpw-prompt-grid__prompt-row"), "::after").animationName === "cpw-prompt-grid-favorite-shine-return",
+                    "exit prompt shine uses the wrong timeline");
+            }
+            if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                const shinePosition = (selector) => new DOMMatrixReadOnly(
+                    getComputedStyle(card.querySelector(selector), "::after").transform,
+                ).m41;
+                const titleBefore = shinePosition(".cpw-prompt-grid__title-shell");
+                const promptBefore = shinePosition(".cpw-prompt-grid__prompt-row");
+                await new Promise(resolve => setTimeout(resolve, 180));
+                assert(shinePosition(".cpw-prompt-grid__title-shell") < titleBefore,
+                    "exit title shine did not move right to left");
+                assert(shinePosition(".cpw-prompt-grid__prompt-row") < promptBefore,
+                    "exit prompt shine did not move right to left");
+            }
+        });
+        await runCase("random mode can be selected again", async () => {
+            document.querySelector(".cpw-prompt-grid__favorite-switch").click();
+            await tick();
+            document.querySelector('.cpw-prompt-card-cascade__random[data-cascade-level="0"]').click();
+            await tick();
+            assert(document.querySelector(".cpw-prompt-grid__random-mode"), "random icon missing after reselect");
+            assert(document.querySelector(".cpw-prompt-grid__title").value === "People", "category title not restored on reselect");
+        });
+        await runCase("choosing one favorite exits random mode", async () => {
+            document.querySelector(".cpw-prompt-grid__favorite-switch").click();
+            await tick();
+            document.querySelector('.cpw-prompt-card-cascade__item[data-cascade-level="0"]').click();
+            await tick();
+            document.querySelector('.cpw-prompt-card-cascade__item[data-cascade-level="1"]').click();
+            await tick();
+            document.querySelector(".cpw-prompt-card-cascade__item--favorite").click();
+            await tick();
+            assert(!document.querySelector(".cpw-prompt-grid__random-mode"), "single favorite did not exit random mode");
+            assert(document.querySelector(".cpw-prompt-grid__prompt").value === "red hair", "favorite snapshot not loaded");
+            assert(document.querySelector(".cpw-prompt-grid__title").value === "Red", "favorite title not shown after random mode");
+            assert(document.querySelector(".cpw-prompt-grid__card--favorite-refreshed"), "favorite switch has no shine effect");
+            assert(document.querySelector(".cpw-prompt-grid__card--favorite-refreshed-reverse"),
+                "choosing one favorite did not reverse the exit shine");
+        });
+    } catch (error) {
+        result.textContent += `FAIL ${error.stack ?? error}\n`;
+    } finally {
+        document.querySelector("#run").disabled = false;
+    }
+};
+</script>
