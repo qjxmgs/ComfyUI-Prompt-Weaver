@@ -16,7 +16,7 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const moduleSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 const {
     DEFAULT_ARCHIVE_ID,
@@ -710,5 +710,18 @@ test("API client preserves paths, methods, payloads, and server errors", async (
     await assert.rejects(
         () => failing.list(),
         (error) => error.message === "duplicate" && error.status === 409 && error.serverMessage === "duplicate",
+    );
+
+    const guarded = new PromptGridArchiveClient({
+        async fetchApi() {
+            return { ok: false, status: 403, async json() {
+                return { code: "loopback_listener_required", error: "server English" };
+            } };
+        },
+    });
+    await assert.rejects(
+        () => guarded.create("test", snapshotFromState(state)),
+        (error) => error.status === 403 && error.code === "loopback_listener_required"
+            && error.message.includes("--listen 127.0.0.1"),
     );
 });

@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
+import { promptWeaverHttpError, t } from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 
 export const ARCHIVE_EXPORT_FORMAT = "prompt-weaver-prompt-grid-archives";
 export const ARCHIVE_FORMAT_VERSION = 1;
@@ -393,12 +393,11 @@ export class PromptGridArchiveClient {
             // Preserve the HTTP status when the server returns a non-JSON error.
         }
         if (!response.ok) {
-            const error = new Error(
-                payload?.error || t("Archive request failed (HTTP {status})", { status: response.status }),
+            throw promptWeaverHttpError(
+                response,
+                payload,
+                t("Archive request failed (HTTP {status})", { status: response.status }),
             );
-            error.status = response.status;
-            error.serverMessage = payload?.error ?? null;
-            throw error;
         }
         return payload;
     }

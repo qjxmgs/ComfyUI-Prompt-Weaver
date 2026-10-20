@@ -12,6 +12,8 @@
   },
   "promptWeaver": {
     "ui": {
+      "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.": "操作被阻止：ComfyUI 没有仅监听回环地址。请移除启动参数 --listen，或改用 --listen 127.0.0.1，然后重启 ComfyUI。同机应用可连接 127.0.0.1；其他设备请使用 SSH 隧道。只修改浏览器地址无法解决。",
+      "Restart ComfyUI with --listen 127.0.0.1": "请用 --listen 127.0.0.1 重启 ComfyUI",
       "Card {index}": "卡片 {index}",
       "Prompt grid configuration error: {message}": "提示词网格配置错误：{message}",
       "JSON could not be parsed ({message})": "JSON 无法解析（{message}）",

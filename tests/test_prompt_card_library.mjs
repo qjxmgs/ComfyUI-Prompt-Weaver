@@ -16,15 +16,15 @@ const tokenUrl = asDataUrl(tokenSource);
 const archiveSource = (await readFile(
     new URL("../web/prompt_grid_archives.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const archiveUrl = asDataUrl(archiveSource);
 const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_grid_archives.js?v=20260928-random-favorites-v7", archiveUrl)
+    .replace("./prompt_grid_archives.js?v=20261020-loopback-help-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
-    .replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
+    .replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
     PromptCardLibraryClient,
@@ -430,6 +430,21 @@ test("API client preserves collection paths, methods, and request bodies", async
     });
 });
 
+test("favorite writes translate only the plugin's guarded 403", async () => {
+    const client = new PromptCardLibraryClient({
+        async fetchApi() {
+            return { ok: false, status: 403, async json() {
+                return { code: "loopback_listener_required", error: "server English" };
+            } };
+        },
+    });
+    await assert.rejects(
+        () => client.createCategory("test"),
+        (error) => error.status === 403 && error.code === "loopback_listener_required"
+            && error.message.includes("SSH tunnel"),
+    );
+});
+
 test("favorite text import parser normalizes lines and preserves duplicate input order", () => {
     const parsed = parseFavoriteCardImportText(
         "  主角  \r\n  1girl, blue eyes  \r\n\r\n主角\n1girl, red eyes\n风景\r mountain  ",
@@ -592,8 +607,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20260928-random-favorites-v7/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20260928-random-favorites-v7/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20261020-loopback-help-v1/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20261020-loopback-help-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /queueMicrotask\(\(\) => playFavoriteRefreshAnimation\(item\.id, card, refreshDirection\)\)/);
@@ -659,6 +674,9 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(favoriteSource, /root\.append\(header, panels, resizeHandle\)/);
     assert.doesNotMatch(favoriteSource, /root\.append\(header, status, panels/);
     assert.match(favoriteSource, /statusVisibleTimer = setTimeout\(\(\) => \{[\s\S]*setStatus\(""\);[\s\S]*FAVORITE_STATUS_VISIBLE_MS/);
+    assert.match(favoriteSource, /if \(error\) header\.after\(status\)/);
+    assert.match(favoriteSource, /if \(!error\) \{\s*statusVisibleTimer = setTimeout/);
+    assert.match(favoriteSource, /status\.setAttribute\("role", error \? "alert" : "status"\)/);
     assert.match(favoriteSource, /panelHeader\(t\("Primary Categories"\), \{ createLevel: "primary" \}\)/);
     assert.match(favoriteSource, /panelHeader\(t\("Secondary Categories"\), \{/);
     assert.match(favoriteSource, /t\("Create a secondary category\."\)/);
@@ -771,6 +789,8 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(cssSource, /\.cpw-prompt-card-library__inline-save,\s*\.cpw-prompt-card-library__inline-cancel\s*\{[^}]*height:\s*31px;[^}]*min-height:\s*31px;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__status\s*\{[^}]*display:\s*inline-flex;[^}]*border-radius:\s*5px;[^}]*clip-path:\s*inset\(0 100% 0 0 round 5px\);[^}]*transition:/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__status--visible\s*\{[^}]*clip-path:\s*inset\(0 0 0 0 round 5px\);[^}]*opacity:\s*1;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__status--error\s*\{[^}]*max-width:\s*none;[^}]*white-space:\s*normal;/s);
+    assert.match(cssSource, /\.cpw-prompt-card-library__status--error \.cpw-prompt-card-library__status-text\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
     assert.match(cssSource, /\.cpw-prompt-card-library__import\s*\{[^}]*border-radius:/s);
     assert.match(cssSource, /\.cpw-prompt-card-import__overlay\s*\{[^}]*position:\s*fixed;[^}]*z-index:\s*2147483690;/s);
     assert.match(cssSource, /\.cpw-prompt-card-import__preview\s*\{[^}]*overflow:\s*auto;/s);

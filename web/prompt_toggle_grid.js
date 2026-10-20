@@ -23,7 +23,7 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20260928-random-favorites-v7";
+} from "./prompt_grid_archives.js?v=20261020-loopback-help-v1";
 import {
     getPromptCardLibraryService,
     favoriteCardBilingualPrompt,
@@ -32,7 +32,7 @@ import {
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
     materializeRandomFavoriteExecution,
-} from "./prompt_card_library.js?v=20260928-random-favorites-v7";
+} from "./prompt_card_library.js?v=20261020-loopback-help-v1";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
@@ -42,7 +42,7 @@ import {
     syncPromptWeaverLocale,
     t,
     tp,
-} from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
+} from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 import {
     confirmPromptEditorDraft,
     dedupePromptTokens,
@@ -80,7 +80,7 @@ import {
     promptTokenLookupText,
     resolvePromptCompletionContext,
     textareaCaretClientRect,
-} from "./prompt_tag_autocomplete.js?v=20260923-sqlite-filter-v1";
+} from "./prompt_tag_autocomplete.js?v=20261020-loopback-help-v1";
 import {
     normalizeVariables,
     variableSuggestionContext,
@@ -94,7 +94,7 @@ import {
 import {
     openPromptVariableManager,
     VariableSuggestionController,
-} from "./prompt_variable_ui.js?v=20260926-variable-token-preview-v1";
+} from "./prompt_variable_ui.js?v=20261020-loopback-help-v1";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -745,7 +745,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20260928-random-favorites-v7", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20261020-loopback-help-v1", import.meta.url).href;
     document.head.append(link);
 }
 

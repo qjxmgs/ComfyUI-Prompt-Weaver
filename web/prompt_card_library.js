@@ -2,9 +2,9 @@ import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
     normalizeRandomFavoriteCategory,
-} from "./prompt_grid_archives.js?v=20260928-random-favorites-v7";
+} from "./prompt_grid_archives.js?v=20261020-loopback-help-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
-import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
+import { promptWeaverHttpError, t } from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";
 const BROADCAST_CHANNEL_NAME = "prompt-weaver-prompt-card-library-v1";
@@ -530,11 +530,11 @@ export class PromptCardLibraryClient {
             // Keep the HTTP status when an upstream failure does not return JSON.
         }
         if (!response.ok) {
-            const error = new Error(
-                payload?.error || t("Favorite card library request failed (HTTP {status})", { status: response.status }),
+            throw promptWeaverHttpError(
+                response,
+                payload,
+                t("Favorite card library request failed (HTTP {status})", { status: response.status }),
             );
-            error.status = response.status;
-            throw error;
         }
         return payload;
     }
@@ -1793,6 +1793,8 @@ export function openPromptCardLibraryMenu({
                 status.hidden = true;
                 status.title = "";
                 status.removeAttribute("aria-label");
+                status.classList.remove("cpw-prompt-card-library__status--error");
+                header.insertBefore(status, closeButton);
             }, FAVORITE_STATUS_TRANSITION_MS);
             return;
         }
@@ -1802,13 +1804,19 @@ export function openPromptCardLibraryMenu({
         status.title = text;
         status.setAttribute("aria-label", text);
         status.classList.toggle("cpw-prompt-card-library__status--error", Boolean(error));
+        status.setAttribute("role", error ? "alert" : "status");
+        status.setAttribute("aria-live", error ? "assertive" : "polite");
+        if (error) header.after(status);
+        else header.insertBefore(status, closeButton);
         status.classList.remove("cpw-prompt-card-library__status--visible");
         void status.offsetWidth;
         status.classList.add("cpw-prompt-card-library__status--visible");
-        statusVisibleTimer = setTimeout(() => {
-            statusVisibleTimer = 0;
-            setStatus("");
-        }, FAVORITE_STATUS_VISIBLE_MS);
+        if (!error) {
+            statusVisibleTimer = setTimeout(() => {
+                statusVisibleTimer = 0;
+                setStatus("");
+            }, FAVORITE_STATUS_VISIBLE_MS);
+        }
     };
 
     const setRetryStatus = (message) => {
@@ -1835,13 +1843,12 @@ export function openPromptCardLibraryMenu({
         status.title = message;
         status.setAttribute("aria-label", message);
         status.classList.add("cpw-prompt-card-library__status--error");
+        status.setAttribute("role", "alert");
+        status.setAttribute("aria-live", "assertive");
+        header.after(status);
         status.classList.remove("cpw-prompt-card-library__status--visible");
         void status.offsetWidth;
         status.classList.add("cpw-prompt-card-library__status--visible");
-        statusVisibleTimer = setTimeout(() => {
-            statusVisibleTimer = 0;
-            setStatus("");
-        }, FAVORITE_STATUS_VISIBLE_MS);
     };
 
     const currentFavorite = () => {

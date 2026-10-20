@@ -12,6 +12,8 @@
   },
   "promptWeaver": {
     "ui": {
+      "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.": "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.",
+      "Restart ComfyUI with --listen 127.0.0.1": "Restart ComfyUI with --listen 127.0.0.1",
       "Card {index}": "Card {index}",
       "Prompt grid configuration error: {message}": "Prompt grid configuration error: {message}",
       "JSON could not be parsed ({message})": "JSON could not be parsed ({message})",

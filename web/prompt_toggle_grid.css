@@ -4253,9 +4253,26 @@
 }
 
 .cpw-prompt-card-library__status--error {
+    width: calc(100% - 20px);
+    max-width: none;
+    max-height: 35vh;
+    flex: 0 0 auto;
+    align-self: center;
+    align-items: flex-start;
+    margin: 8px 0 0;
+    overflow: auto;
     border-color: color-mix(in srgb, var(--error-text, #ef7777) 62%, transparent);
     color: var(--error-text, #ef7777);
     background: color-mix(in srgb, var(--error-text, #ef7777) 10%, transparent);
+    white-space: normal;
+    user-select: text;
+}
+
+.cpw-prompt-card-library__status--error .cpw-prompt-card-library__status-text {
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 .cpw-prompt-card-library__retry {

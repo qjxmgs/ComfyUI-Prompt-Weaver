@@ -1,4 +1,4 @@
-import { t } from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
+import { promptWeaverHttpError, t } from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 import {
     PromptAssistantTagCatalog,
     findPromptAssistantMatchField,
@@ -6,7 +6,7 @@ import {
     normalizePromptAssistantSearchText,
     promptAssistantQueryIsEligible,
     searchPromptAssistantTags,
-} from "./prompt_assistant_tags.js?v=20260923-sqlite-filter-v1";
+} from "./prompt_assistant_tags.js?v=20261020-loopback-help-v1";
 
 
 export const DANBOORU_SETTING_ID = "PromptWeaver.Autocomplete.Danbooru";
@@ -50,13 +50,13 @@ function responseIsOk(response) {
 
 async function readJsonResponse(response, label) {
     if (!responseIsOk(response)) {
-        let detail = "";
+        let payload = null;
         try {
-            detail = (await response?.json?.())?.error || "";
+            payload = await response?.json?.();
         } catch (_error) {
-            detail = "";
+            // Keep the request fallback when an upstream error is not JSON.
         }
-        throw new Error(detail || t("{label} request failed.", { label }));
+        throw promptWeaverHttpError(response, payload, t("{label} request failed.", { label }));
     }
     try {
         return await response.json();

@@ -4,9 +4,10 @@ import {
     connectPromptWeaverI18n,
     formatDateTime,
     formatNumber,
+    promptWeaverHttpError,
     subscribePromptWeaverLocale,
     t,
-} from "./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1";
+} from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 import {
     TRANSLATION_STATUS_POLL_MS,
     TRANSLATION_UPDATE_TIMEOUT_MS,
@@ -21,7 +22,7 @@ import {
     DEFAULT_AUTOCOMPLETE_SOURCE_ORDER,
     PROMPT_ASSISTANT_SETTING_ID,
     normalizeAutocompleteSourceOrder,
-} from "./prompt_tag_autocomplete.js?v=20260923-sqlite-filter-v1";
+} from "./prompt_tag_autocomplete.js?v=20261020-loopback-help-v1";
 
 import { MIN_POST_COUNT_SETTING_ID, DEFAULT_MIN_POST_COUNT, DanbooruFilterState } from "./prompt_tag_filter.js?v=20260923-sqlite-filter-v1";
 
@@ -43,10 +44,13 @@ class TranslationApiClient {
         try {
             payload = await response?.json?.();
         } catch (_error) {
-            throw new Error(t("{label} returned invalid JSON.", { label }));
+            if (response?.ok) {
+                throw new Error(t("{label} returned invalid JSON.", { label }));
+            }
+            // An upstream error need not include JSON; preserve its HTTP status.
         }
         if (!response || response.ok === false) {
-            throw new Error(payload?.error || t("{label} request failed.", { label }));
+            throw promptWeaverHttpError(response, payload, t("{label} request failed.", { label }));
         }
         return payload;
     }
@@ -241,7 +245,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20260928-random-favorites-v7",
+        "./prompt_toggle_grid.css?v=20261020-loopback-help-v1",
         import.meta.url,
     ).href;
     document.head.append(link);

@@ -67,8 +67,12 @@ _prompt_card_library_stores = {}
 _tag_autocomplete_stores = {}
 _tag_source_manifest_path = Path(__file__).resolve().parent / "data" / "tag_sources.json"
 _LOCAL_ONLY_ERROR = (
-    "This operation is only available when ComfyUI listens on loopback addresses."
+    "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. "
+    "Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. "
+    "Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. "
+    "Changing only the browser URL will not fix the listener."
 )
+_LOCAL_ONLY_ERROR_CODE = "loopback_listener_required"
 
 
 def _host_is_loopback(host):
@@ -101,7 +105,10 @@ def _local_only(handler):
     @functools.wraps(handler)
     async def guarded(request):
         if not _listen_is_loopback_only(getattr(args, "listen", None)):
-            return web.json_response({"error": _LOCAL_ONLY_ERROR}, status=403)
+            return web.json_response(
+                {"error": _LOCAL_ONLY_ERROR, "code": _LOCAL_ONLY_ERROR_CODE},
+                status=403,
+            )
         return await handler(request)
 
     guarded._prompt_weaver_local_only = True

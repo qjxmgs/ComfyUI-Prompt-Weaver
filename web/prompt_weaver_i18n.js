@@ -2,6 +2,7 @@ const DEFAULT_LOCALE = "en";
 const LOCALE_SETTING_ID = "Comfy.Locale";
 const LOCALE_CHANGE_EVENT = "Comfy.Locale.change";
 const MESSAGE_NAMESPACE = "promptWeaver";
+export const PROMPT_WEAVER_LOCAL_ONLY_CODE = "loopback_listener_required";
 
 let activeLocale = DEFAULT_LOCALE;
 let messagesByLocale = Object.freeze({});
@@ -159,6 +160,18 @@ export function t(message, parameters = {}) {
         ? localized
         : (typeof english === "string" ? english : source);
     return interpolate(template, parameters);
+}
+
+export function promptWeaverHttpError(response, payload, fallback) {
+    const localOnly = response?.status === 403
+        && payload?.code === PROMPT_WEAVER_LOCAL_ONLY_CODE;
+    const error = new Error(localOnly
+        ? t("Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.")
+        : (payload?.error || fallback));
+    error.status = response?.status ?? null;
+    error.code = localOnly ? PROMPT_WEAVER_LOCAL_ONLY_CODE : null;
+    error.serverMessage = payload?.error ?? null;
+    return error;
 }
 
 export function tp(singular, plural, count, parameters = {}) {

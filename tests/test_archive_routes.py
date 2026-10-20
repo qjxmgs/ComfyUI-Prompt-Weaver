@@ -194,6 +194,20 @@ class ArchiveRouteTests(unittest.TestCase):
         }
         self.assertEqual(protected, expected)
 
+        self.module.args.listen = "0.0.0.0"
+        for method, path, handler in registered:
+            if (method, path) not in expected:
+                continue
+            with self.subTest(method=method, path=path):
+                response = self.run_async(handler(object()))
+                self.assertEqual(response.status, 403)
+                self.assertEqual(response.payload, {
+                    "error": self.module._LOCAL_ONLY_ERROR,
+                    "code": self.module._LOCAL_ONLY_ERROR_CODE,
+                })
+                self.assertIn("--listen 127.0.0.1", response.payload["error"])
+                self.assertIn("SSH tunnel", response.payload["error"])
+
     def test_remote_mode_rejects_before_reading_or_mutating_request(self):
         class UnreadableRequest:
             async def json(self):
@@ -204,7 +218,10 @@ class ArchiveRouteTests(unittest.TestCase):
         self.assertEqual(response.status, 403)
         self.assertEqual(
             response.payload,
-            {"error": self.module._LOCAL_ONLY_ERROR},
+            {
+                "error": self.module._LOCAL_ONLY_ERROR,
+                "code": self.module._LOCAL_ONLY_ERROR_CODE,
+            },
         )
         self.assertEqual(self.module._frontend_heartbeats, {})
 

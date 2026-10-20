@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import * as messages from "../web/prompt_weaver_i18n.js";
@@ -14,6 +15,7 @@ const resources = {
                 "Actions": "Actions",
                 "{count} column": "{count} column",
                 "{count} columns": "{count} columns",
+                "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.": "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.",
             },
         },
     },
@@ -27,6 +29,7 @@ const resources = {
                 "Actions": "操作",
                 "{count} column": "{count} 列",
                 "{count} columns": "{count} 列",
+                "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.": "操作被阻止：ComfyUI 没有仅监听回环地址。请移除启动参数 --listen，或改用 --listen 127.0.0.1，然后重启 ComfyUI。同机应用可连接 127.0.0.1；其他设备请使用 SSH 隧道。只修改浏览器地址无法解决。",
             },
         },
     },
@@ -95,6 +98,32 @@ test("official ComfyUI locale resources load once and follow live locale changes
     assert.ok(seenLocales.includes("zh"));
     assert.ok(seenLocales.includes("en"));
     unsubscribe();
+});
+
+test("only the plugin's coded 403 receives actionable localized guidance", () => {
+    const coded = { code: messages.PROMPT_WEAVER_LOCAL_ONLY_CODE, error: "server English" };
+    messages.setPromptWeaverLocale("zh");
+    const localized = messages.promptWeaverHttpError({ status: 403 }, coded, "fallback");
+    assert.match(localized.message, /SSH 隧道/);
+    assert.match(localized.message, /重启 ComfyUI/);
+    assert.match(localized.message, /只修改浏览器地址无法解决/);
+    assert.equal(localized.status, 403);
+    assert.equal(localized.code, messages.PROMPT_WEAVER_LOCAL_ONLY_CODE);
+    assert.equal(localized.serverMessage, "server English");
+    assert.equal(messages.promptWeaverHttpError({ status: 403 }, { error: "proxy denied" }, "fallback").message, "proxy denied");
+    assert.equal(messages.promptWeaverHttpError({ status: 403 }, null, "HTTP 403").message, "HTTP 403");
+    assert.equal(messages.promptWeaverHttpError({ status: 409 }, coded, "fallback").message, "server English");
+    messages.setPromptWeaverLocale("en");
+    assert.match(messages.promptWeaverHttpError({ status: 403 }, coded, "fallback").message, /--listen 127\.0\.0\.1/);
+});
+
+test("workflow bridge shows a guarded failure once instead of repeating heartbeat toasts", async () => {
+    const source = await readFile(new URL("../web/prompt_weaver.js", import.meta.url), "utf8");
+    assert.match(source, /await connectPromptWeaverI18n\(app, api\)/);
+    assert.match(source, /if \(!response\.ok\) throw await bridgeResponseError\(response\)/);
+    assert.match(source, /bridgeLocalOnlyWarningShown = true/);
+    assert.match(source, /error\?\.code !== PROMPT_WEAVER_LOCAL_ONLY_CODE/);
+    assert.match(source, /summary: t\("Restart ComfyUI with --listen 127\.0\.0\.1"\)/);
 });
 
 test("locale normalization does not substitute Simplified Chinese for Traditional Chinese", () => {

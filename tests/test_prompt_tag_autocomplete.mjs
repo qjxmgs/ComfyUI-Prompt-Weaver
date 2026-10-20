@@ -10,14 +10,14 @@ const i18nUrl = `data:text/javascript;base64,${Buffer.from(i18nSource).toString(
 const assistantSource = (await readFile(
     new URL("../web/prompt_assistant_tags.js", import.meta.url),
     "utf8",
-)).replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl);
+)).replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const assistantUrl = `data:text/javascript;base64,${Buffer.from(assistantSource).toString("base64")}`;
 const moduleSource = (await readFile(
     new URL("../web/prompt_tag_autocomplete.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_weaver_i18n.js?v=20260923-sqlite-filter-v1", i18nUrl)
-    .replace("./prompt_assistant_tags.js?v=20260923-sqlite-filter-v1", assistantUrl);
+    .replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl)
+    .replace("./prompt_assistant_tags.js?v=20261020-loopback-help-v1", assistantUrl);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`;
 test("Danbooru threshold is sent to status/search but never exact resolution", async () => {
     let threshold = 100;
@@ -88,6 +88,28 @@ const {
     resolveAutocompletePopupPosition,
     resolvePromptCompletionContext,
 } = await import(moduleUrl);
+
+test("Danbooru writes show loopback guidance and preserve unrelated 403 errors", async () => {
+    let coded = true;
+    const provider = new DanbooruTagProvider({
+        async fetchApi() {
+            return { ok: false, status: 403, async json() {
+                return coded
+                    ? { code: "loopback_listener_required", error: "server English" }
+                    : { error: "proxy denied" };
+            } };
+        },
+    });
+    await assert.rejects(
+        () => provider.fetchJson("/prompt-weaver/tag-autocomplete/update", { method: "POST" }, "dictionary update"),
+        (error) => error.code === "loopback_listener_required" && error.message.includes("--listen 127.0.0.1"),
+    );
+    coded = false;
+    await assert.rejects(
+        () => provider.fetchJson("/prompt-weaver/tag-autocomplete/update", { method: "POST" }, "dictionary update"),
+        (error) => error.message === "proxy denied" && error.code === null,
+    );
+});
 
 test("manual Danbooru updates poll for up to five minutes", () => {
     assert.equal(DANBOORU_UPDATE_POLL_MS, 500);
@@ -734,14 +756,14 @@ test("prompt grid source wires autocomplete into cards, editor modes and variabl
     assert.match(settingsSource, /id:\s*TRANSLATION_MANAGER_SETTING_ID/);
     assert.match(settingsSource, /PromptWeaver\.Autocomplete\.UpdateDictionary/);
     assert.match(settingsSource, /ComfyUIPromptWeaver\.TranslationSettings/);
-    assert.match(source, /prompt_tag_autocomplete\.js\?v=20260923-sqlite-filter-v1/);
+    assert.match(source, /prompt_tag_autocomplete\.js\?v=20261020-loopback-help-v1/);
     assert.match(source, /sourceOrder:\s*readAutocompleteSourceOrder/);
     assert.match(source, /new PromptAutocompleteController\(\s*prompt,[\s\S]*completionSeparator: ", "/);
     assert.equal((source.match(/completionSeparator: ", "/g) || []).length, 1);
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 4);
     assert.equal((source.match(/getLocale: getPromptWeaverLocale/g) || []).length, 4);
     assert.doesNotMatch(source, /getLocale: \(\) => "en"/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20260928-random-favorites-v7/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20261020-loopback-help-v1/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);

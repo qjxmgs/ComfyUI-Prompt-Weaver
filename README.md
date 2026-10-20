@@ -53,7 +53,13 @@ The random favorite category button also requires `web/assets/icons/ic_random.pn
 
 Prompt Weaver enables its workflow bridge and every server-side write only when ComfyUI is configured to listen exclusively on loopback addresses such as `127.0.0.1`, `::1`, or `localhost`. Starting ComfyUI with `--listen`, `--listen 0.0.0.0`, a LAN address, or any mixed local/non-local address keeps read-only queries available but makes archive, favorite-card, and tag-dictionary changes return HTTP `403`.
 
-Restart ComfyUI with a loopback-only listener to use those operations. Proxy and forwarding headers are intentionally not trusted to relax this boundary.
+The check uses ComfyUI's **server listen setting**, not the URL in your browser. A bare `--listen` binds to all interfaces, so switching the browser URL to `localhost` does not remove the `403`.
+
+- **Using ComfyUI on the same computer:** remove `--listen` from the startup command, or use `--listen 127.0.0.1`, then restart ComfyUI. Check any launcher or startup script that might add the flag.
+- **Using ComfyUI from another computer:** keep the ComfyUI server on loopback and open an SSH tunnel from the client: `ssh -N -L 18188:127.0.0.1:8188 user@server`. Then open `http://127.0.0.1:18188` on the client. This requires an SSH server on the ComfyUI machine; change `8188` if ComfyUI uses another port. Do not expose that ComfyUI port directly to the network.
+- **Managed remote access:** an authenticated HTTPS reverse proxy may forward to the loopback listener if it also supports WebSockets and blocks direct access to the ComfyUI port. The proxy's authentication is the security boundary; ComfyUI user directories do not authenticate remote callers.
+
+Proxy and forwarding **headers** are intentionally not trusted to relax the plugin's guard. If a loopback-only startup still returns `403`, inspect the effective launch arguments and listener address, plus the HTTP response's `code` field (`loopback_listener_required` identifies this plugin guard). Do not send access tokens or private prompts with a support report.
 
 ## Language support
 
