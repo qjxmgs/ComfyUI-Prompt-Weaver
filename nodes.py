@@ -198,11 +198,9 @@ def _quote_end_at(text, index):
         return "”"
     if character == "‘":
         return "’"
+    # A quote cannot start inside a word, including before a hyphen.
     if character == "'" and not (
-        index > 0
-        and index + 1 < len(text)
-        and _is_word_character(text[index - 1])
-        and _is_word_character(text[index + 1])
+        index > 0 and _is_word_character(text[index - 1])
     ):
         return "'"
     return None

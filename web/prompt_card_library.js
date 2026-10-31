@@ -3,7 +3,7 @@ import {
     normalizePromptGridItemColor,
     normalizeRandomFavoriteCategory,
 } from "./prompt_grid_archives.js?v=20261020-loopback-help-v1";
-import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
+import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1";
 import { promptWeaverHttpError, t } from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 
 export const PROMPT_CARD_LIBRARY_SYNC_EVENT = "prompt-weaver-prompt-card-library-sync";

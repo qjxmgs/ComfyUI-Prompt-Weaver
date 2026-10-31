@@ -112,6 +112,22 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
             '(red, blue:1.2), escaped\\, comma',
         )
 
+    def test_hyphenated_apostrophe_keeps_following_tags_separate(self):
+        self.assertEqual(
+            NODES._split_prompt_tokens(
+                "jack-o'-lantern hair ornament, blue eyes, smile"
+            ),
+            ["jack-o'-lantern hair ornament", "blue eyes", "smile"],
+        )
+        config = json.dumps({"items": [{
+            "enabled": True,
+            "prompt": "jack-o'-lantern hair ornament, blue eyes, smile",
+        }]})
+        self.assertEqual(
+            self.combine(config),
+            "jack-o'-lantern hair ornament, blue eyes, smile",
+        )
+
     def test_prefix_can_be_the_only_output(self):
         config = json.dumps({"items": []})
         self.assertEqual(

@@ -23,7 +23,7 @@ const favoriteSource = (await readFile(
     "utf8",
 ))
     .replace("./prompt_grid_archives.js?v=20261020-loopback-help-v1", archiveUrl)
-    .replace("./prompt_editor_tokens.js?v=20260902-selection-state-v1", tokenUrl)
+    .replace("./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1", tokenUrl)
     .replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
 const {
@@ -607,7 +607,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20261020-loopback-help-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20261101-apostrophe-token-v1/);
     assert.match(gridSource, /prompt_toggle_grid\.css\?v=20261020-loopback-help-v1/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);

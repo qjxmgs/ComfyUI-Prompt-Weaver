@@ -7,7 +7,8 @@ function quoteEndAt(text, index) {
     if (character === '"') return '"';
     if (character === "“") return "”";
     if (character === "‘") return "’";
-    if (character === "'" && !(isWordCharacter(text[index - 1]) && isWordCharacter(text[index + 1]))) {
+    // A quote cannot start inside a word, including before a hyphen.
+    if (character === "'" && !isWordCharacter(text[index - 1])) {
         return "'";
     }
     return null;

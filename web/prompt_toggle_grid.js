@@ -32,7 +32,7 @@ import {
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
     materializeRandomFavoriteExecution,
-} from "./prompt_card_library.js?v=20261020-loopback-help-v1";
+} from "./prompt_card_library.js?v=20261101-apostrophe-token-v1";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
@@ -55,7 +55,7 @@ import {
     setAllPromptTokenSelection,
     splitPromptTokens,
     togglePromptTokenOnce,
-} from "./prompt_editor_tokens.js?v=20260902-selection-state-v1";
+} from "./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1";
 import {
     clampPromptEditorPosition,
     countActivePromptTokens,

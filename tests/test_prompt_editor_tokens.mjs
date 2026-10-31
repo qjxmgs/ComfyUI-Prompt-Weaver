@@ -46,6 +46,10 @@ test("preserves quoted and escaped separators without treating apostrophes as qu
         splitPromptTokens("'artist's red, blue style', final"),
         ["'artist's red, blue style'", "final"],
     );
+    assert.deepEqual(
+        splitPromptTokens("jack-o'-lantern hair ornament, blue eyes, smile"),
+        ["jack-o'-lantern hair ornament", "blue eyes", "smile"],
+    );
 });
 
 test("skips empty items while retaining duplicates, Unicode, and order", () => {
