@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -18,6 +19,7 @@ MAX_STORE_BYTES = 20 * 1024 * 1024
 ITEM_COLORS = frozenset(
     {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray", "white", "black"}
 )
+EXAMPLE_IMAGE_ID_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class PromptCardLibraryError(Exception):
@@ -130,6 +132,11 @@ def normalize_card_snapshot(value):
         if not isinstance(color, str) or color not in ITEM_COLORS:
             raise PromptCardLibraryValidationError("card color must be a supported color")
         normalized["color"] = color
+    if "example_image_id" in value:
+        image_id = value["example_image_id"]
+        if not isinstance(image_id, str) or EXAMPLE_IMAGE_ID_RE.fullmatch(image_id) is None:
+            raise PromptCardLibraryValidationError("example_image_id must be a thumbnail ID")
+        normalized["example_image_id"] = image_id
     retain_unselected = value.get("retain_unselected", True)
     if not isinstance(retain_unselected, bool):
         raise PromptCardLibraryValidationError("retain_unselected must be a boolean")
@@ -538,10 +545,18 @@ class PromptCardLibraryStore:
                 self._write_unlocked(data)
             return imported, errors, data["revision"]
 
-    def update_card(self, card_id, category_id=None, snapshot=None):
+    def update_card(self, card_id, category_id=None, snapshot=None,
+                    example_image_id=None, update_example_image=False):
         card_id = _normalize_uuid(card_id, "favorite card id")
-        if category_id is None and snapshot is None:
-            raise PromptCardLibraryValidationError("category_id or snapshot is required")
+        if category_id is None and snapshot is None and not update_example_image:
+            raise PromptCardLibraryValidationError("category_id, snapshot or example_image_id is required")
+        if update_example_image and (category_id is not None or snapshot is not None):
+            raise PromptCardLibraryValidationError("example_image_id must be updated separately")
+        if update_example_image and example_image_id is not None and (
+            not isinstance(example_image_id, str)
+            or EXAMPLE_IMAGE_ID_RE.fullmatch(example_image_id) is None
+        ):
+            raise PromptCardLibraryValidationError("example_image_id must be a thumbnail ID or null")
         normalized_category = None if category_id is None else _normalize_uuid(category_id, "category_id")
         normalized_snapshot = None if snapshot is None else normalize_card_snapshot(snapshot)
         with self._lock:
@@ -561,9 +576,14 @@ class PromptCardLibraryStore:
                 insert_at = target_indexes[-1] + 1 if target_indexes else len(data["cards"])
                 data["cards"].insert(insert_at, card)
             if normalized_snapshot is not None:
-                for field in ("title", "prompt", "color", "retain_unselected", "prompt_tokens"):
+                for field in ("title", "prompt", "color", "retain_unselected", "prompt_tokens", "example_image_id"):
                     card.pop(field, None)
                 card.update(normalized_snapshot)
+            if update_example_image:
+                if example_image_id is None:
+                    card.pop("example_image_id", None)
+                else:
+                    card["example_image_id"] = example_image_id
             card["updated_at"] = _now()
             self._increment_revision(data)
             self._write_unlocked(data)

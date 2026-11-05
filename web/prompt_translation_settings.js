@@ -245,7 +245,7 @@ function ensureTranslationStylesheet() {
     link.id = id;
     link.rel = "stylesheet";
     link.href = new URL(
-        "./prompt_toggle_grid.css?v=20261020-loopback-help-v1",
+        "./prompt_toggle_grid.css?v=20261105-card-bound-image-v2",
         import.meta.url,
     ).href;
     document.head.append(link);

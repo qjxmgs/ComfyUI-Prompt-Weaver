@@ -1,5 +1,6 @@
 .cpw-prompt-grid,
 .cpw-prompt-grid *,
+.cpw-prompt-grid__prompt-tooltip,
 .cpw-prompt-editor,
 .cpw-prompt-editor *,
 .cpw-archive-manager,
@@ -1497,6 +1498,40 @@
     min-width: 0;
     overflow: hidden;
     border-radius: 5px;
+}
+
+.cpw-prompt-grid__prompt-tooltip {
+    position: fixed;
+    z-index: 2147483150;
+    width: min(440px, calc(100vw - 16px));
+    max-height: calc(100vh - 16px);
+    padding: 8px 10px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid color-mix(in srgb, var(--border-color, #4b4d52) 78%, var(--input-text, #ddd) 22%);
+    border-radius: 6px;
+    color: var(--input-text, var(--fg-color, #e8e8ea));
+    background: color-mix(in srgb, var(--comfy-menu-bg, #202124) 96%, transparent);
+    box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+    font: 12px/1.45 Inter, system-ui, sans-serif;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.cpw-prompt-grid__prompt-tooltip--image {
+    width: max-content;
+    max-width: min(404px, calc(100vw - 16px));
+    text-align: center;
+}
+
+.cpw-prompt-grid__prompt-tooltip-image {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: min(384px, calc(100vw - 36px));
+    max-height: min(384px, calc(100vh - 36px));
+    object-fit: contain;
 }
 
 .cpw-prompt-grid__item-menu-action--danger {

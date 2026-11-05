@@ -110,6 +110,8 @@ class PluginRegistrationTests(unittest.TestCase):
                 ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}", "update_prompt_card_library_card"),
                 ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}/position", "position_prompt_card_library_card"),
                 ("DELETE", "/prompt-weaver/prompt-card-library/cards/{card_id}", "delete_prompt_card_library_card"),
+                ("POST", "/prompt-weaver/example-thumbnails", "upload_example_thumbnail"),
+                ("GET", "/prompt-weaver/example-thumbnails/{image_id}", "get_example_thumbnail"),
             ],
         )
 

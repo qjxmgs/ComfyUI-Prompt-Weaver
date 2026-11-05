@@ -47,6 +47,8 @@ function archiveItem(item) {
     const color = normalizePromptGridItemColor(item?.color);
     const favoriteId = normalizePromptCardFavoriteId(item?.favorite_id);
     const randomCategory = normalizeRandomFavoriteCategory(item?.random_favorite_category);
+    const exampleImageId = typeof item?.example_image_id === "string"
+        && /^[0-9a-f]{64}$/.test(item.example_image_id) ? item.example_image_id : null;
     const retainUnselected = item?.retain_unselected !== false;
     const promptTokens = retainUnselected && Array.isArray(item?.prompt_tokens)
         ? item.prompt_tokens
@@ -67,6 +69,7 @@ function archiveItem(item) {
         ...(color ? { color } : {}),
         ...(favoriteId ? { favorite_id: favoriteId } : {}),
         ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
+        ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
         ...(!retainUnselected ? { retain_unselected: false } : {}),
         ...(hasInactiveTokens ? { prompt_tokens: promptTokens } : {}),
     };
@@ -121,6 +124,7 @@ export function isPristineDefaultSnapshot(snapshot) {
                 && item.retain_unselected !== false
                 && !Array.isArray(item.prompt_tokens)
                 && !normalizePromptGridItemColor(item.color)
+                && !item.example_image_id
                 && (
                     item.title === `Card ${String(number).padStart(2, "0")}`
                     || item.title === `\u5361\u7247 ${String(number).padStart(2, "0")}`
@@ -149,6 +153,8 @@ function gridSemantics(snapshot) {
             const color = normalizePromptGridItemColor(item?.color);
             const favoriteId = normalizePromptCardFavoriteId(item?.favorite_id);
             const randomCategory = normalizeRandomFavoriteCategory(item?.random_favorite_category);
+            const exampleImageId = typeof item?.example_image_id === "string"
+                && /^[0-9a-f]{64}$/.test(item.example_image_id) ? item.example_image_id : null;
             return {
                 enabled: item.enabled,
                 title: pristineDefault ? `__prompt_weaver_default_${index + 1}__` : item.title,
@@ -156,6 +162,7 @@ function gridSemantics(snapshot) {
                 ...(color ? { color } : {}),
                 ...(favoriteId ? { favorite_id: favoriteId } : {}),
                 ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
+                ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
                 ...(item.retain_unselected === false ? { retain_unselected: false } : {}),
                 ...(Array.isArray(item.prompt_tokens) && item.prompt_tokens.some((entry) => !entry.selected)
                     ? {

@@ -142,6 +142,15 @@ test("favorite links survive archive round trips and participate in dirty state"
     assert.equal(snapshotFromState(linkedState).items[0].favorite_id, undefined);
 });
 
+test("example thumbnail IDs survive archives and change dirty state", () => {
+    const imageId = "a".repeat(64);
+    const withImage = { ...state, items: [{ ...state.items[0], example_image_id: imageId }] };
+    const saved = snapshotFromState(withImage);
+    assert.equal(saved.items[0].example_image_id, imageId);
+    assert.equal(configFromArchiveSnapshot(saved).items[0].example_image_id, imageId);
+    assert.notEqual(semanticFingerprint(saved), semanticFingerprint(snapshotFromState(state)));
+});
+
 test("random favorite categories survive archive round trips and change dirty state", () => {
     const randomState = structuredClone(state);
     randomState.items[0].random_favorite_category = {

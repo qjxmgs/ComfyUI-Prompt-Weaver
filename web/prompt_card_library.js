@@ -2,7 +2,7 @@ import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
     normalizeRandomFavoriteCategory,
-} from "./prompt_grid_archives.js?v=20261020-loopback-help-v1";
+} from "./prompt_grid_archives.js?v=20261105-example-thumbnail-v1";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1";
 import { promptWeaverHttpError, t } from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 
@@ -252,12 +252,15 @@ function normalizePromptTokens(value) {
 
 export function promptCardFavoriteSnapshot(value) {
     const color = normalizePromptGridItemColor(value?.color);
+    const exampleImageId = typeof value?.example_image_id === "string"
+        && /^[0-9a-f]{64}$/.test(value.example_image_id) ? value.example_image_id : null;
     const retainUnselected = value?.retain_unselected !== false;
     const promptTokens = retainUnselected ? normalizePromptTokens(value?.prompt_tokens) : [];
     return {
         title: typeof value?.title === "string" ? value.title : "",
         prompt: typeof value?.prompt === "string" ? value.prompt : "",
         ...(color ? { color } : {}),
+        ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
         ...(!retainUnselected ? { retain_unselected: false } : {}),
         ...(promptTokens.some((entry) => !entry.selected) ? { prompt_tokens: promptTokens } : {}),
     };
@@ -346,6 +349,7 @@ export function replacePromptGridItemWithFavorite(item, favorite) {
         prompt_tokens: _discardedPromptTokens,
         favorite_id: _discardedFavoriteId,
         random_favorite_category: _discardedRandomCategory,
+        example_image_id: _discardedExampleImageId,
         ...preserved
     } = item && typeof item === "object" ? item : {};
     const favoriteId = normalizePromptCardFavoriteId(favorite?.id);
@@ -597,6 +601,10 @@ export class PromptCardLibraryClient {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(changes),
         });
+    }
+
+    setCardExampleImage(id, imageId) {
+        return this.updateCard(id, { example_image_id: imageId });
     }
 
     deleteCard(id) {

@@ -72,6 +72,44 @@ class PromptCardLibraryStoreTests(unittest.TestCase):
         with self.assertRaises(PromptCardLibraryNotFoundError):
             self.store.delete_card(card["id"])
 
+    def test_example_image_is_optional_and_patch_changes_only_its_association(self):
+        _primary, secondary = self.create_branch()
+        image_a = "a" * 64
+        image_b = "b" * 64
+        source = {**snapshot(), "example_image_id": image_a}
+        card, revision = self.store.create_card(secondary["id"], source)
+        self.assertEqual(card["example_image_id"], image_a)
+        before = {key: value for key, value in card.items() if key not in {"example_image_id", "updated_at"}}
+        changed, new_revision = self.store.update_card(
+            card["id"], example_image_id=image_b, update_example_image=True,
+        )
+        self.assertEqual(new_revision, revision + 1)
+        self.assertEqual(changed["example_image_id"], image_b)
+        self.assertEqual(
+            {key: value for key, value in changed.items() if key not in {"example_image_id", "updated_at"}},
+            before,
+        )
+        edited, _ = self.store.update_card(
+            card["id"], snapshot={**snapshot("edited"), "example_image_id": image_b},
+        )
+        self.assertEqual(edited["prompt"], "prompt edited")
+        self.assertEqual(edited["example_image_id"], image_b)
+        removed, _ = self.store.update_card(card["id"], example_image_id=None, update_example_image=True)
+        self.assertNotIn("example_image_id", removed)
+        self.assertNotIn("example_image_id", self.store.list_library()["cards"][0])
+        for invalid in ("A" * 64, "../bad", 7, ""):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                PromptCardLibraryValidationError, "example_image_id"
+            ):
+                self.store.update_card(card["id"], example_image_id=invalid, update_example_image=True)
+        with self.assertRaisesRegex(PromptCardLibraryValidationError, "separately"):
+            self.store.update_card(
+                card["id"], snapshot=snapshot("different"),
+                example_image_id=image_a, update_example_image=True,
+            )
+        with self.assertRaisesRegex(PromptCardLibraryValidationError, "example_image_id"):
+            self.store.create_card(secondary["id"], {**snapshot(), "example_image_id": "bad"})
+
     def test_batch_import_skips_invalid_cards_and_writes_once_in_input_order(self):
         _primary, secondary = self.create_branch()
         before_revision = self.store.list_library()["revision"]

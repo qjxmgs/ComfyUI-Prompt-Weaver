@@ -91,7 +91,13 @@ Each card contains:
 - A title used only for identification; it is not included in the output. Random favorite mode temporarily shows the category name and makes the title read-only.
 - A fixed single-line prompt field and a tag-editor button.
 - Drag-to-reorder from any non-interactive blank area with live displacement animation. Blank areas use a grab cursor, and `Esc` restores the original order while dragging.
-- Card color and deletion actions in the card context menu. Delete expands in place to a Confirm/Cancel row before removing any card; right-clicking a text field keeps the browser's native menu.
+- Card color, example-image, and deletion actions in the card context menu. Delete expands in place to a Confirm/Cancel row before removing any card; right-clicking a text field keeps the browser's native menu.
+
+Use **Add Example Image** from a card's context menu to choose a local image; the browser uploads only a WebP thumbnail (up to 384 px), never the original. Hovering the card prompt shows that thumbnail instead of the full-text preview. Without an image, the existing preview appears only when the prompt is truncated. When an image exists, the menu offers **Replace Example Image** and **Remove Example Image**.
+
+An image on a saved favorite belongs to that favorite across workflows for the same ComfyUI user. Switching from favorite A to B displays B's image, or no image if B has none; an image on a standalone grid card stays only with that card. Random-category mode does not show the previous card's image before a draw, and exiting it restores the original card preview. Image changes never alter the card's prompt text.
+
+Thumbnails are cached per ComfyUI user on the local instance (20 MiB source limit, 512 KiB thumbnail limit, 256 MiB cache limit). Workflows and archives store only the thumbnail ID, not the image. A workflow opened on another machine may show an unavailable-image message, but its prompt still runs. Upload and thumbnail retrieval require ComfyUI to listen only on a loopback address.
 
 ### Grid controls
 
@@ -219,7 +225,7 @@ A red `×` on the right arms deletion as `!`; clicking it again deletes the glob
 
 Choosing a favorite updates the current grid card:
 
-- Replaces the title, prompt, retained-token policy, token states, and `favorite_id` together.
+- Replaces the title, prompt, retained-token policy, token states, `favorite_id`, and example-image association together.
 - Preserves the grid card ID, enabled switch, color, and position.
 
 Selecting the same favorite again reloads its latest saved prompt data without changing the card color.
@@ -280,7 +286,7 @@ The **Import** action beside the Favorite Cards title opens a batch text importe
 
 Preview is optional and lists valid cards plus skipped reasons. Confirmation always reparses the latest text, appends valid cards in source order with existing defaults, skips invalid entries, and reports an unmatched final title without blocking the remaining import.
 
-Favorite-library create, move, update, and remove operations take effect immediately. The current grid card content and favorite association are committed only by **Confirm**; cancelling the editor leaves the card configuration unchanged without rolling back global library operations. Favorites remain independent snapshots, so later card edits never overwrite them implicitly.
+Favorite-library create, move, update, and remove operations take effect immediately. The current grid card content and favorite association are committed only by **Confirm**; cancelling the editor leaves the card configuration unchanged without rolling back global library operations. Favorites remain independent snapshots, so later prompt edits never overwrite them implicitly. The card context menu's example-image actions are the explicit exception: on a linked favorite, they immediately update that favorite's image association without changing its prompt or title.
 
 The library is stored at `ComfyUI-Prompt-Weaver/prompt-card-library.json` in the current ComfyUI user's data directory. It uses the archive service's locked, validated, temporary-file plus atomic-replacement strategy; a corrupt or failed read never overwrites the original file.
 

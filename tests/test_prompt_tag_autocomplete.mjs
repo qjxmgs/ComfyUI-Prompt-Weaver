@@ -763,7 +763,7 @@ test("prompt grid source wires autocomplete into cards, editor modes and variabl
     assert.equal((source.match(/getLimit: readAutocompleteLimit/g) || []).length, 4);
     assert.equal((source.match(/getLocale: getPromptWeaverLocale/g) || []).length, 4);
     assert.doesNotMatch(source, /getLocale: \(\) => "en"/);
-    assert.match(source, /prompt_toggle_grid\.css\?v=20261020-loopback-help-v1/);
+    assert.match(source, /prompt_toggle_grid\.css\?v=20261105-card-bound-image-v2/);
     const cssSource = await readFile(new URL("../web/prompt_toggle_grid.css", import.meta.url), "utf8");
     assert.match(cssSource, /PromptWeaver\.Autocomplete\.SourceOrder/);
     assert.match(cssSource, /\.cpw-autocomplete-sources\s*\{[\s\S]*border-radius:\s*10px/);

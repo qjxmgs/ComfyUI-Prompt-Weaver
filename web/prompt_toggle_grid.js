@@ -23,7 +23,7 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20261020-loopback-help-v1";
+} from "./prompt_grid_archives.js?v=20261105-example-thumbnail-v1";
 import {
     getPromptCardLibraryService,
     favoriteCardBilingualPrompt,
@@ -32,12 +32,13 @@ import {
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
     materializeRandomFavoriteExecution,
-} from "./prompt_card_library.js?v=20261101-apostrophe-token-v1";
+} from "./prompt_card_library.js?v=20261105-card-bound-image-v2";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
     formatList,
     getPromptWeaverLocale,
+    promptWeaverHttpError,
     subscribePromptWeaverLocale,
     syncPromptWeaverLocale,
     t,
@@ -110,6 +111,15 @@ import {
     promptGridWheelTarget,
     toggleAllPromptGridItems,
 } from "./prompt_grid_controls.js?v=20260901-grid-wheel-routing-v1";
+import {
+    createExampleThumbnail,
+    effectiveExampleImageId,
+    normalizeExampleImageId,
+} from "./prompt_example_images.js?v=20261105-card-bound-image-v2";
+import {
+    promptFullPreviewPosition,
+    promptNeedsFullPreview,
+} from "./prompt_grid_prompt_tip.js?v=20261105-full-prompt-tip-v1";
 
 const WIDGET_TYPE = "PROMPT_WEAVER_PROMPT_GRID";
 const CONFIG_VERSION = 1;
@@ -123,6 +133,7 @@ const MIN_WIDGET_HEIGHT = 160;
 const MIN_NODE_HEIGHT = MIN_WIDGET_HEIGHT + NODE_CHROME_HEIGHT;
 const HEIGHT_FIT_TOLERANCE = 2;
 const GRID_GAP = 8;
+let promptFullPreviewSequence = 0;
 const EDGE_SCROLL_ZONE = 24;
 const EDGE_SCROLL_MAX_SPEED = 12;
 const REORDER_ANIMATION_DURATION = 120;
@@ -402,6 +413,11 @@ function normalizeConfigValue(value) {
         if (hasRandomCategory && JSON.stringify(randomCategory) !== JSON.stringify(item.random_favorite_category)) {
             normalized = true;
         }
+        const hasExampleImage = Object.prototype.hasOwnProperty.call(item, "example_image_id");
+        const exampleImageId = normalizeExampleImageId(item.example_image_id);
+        if (hasExampleImage && !exampleImageId) {
+            throw configError(t("items[{index}].example_image_id must be a thumbnail ID", { index }));
+        }
 
         let id = typeof item.id === "string" && item.id.trim() ? item.id : createId();
         if (usedIds.has(id)) throw configError(t("items[{index}].id duplicates another card", { index }));
@@ -414,6 +430,7 @@ function normalizeConfigValue(value) {
             color: _discardedColor,
             favorite_id: _discardedFavoriteId,
             random_favorite_category: _discardedRandomCategory,
+            example_image_id: _discardedExampleImageId,
             retain_unselected: _discardedRetainUnselected,
             prompt_tokens: _discardedPromptTokens,
             ...itemWithoutEditorState
@@ -446,6 +463,7 @@ function normalizeConfigValue(value) {
             ...(color ? { color } : {}),
             ...(favoriteId ? { favorite_id: favoriteId } : {}),
             ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
+            ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && normalizedTokenStates
                 ? { prompt_tokens: normalizedTokenStates }
@@ -745,7 +763,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20261020-loopback-help-v1", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20261105-card-bound-image-v2", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -909,6 +927,14 @@ function createPromptGridWidget(node, inputName, inputData) {
     const grid = element("div", "cpw-prompt-grid__cards");
     scroll.append(grid);
     root.append(toolbar, errorPanel, scroll);
+    const exampleImagePicker = element("input", "");
+    exampleImagePicker.type = "file";
+    exampleImagePicker.accept = "image/*";
+    exampleImagePicker.hidden = true;
+    exampleImagePicker.style.display = "none";
+    root.append(exampleImagePicker);
+    let exampleImagePickerTarget = null;
+    let exampleImageUploadBusy = false;
 
     let state;
     let serializedValue = "";
@@ -946,6 +972,168 @@ function createPromptGridWidget(node, inputName, inputData) {
         console.warn("[Prompt Weaver] Could not load favorite cards", error);
     });
     let variableRevision = 0;
+    const promptTooltip = element("div", "cpw-prompt-grid__prompt-tooltip");
+    promptTooltip.id = `cpw-prompt-grid-prompt-tooltip-${++promptFullPreviewSequence}`;
+    promptTooltip.setAttribute("role", "tooltip");
+    const promptMeasure = document.createElement("canvas").getContext("2d");
+    let promptTooltipAnchor = null;
+    let promptTooltipNativeTitle = null;
+    let promptTooltipHideTimer = 0;
+    let promptTooltipRequest = null;
+    let promptTooltipObjectUrl = null;
+    let promptTooltipGeneration = 0;
+
+    function cancelPromptTooltipHide() {
+        if (!promptTooltipHideTimer) return;
+        clearTimeout(promptTooltipHideTimer);
+        promptTooltipHideTimer = 0;
+    }
+
+    function hidePromptTooltip() {
+        cancelPromptTooltipHide();
+        promptTooltipGeneration += 1;
+        promptTooltipRequest?.abort();
+        promptTooltipRequest = null;
+        if (promptTooltipObjectUrl) URL.revokeObjectURL(promptTooltipObjectUrl);
+        promptTooltipObjectUrl = null;
+        document.removeEventListener("scroll", onPromptTooltipScroll, true);
+        document.removeEventListener("wheel", onPromptTooltipWheel, true);
+        window.removeEventListener("resize", hidePromptTooltip);
+        window.removeEventListener("blur", hidePromptTooltip);
+        if (promptTooltipAnchor) {
+            const describedBy = (promptTooltipAnchor.getAttribute("aria-describedby") ?? "")
+                .split(/\s+/).filter((id) => id && id !== promptTooltip.id);
+            if (describedBy.length) {
+                promptTooltipAnchor.setAttribute("aria-describedby", describedBy.join(" "));
+            } else {
+                promptTooltipAnchor.removeAttribute("aria-describedby");
+            }
+            if (promptTooltipNativeTitle !== null) {
+                promptTooltipAnchor.setAttribute("title", promptTooltipNativeTitle);
+            }
+        }
+        promptTooltipAnchor = null;
+        promptTooltipNativeTitle = null;
+        promptTooltip.remove();
+    }
+
+    function schedulePromptTooltipHide() {
+        if (!promptTooltipAnchor) return;
+        cancelPromptTooltipHide();
+        promptTooltipHideTimer = setTimeout(hidePromptTooltip, 160);
+    }
+
+    function positionPromptTooltip(input) {
+        if (promptTooltipAnchor !== input || !promptTooltip.isConnected) return false;
+        promptTooltip.style.maxHeight = "";
+        promptTooltip.style.visibility = "hidden";
+        const rect = promptTooltip.getBoundingClientRect();
+        const position = promptFullPreviewPosition({
+            anchor: input.getBoundingClientRect(),
+            tooltipWidth: rect.width,
+            tooltipHeight: rect.height,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        });
+        if (!position) {
+            hidePromptTooltip();
+            return false;
+        }
+        promptTooltip.style.left = `${Math.round(position.left)}px`;
+        promptTooltip.style.top = `${Math.round(position.top)}px`;
+        promptTooltip.style.maxHeight = `${Math.floor(position.maxHeight)}px`;
+        promptTooltip.style.visibility = "";
+        return true;
+    }
+
+    async function loadPromptTooltipImage(input, imageId, generation) {
+        const controller = new AbortController();
+        promptTooltipRequest = controller;
+        let objectUrl = null;
+        try {
+            const response = await api.fetchApi(
+                `/prompt-weaver/example-thumbnails/${imageId}`,
+                { signal: controller.signal },
+            );
+            if (!response.ok) {
+                const payload = await response.json().catch(() => ({}));
+                throw promptWeaverHttpError(response, payload, t("Example image is unavailable on this ComfyUI instance."));
+            }
+            const blob = await response.blob();
+            if (blob.type !== "image/webp") throw new Error(t("Example image is unavailable on this ComfyUI instance."));
+            objectUrl = URL.createObjectURL(blob);
+            const image = element("img", "cpw-prompt-grid__prompt-tooltip-image");
+            image.alt = t("Example image");
+            image.src = objectUrl;
+            await image.decode();
+            if (generation !== promptTooltipGeneration || promptTooltipAnchor !== input) return;
+            promptTooltipObjectUrl = objectUrl;
+            objectUrl = null;
+            promptTooltip.replaceChildren(image);
+            positionPromptTooltip(input);
+        } catch (error) {
+            if (controller.signal.aborted || generation !== promptTooltipGeneration) return;
+            promptTooltip.textContent = error?.status === 403
+                ? error.message : t("Example image is unavailable on this ComfyUI instance.");
+            positionPromptTooltip(input);
+        } finally {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            if (promptTooltipRequest === controller) promptTooltipRequest = null;
+        }
+    }
+
+    function showPromptTooltip(input, itemId) {
+        cancelPromptTooltipHide();
+        if (
+            !input.isConnected || document.activeElement === input
+            || activePromptEditor || activePromptCardLibraryMenu || activeItemContextMenu || dragSession
+        ) {
+            hidePromptTooltip();
+            return;
+        }
+        const item = state?.items.find((entry) => entry.id === itemId);
+        const rawPrompt = item?.prompt ?? input.value;
+        const exampleImageId = effectiveExampleImageId(item, promptCardLibraryService.library);
+        const style = getComputedStyle(input);
+        const contentWidth = input.clientWidth
+            - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+        if (promptMeasure) promptMeasure.font = style.font || `${style.fontSize} ${style.fontFamily}`;
+        const letterSpacing = parseFloat(style.letterSpacing);
+        const textWidth = (promptMeasure?.measureText(input.value).width ?? input.scrollWidth)
+            + (Number.isFinite(letterSpacing) ? letterSpacing * Math.max(0, input.value.length - 1) : 0);
+        if (!exampleImageId && !promptNeedsFullPreview(rawPrompt, input.value, textWidth, contentWidth)) {
+            hidePromptTooltip();
+            return;
+        }
+
+        hidePromptTooltip();
+        promptTooltipAnchor = input;
+        if (input.hasAttribute("title")) {
+            promptTooltipNativeTitle = input.getAttribute("title");
+            input.removeAttribute("title");
+        }
+        const describedBy = input.getAttribute("aria-describedby");
+        input.setAttribute("aria-describedby", [describedBy, promptTooltip.id].filter(Boolean).join(" "));
+        promptTooltip.classList.toggle("cpw-prompt-grid__prompt-tooltip--image", Boolean(exampleImageId));
+        promptTooltip.textContent = exampleImageId ? t("Loading example image…") : rawPrompt;
+        document.body.append(promptTooltip);
+        if (!positionPromptTooltip(input)) return;
+        document.addEventListener("scroll", onPromptTooltipScroll, true);
+        document.addEventListener("wheel", onPromptTooltipWheel, true);
+        window.addEventListener("resize", hidePromptTooltip);
+        window.addEventListener("blur", hidePromptTooltip);
+        if (exampleImageId) loadPromptTooltipImage(input, exampleImageId, promptTooltipGeneration);
+    }
+
+    promptTooltip.addEventListener("pointerenter", cancelPromptTooltipHide);
+    promptTooltip.addEventListener("pointerleave", schedulePromptTooltipHide);
+    promptTooltip.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+    const onPromptTooltipScroll = (event) => {
+        if (event.target !== promptTooltip) hidePromptTooltip();
+    };
+    const onPromptTooltipWheel = (event) => {
+        if (!promptTooltip.contains(event.target)) hidePromptTooltip();
+    };
 
     function syncMasterToggle() {
         const items = state?.items ?? [];
@@ -991,10 +1179,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
     }
 
-    const unsubscribeFavoriteLabels = promptCardLibraryService.subscribe(refreshRandomCategoryLabels);
+    const unsubscribeFavoriteLabels = promptCardLibraryService.subscribe(() => {
+        hidePromptTooltip();
+        refreshRandomCategoryLabels();
+    });
 
     function refreshLocale() {
         if (disposed) return;
+        hidePromptTooltip();
         refreshColumnOptions();
         columnSelect.querySelector("button")?.setAttribute("aria-label", t("Grid columns"));
         archiveSelect.querySelector("button")?.setAttribute(
@@ -2758,6 +2950,94 @@ function createPromptGridWidget(node, inputName, inputData) {
         commit(false, captureHistory);
     }
 
+    function applyExampleImageToCard({ itemId, favoriteId }, imageId) {
+        const item = state?.items.find((candidate) => candidate.id === itemId);
+        if (!item || item.random_favorite_category
+            || normalizePromptCardFavoriteId(item.favorite_id) !== favoriteId) return;
+        if (imageId) {
+            updateItem(itemId, { example_image_id: imageId });
+        } else {
+            const { example_image_id: _removedImageId, ...rest } = item;
+            state.items[state.items.indexOf(item)] = rest;
+            commit(false, true);
+        }
+    }
+
+    async function saveExampleImageAssociation(target, imageId) {
+        if (target.favoriteId) {
+            const library = await promptCardLibraryService.refresh(true);
+            if (library.cards.some((card) => card.id === target.favoriteId)) {
+                await promptCardLibraryService.mutate((client) => (
+                    client.setCardExampleImage(target.favoriteId, imageId)
+                ));
+            }
+        }
+        if (!disposed) applyExampleImageToCard(target, imageId);
+    }
+
+    async function uploadExampleImage(target, file) {
+        if (!file || exampleImageUploadBusy || disposed) return;
+        exampleImageUploadBusy = true;
+        try {
+            const thumbnail = await createExampleThumbnail(file);
+            const response = await api.fetchApi("/prompt-weaver/example-thumbnails", {
+                method: "POST",
+                headers: { "Content-Type": "image/webp" },
+                body: thumbnail,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw promptWeaverHttpError(response, payload, t("Example image could not be saved."));
+            }
+            const imageId = normalizeExampleImageId(payload.id);
+            if (!imageId) throw new Error(t("Example image could not be saved."));
+            await saveExampleImageAssociation(target, imageId);
+        } catch (error) {
+            showArchiveToast("error", t("Example Image Failed"), t(error.message || "Example image could not be saved."));
+        } finally {
+            exampleImageUploadBusy = false;
+        }
+    }
+
+    exampleImagePicker.addEventListener("change", () => {
+        const target = exampleImagePickerTarget;
+        const file = exampleImagePicker.files?.[0];
+        exampleImagePicker.value = "";
+        exampleImagePickerTarget = null;
+        if (target && file) uploadExampleImage(target, file);
+    });
+
+    function chooseExampleImage(itemId) {
+        closeItemContextMenu();
+        if (exampleImageUploadBusy) return;
+        const item = state?.items.find((candidate) => candidate.id === itemId);
+        if (!item || item.random_favorite_category) return;
+        exampleImagePickerTarget = {
+            itemId,
+            favoriteId: normalizePromptCardFavoriteId(item.favorite_id),
+        };
+        exampleImagePicker.value = "";
+        exampleImagePicker.click();
+    }
+
+    async function removeExampleImage(itemId) {
+        closeItemContextMenu();
+        const item = state?.items.find((candidate) => candidate.id === itemId);
+        if (!item || item.random_favorite_category || exampleImageUploadBusy
+            || !effectiveExampleImageId(item, promptCardLibraryService.library)) return;
+        exampleImageUploadBusy = true;
+        try {
+            await saveExampleImageAssociation({
+                itemId,
+                favoriteId: normalizePromptCardFavoriteId(item.favorite_id),
+            }, null);
+        } catch (error) {
+            showArchiveToast("error", t("Example Image Failed"), t(error.message || "Example image could not be saved."));
+        } finally {
+            exampleImageUploadBusy = false;
+        }
+    }
+
     function clearFavoriteRefreshTimers() {
         for (const timer of favoriteRefreshTimers.values()) clearTimeout(timer);
         favoriteRefreshTimers.clear();
@@ -3001,10 +3281,12 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (event.target.closest('input[type="text"], textarea, [contenteditable="true"]')) return;
         event.preventDefault();
         event.stopPropagation();
+        hidePromptTooltip();
         closeItemContextMenu();
 
         const currentIndex = state.items.findIndex((candidate) => candidate.id === item.id);
         if (currentIndex < 0) return;
+        item = state.items[currentIndex];
         const menu = element("div", "cpw-prompt-grid__item-menu");
         menu.setAttribute("role", "menu");
         menu.setAttribute("aria-label", t("{name} menu", { name: item.title || t("Prompt") }));
@@ -3095,6 +3377,17 @@ function createPromptGridWidget(node, inputName, inputData) {
             colorButton.addEventListener("click", () => setItemColor(item.id, option.key));
             colorGroup.append(colorButton);
         }
+        const imageSeparator = element("div", "cpw-prompt-grid__item-menu-separator");
+        imageSeparator.setAttribute("role", "separator");
+        const imageId = effectiveExampleImageId(item, promptCardLibraryService.library);
+        const imageAction = makeAction(
+            t(imageId ? "Replace Example Image" : "Add Example Image"),
+            exampleImageUploadBusy,
+            () => chooseExampleImage(item.id),
+        );
+        const removeImageAction = imageId
+            ? makeAction(t("Remove Example Image"), exampleImageUploadBusy, () => removeExampleImage(item.id))
+            : null;
         const deleteSeparator = element("div", "cpw-prompt-grid__item-menu-separator");
         deleteSeparator.setAttribute("role", "separator");
         menu.append(
@@ -3103,6 +3396,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             separator,
             colorLabel,
             colorGroup,
+            ...(!item.random_favorite_category ? [imageSeparator, imageAction] : []),
+            ...(!item.random_favorite_category && removeImageAction ? [removeImageAction] : []),
             deleteSeparator,
             deleteSlot,
         );
@@ -4824,6 +5119,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 title: cardTitleInput.value,
                 prompt: currentPromptDraft(),
                 color: currentItem?.color,
+                example_image_id: effectiveExampleImageId(currentItem, promptCardLibraryService.library),
                 retain_unselected: retainUnselected,
                 prompt_tokens: promptTokens,
             });
@@ -5087,6 +5383,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                         title: nextTitle,
                         prompt: nextPrompt,
                         color: currentItem?.color,
+                        example_image_id: effectiveExampleImageId(currentItem, promptCardLibraryService.library),
                         retain_unselected: retainUnselected,
                         prompt_tokens: promptTokens,
                     }));
@@ -5276,7 +5573,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         title.addEventListener("input", () => {
             if (!randomCategory) updateItem(item.id, { title: title.value }, false);
         });
-        prompt.addEventListener("input", () => updateItem(item.id, { prompt: prompt.value }, false));
+        prompt.addEventListener("input", () => {
+            hidePromptTooltip();
+            updateItem(item.id, { prompt: prompt.value }, false);
+        });
+        prompt.addEventListener("pointerenter", () => showPromptTooltip(prompt, item.id));
+        prompt.addEventListener("pointerleave", schedulePromptTooltipHide);
+        prompt.addEventListener("pointerdown", hidePromptTooltip);
+        prompt.addEventListener("focus", hidePromptTooltip);
         title.addEventListener("change", captureCanvasState);
         prompt.addEventListener("change", captureCanvasState);
         if (!randomCategory) {
@@ -5291,7 +5595,10 @@ function createPromptGridWidget(node, inputName, inputData) {
                 },
             ));
         }
-        promptEditButton.addEventListener("click", () => openPromptEditor(prompt, item.id, promptEditButton));
+        promptEditButton.addEventListener("click", () => {
+            hidePromptTooltip();
+            openPromptEditor(prompt, item.id, promptEditButton);
+        });
         favoriteSwitchButton.addEventListener("click", () => (
             openCardFavoriteSwitchMenu(item.id, favoriteSwitchButton)
         ));
@@ -5312,6 +5619,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function render() {
         if (disposed) return;
+        hidePromptTooltip();
         closePromptCardLibraryMenu(false);
         closeItemContextMenu();
         clearFavoriteRefreshTimers();
@@ -5445,6 +5753,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     const previousNodeOnResize = node.onResize;
     const promptGridOnResize = function (...args) {
         const result = previousNodeOnResize?.apply(this, args);
+        hidePromptTooltip();
         scheduleArchiveSizeReconcile();
         return result;
     };
@@ -5471,6 +5780,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     widget.inputSpec = inputData;
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
+        hidePromptTooltip();
         closePromptCardLibraryMenu(false);
         closeItemContextMenu();
         if (activePromptEditor) closePromptEditor(false);

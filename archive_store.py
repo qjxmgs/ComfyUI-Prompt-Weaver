@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -188,6 +189,8 @@ def validate_snapshot(value):
         favorite_id = item.get("favorite_id")
         has_random_category = "random_favorite_category" in item
         random_category = item.get("random_favorite_category")
+        has_example_image = "example_image_id" in item
+        example_image_id = item.get("example_image_id")
         has_retain_unselected = "retain_unselected" in item
         retain_unselected = item.get("retain_unselected", True)
         has_prompt_tokens = "prompt_tokens" in item
@@ -205,6 +208,11 @@ def validate_snapshot(value):
         if has_color and (not isinstance(color, str) or color not in ITEM_COLORS):
             raise ArchiveValidationError(
                 f"snapshot items[{index}].color must be a supported color"
+            )
+        if has_example_image and (not isinstance(example_image_id, str)
+                                  or re.fullmatch(r"[0-9a-f]{64}", example_image_id) is None):
+            raise ArchiveValidationError(
+                f"snapshot items[{index}].example_image_id must be a thumbnail ID"
             )
         if has_favorite_id:
             try:
@@ -273,6 +281,8 @@ def validate_snapshot(value):
             normalized_item["favorite_id"] = favorite_id
         if has_random_category:
             normalized_item["random_favorite_category"] = random_category
+        if has_example_image:
+            normalized_item["example_image_id"] = example_image_id
         if retain_unselected is False:
             normalized_item["retain_unselected"] = False
         elif any(not token["selected"] for token in normalized_prompt_tokens):

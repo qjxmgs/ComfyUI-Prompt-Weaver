@@ -86,6 +86,17 @@ class ArchiveStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ArchiveValidationError, "favorite_id"):
             validate_snapshot(invalid)
 
+    def test_example_thumbnail_ids_survive_archive_roundtrip(self):
+        image_id = "a" * 64
+        linked = snapshot("example")
+        linked["items"][0]["example_image_id"] = image_id
+        self.assertEqual(validate_snapshot(linked)["items"][0]["example_image_id"], image_id)
+        created = self.store.create("with image", linked)
+        self.assertEqual(created["snapshot"]["items"][0]["example_image_id"], image_id)
+        linked["items"][0]["example_image_id"] = "../invalid"
+        with self.assertRaisesRegex(ArchiveValidationError, "example_image_id"):
+            validate_snapshot(linked)
+
     def test_creation_order_is_stable_and_manual_order_is_persisted(self):
         first = self.store.create("最早", snapshot("first"))
         second = self.store.create("中间", snapshot("second"))

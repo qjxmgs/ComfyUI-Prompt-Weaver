@@ -22,7 +22,7 @@ const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_grid_archives.js?v=20261020-loopback-help-v1", archiveUrl)
+    .replace("./prompt_grid_archives.js?v=20261105-example-thumbnail-v1", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1", tokenUrl)
     .replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
@@ -58,21 +58,24 @@ test("random category candidates respect category levels and each draw creates a
     const secondBranch = "44444444-4444-4444-8444-444444444444";
     const otherCard = "55555555-5555-4555-8555-555555555555";
     const library = libraryPayload();
+    library.cards[0].example_image_id = "a".repeat(64);
     library.categories.push({ id: secondBranch, parent_id: PRIMARY_ID, name: "other" });
-    library.cards.push({ ...library.cards[0], id: otherCard, category_id: secondBranch, title: "second", prompt: "blue hair" });
+    library.cards.push({ ...library.cards[0], id: otherCard, category_id: secondBranch, title: "second", prompt: "blue hair", example_image_id: "b".repeat(64) });
     const primary = { id: PRIMARY_ID, level: "primary" };
     const secondary = { id: SECONDARY_ID, level: "secondary" };
     assert.equal(favoriteCardsInRandomCategory(library, primary).length, 2);
     assert.deepEqual(favoriteCardsInRandomCategory(library, secondary).map((card) => card.id), [CARD_ID]);
     assert.deepEqual(favoriteCardsInRandomCategory(library, { id: otherCard, level: "primary" }), []);
     const original = { version: 1, columns: 2, items: [
-        { id: "grid-1", enabled: true, title: "original", prompt: "fallback", color: "green", random_favorite_category: primary },
+        { id: "grid-1", enabled: true, title: "original", prompt: "fallback", color: "green", example_image_id: "c".repeat(64), random_favorite_category: primary },
         { id: "grid-2", enabled: false, title: "disabled", prompt: "old", random_favorite_category: secondary },
     ] };
     const first = resolveRandomFavoriteConfig(original, library, () => 0);
     const second = resolveRandomFavoriteConfig(original, library, () => 0.999999);
     assert.equal(first.config.items[0].prompt, "1girl");
     assert.equal(second.config.items[0].prompt, "blue hair");
+    assert.equal(first.config.items[0].example_image_id, "a".repeat(64));
+    assert.equal(second.config.items[0].example_image_id, "b".repeat(64));
     assert.equal(first.config.items[0].color, "green");
     assert.equal(first.config.items[0].id, "grid-1");
     assert.equal(first.config.items[0].enabled, true);
@@ -89,6 +92,7 @@ test("random category candidates respect category levels and each draw creates a
     assert.deepEqual(materializeRandomFavoriteExecution(payload, library, () => 0), { missing: false, incompatible: false });
     assert.equal(payload.output["7"].inputs.config, payload.workflow.nodes[0].widgets_values[0]);
     assert.equal(JSON.parse(payload.output["7"].inputs.config).items[0].favorite_id, CARD_ID);
+    assert.equal(JSON.parse(payload.output["7"].inputs.config).items[0].example_image_id, "a".repeat(64));
     assert.equal(JSON.parse(serialized).items[0].random_favorite_category.level, "primary");
 });
 
@@ -200,12 +204,14 @@ test("favorite snapshots are independent from ids and timestamps", () => {
     const snapshot = promptCardFavoriteSnapshot({
         ...card,
         color: "purple",
+        example_image_id: "a".repeat(64),
         favorite_id: CARD_ID,
     });
     assert.deepEqual(snapshot, {
         title: "主角",
         prompt: "1girl",
         color: "purple",
+        example_image_id: "a".repeat(64),
         prompt_tokens: [
             { text: "1girl", selected: true },
             { text: "blue eyes", selected: false },
@@ -220,26 +226,35 @@ test("favorite snapshots are independent from ids and timestamps", () => {
         ...snapshot,
         prompt: "1girl, solo",
     }));
+    assert.notEqual(promptCardFavoriteFingerprint(snapshot), promptCardFavoriteFingerprint({
+        ...snapshot,
+        example_image_id: "b".repeat(64),
+    }));
+    const library = libraryPayload();
+    library.cards[0].example_image_id = "a".repeat(64);
+    assert.equal(normalizePromptCardLibrary(library).cards[0].example_image_id, "a".repeat(64));
 });
 
-test("favorite switching replaces prompt fields while preserving grid identity, state, and color", () => {
+test("favorite switching takes the destination image and preserves grid identity, state, and color", () => {
     const current = {
         id: "grid-card-1",
         enabled: false,
         title: "旧卡片",
         prompt: "old prompt",
         color: "red",
+        example_image_id: "a".repeat(64),
         retain_unselected: false,
         favorite_id: "44444444-4444-4444-8444-444444444444",
         custom_editor_state: "preserved",
     };
-    const favorite = { ...libraryPayload().cards[0], color: "purple" };
+    const favorite = { ...libraryPayload().cards[0], color: "purple", example_image_id: "b".repeat(64) };
     const switched = replacePromptGridItemWithFavorite(current, favorite);
     assert.deepEqual(switched, {
         id: "grid-card-1",
         enabled: false,
         custom_editor_state: "preserved",
         color: "red",
+        example_image_id: "b".repeat(64),
         title: "主角",
         prompt: "1girl",
         prompt_tokens: [
@@ -257,6 +272,9 @@ test("favorite switching replaces prompt fields while preserving grid identity, 
         favorite,
     );
     assert.equal(Object.hasOwn(colorless, "color"), false);
+    const withoutImage = replacePromptGridItemWithFavorite(switched, libraryPayload().cards[0]);
+    assert.equal(Object.hasOwn(withoutImage, "example_image_id"), false);
+    assert.equal(replacePromptGridItemWithFavorite(withoutImage, favorite).example_image_id, "b".repeat(64));
 });
 
 test("favorite moves accept only changed secondary-category targets", () => {
@@ -386,6 +404,7 @@ test("API client preserves collection paths, methods, and request bodies", async
         { title: "风景", prompt: "mountain" },
     ]);
     await client.updateCard("id with space", { category_id: SECONDARY_ID });
+    await client.setCardExampleImage("id with space", "a".repeat(64));
     await client.deleteCard("id with space");
     await client.reorderCards(SECONDARY_ID, [CARD_ID]);
     await client.positionCard("id with space", SECONDARY_ID, 2);
@@ -412,19 +431,21 @@ test("API client preserves collection paths, methods, and request bodies", async
         ],
     });
     assert.equal(requests[7].options.method, "PATCH");
-    assert.equal(requests[8].options.method, "DELETE");
-    assert.equal(requests[9].path, "/prompt-weaver/prompt-card-library/cards/order");
-    assert.equal(requests[9].options.method, "PATCH");
-    assert.deepEqual(JSON.parse(requests[9].options.body), {
+    assert.equal(requests[8].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[8].options.body), { example_image_id: "a".repeat(64) });
+    assert.equal(requests[9].options.method, "DELETE");
+    assert.equal(requests[10].path, "/prompt-weaver/prompt-card-library/cards/order");
+    assert.equal(requests[10].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[10].options.body), {
         category_id: SECONDARY_ID,
         card_ids: [CARD_ID],
     });
     assert.equal(
-        requests[10].path,
+        requests[11].path,
         "/prompt-weaver/prompt-card-library/cards/id%20with%20space/position",
     );
-    assert.equal(requests[10].options.method, "PATCH");
-    assert.deepEqual(JSON.parse(requests[10].options.body), {
+    assert.equal(requests[11].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[11].options.body), {
         category_id: SECONDARY_ID,
         index: 2,
     });
@@ -607,8 +628,15 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20261101-apostrophe-token-v1/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20261020-loopback-help-v1/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20261105-card-bound-image-v2/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20261105-card-bound-image-v2/);
+    assert.match(gridSource, /promptNeedsFullPreview\(rawPrompt, input\.value, textWidth, contentWidth\)/);
+    assert.match(gridSource, /promptTooltip\.textContent = exampleImageId \? t\("Loading example image…"\) : rawPrompt/);
+    assert.match(gridSource, /document\.body\.append\(promptTooltip\)/);
+    assert.match(gridSource, /prompt\.addEventListener\("pointerenter", \(\) => showPromptTooltip\(prompt, item\.id\)\)/);
+    assert.match(gridSource, /prompt\.addEventListener\("focus", hidePromptTooltip\)/);
+    assert.match(gridSource, /widget\.onRemove = function[\s\S]*hidePromptTooltip\(\)/);
+    assert.match(cssSource, /\.cpw-prompt-grid__prompt-tooltip\s*\{[\s\S]*white-space: pre-wrap/);
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /queueMicrotask\(\(\) => playFavoriteRefreshAnimation\(item\.id, card, refreshDirection\)\)/);

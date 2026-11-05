@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+from io import BytesIO
 import json
 from pathlib import Path
 import sys
@@ -8,6 +9,8 @@ import types
 import unittest
 from unittest import mock
 import uuid
+
+from PIL import Image
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +50,7 @@ class _UserManager:
     def __init__(self, root):
         self.root = Path(root)
 
-    def get_request_user_filepath(self, request, relative_path):
+    def get_request_user_filepath(self, request, relative_path, create_dir=True):
         return str(self.root / request.user / relative_path)
 
 
@@ -61,13 +64,14 @@ class _Content:
 
 
 class _Request:
-    def __init__(self, payload=None, *, user="alice", match_info=None, query=None, raw=None):
+    def __init__(self, payload=None, *, user="alice", match_info=None, query=None, raw=None, content_type="application/json"):
         self.user = user
         self.match_info = match_info or {}
         self.query = query or {}
         self._raw = raw if raw is not None else json.dumps(payload).encode("utf-8")
         self.content_length = len(self._raw)
         self.content = _Content(self._raw)
+        self.content_type = content_type
 
     async def read(self):
         return self._raw
@@ -109,7 +113,8 @@ def _load_plugin(root, *, listen="127.0.0.1"):
     cli_args_module.args = types.SimpleNamespace(listen=listen)
     aiohttp_module = types.ModuleType("aiohttp")
     aiohttp_module.web = types.SimpleNamespace(
-        json_response=lambda payload, status=200: _Response(payload, status)
+        json_response=lambda payload, status=200: _Response(payload, status),
+        FileResponse=lambda path, headers=None: types.SimpleNamespace(path=path, headers=headers, status=200),
     )
     module_name = f"comfyui_prompt_weaver_routes_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(
@@ -185,6 +190,8 @@ class ArchiveRouteTests(unittest.TestCase):
             ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}"),
             ("PATCH", "/prompt-weaver/prompt-card-library/cards/{card_id}/position"),
             ("DELETE", "/prompt-weaver/prompt-card-library/cards/{card_id}"),
+            ("POST", "/prompt-weaver/example-thumbnails"),
+            ("GET", "/prompt-weaver/example-thumbnails/{image_id}"),
         }
         registered = self.module.PromptServer.instance.routes.registered
         protected = {
@@ -235,6 +242,50 @@ class ArchiveRouteTests(unittest.TestCase):
         with mock.patch.object(self.module, "_tag_autocomplete_store", side_effect=AssertionError("must not open storage")):
             response = self.run_async(self.module.select_tag_autocomplete_source(object()))
         self.assertEqual(response.status, 403)
+
+    def test_example_thumbnail_upload_read_and_user_isolation(self):
+        output = BytesIO()
+        Image.new("RGB", (40, 30), "red").save(output, "WEBP")
+        raw = output.getvalue()
+        posted = self.run_async(self.module.upload_example_thumbnail(
+            _Request(raw=raw, content_type="image/webp"),
+        ))
+        self.assertEqual(posted.status, 200)
+        image_id = posted.payload["id"]
+        found = self.run_async(self.module.get_example_thumbnail(
+            _Request(match_info={"image_id": image_id}),
+        ))
+        self.assertEqual(found.status, 200)
+        self.assertEqual(found.headers["Content-Type"], "image/webp")
+        self.assertEqual(found.path.read_bytes()[:4], b"RIFF")
+        missing = self.run_async(self.module.get_example_thumbnail(
+            _Request(user="bob", match_info={"image_id": image_id}),
+        ))
+        self.assertEqual(missing.status, 404)
+        invalid = self.run_async(self.module.get_example_thumbnail(
+            _Request(match_info={"image_id": "../bad"}),
+        ))
+        self.assertEqual(invalid.status, 404)
+        self.assertEqual(posted.payload, self.run_async(self.module.upload_example_thumbnail(
+            _Request(raw=raw, content_type="image/webp"),
+        )).payload)
+
+    def test_example_thumbnail_rejection_precedes_body_and_storage_access(self):
+        self.module.args.listen = "0.0.0.0"
+        with mock.patch.object(self.module, "_example_thumbnail_store", side_effect=AssertionError("storage opened")):
+            for handler in (self.module.upload_example_thumbnail, self.module.get_example_thumbnail):
+                response = self.run_async(handler(object()))
+                self.assertEqual(response.status, 403)
+
+    def test_example_thumbnail_upload_limits_and_invalid_content(self):
+        too_large = _Request(raw=b"x" * (512 * 1024 + 1), content_type="image/webp")
+        self.assertEqual(self.run_async(self.module.upload_example_thumbnail(too_large)).status, 413)
+        self.assertEqual(self.run_async(self.module.upload_example_thumbnail(
+            _Request(raw=b"bad", content_type="image/png"),
+        )).status, 400)
+        self.assertEqual(self.run_async(self.module.upload_example_thumbnail(
+            _Request(raw=b"bad", content_type="image/webp"),
+        )).status, 400)
 
     def test_dictionary_threshold_validation_and_source_payload(self):
         for value in ["9", "invalid", "1.5"]:
@@ -833,6 +884,37 @@ class ArchiveRouteTests(unittest.TestCase):
             _Request(match_info={"card_id": card["id"]})
         ))
         self.assertEqual(removed.status, 200)
+
+    def test_favorite_example_image_patch_preserves_other_fields_and_is_user_isolated(self):
+        primary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "人物", "parent_id": None})
+        )).payload["category"]
+        secondary = self.run_async(self.module.create_prompt_card_library_category(
+            _Request({"name": "角色", "parent_id": primary["id"]})
+        )).payload["category"]
+        image_id = "a" * 64
+        card = self.run_async(self.module.create_prompt_card_library_card(_Request({
+            "category_id": secondary["id"],
+            "snapshot": {"title": "A", "prompt": "1girl"},
+        }))).payload["card"]
+        changed = self.run_async(self.module.update_prompt_card_library_card(_Request(
+            {"example_image_id": image_id}, match_info={"card_id": card["id"]},
+        )))
+        self.assertEqual(changed.status, 200)
+        self.assertEqual(changed.payload["card"]["example_image_id"], image_id)
+        self.assertEqual(changed.payload["card"]["prompt"], "1girl")
+        self.assertEqual(changed.payload["card"]["title"], "A")
+        other_user = self.run_async(self.module.list_prompt_card_library(_Request(user="bob")))
+        self.assertEqual(other_user.payload["cards"], [])
+        invalid = self.run_async(self.module.update_prompt_card_library_card(_Request(
+            {"example_image_id": "bad"}, match_info={"card_id": card["id"]},
+        )))
+        self.assertEqual(invalid.status, 400)
+        removed = self.run_async(self.module.update_prompt_card_library_card(_Request(
+            {"example_image_id": None}, match_info={"card_id": card["id"]},
+        )))
+        self.assertEqual(removed.status, 200)
+        self.assertNotIn("example_image_id", removed.payload["card"])
 
     def test_prompt_card_library_reorder_route_persists_exact_category_order(self):
         primary = self.run_async(self.module.create_prompt_card_library_category(

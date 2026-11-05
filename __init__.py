@@ -24,6 +24,12 @@ from .archive_store import (
     ArchiveValidationError,
 )
 from .nodes import PromptWeaverPromptToggleGrid
+from .example_thumbnail_store import (
+    MAX_THUMBNAIL_BYTES,
+    ExampleThumbnailStore,
+    ThumbnailCapacityError,
+    ThumbnailValidationError,
+)
 from .prompt_card_library import (
     MAX_REQUEST_BYTES as MAX_PROMPT_CARD_LIBRARY_REQUEST_BYTES,
     PromptCardLibraryCapacityError,
@@ -65,6 +71,7 @@ _frontend_heartbeats = {}
 _archive_stores = {}
 _prompt_card_library_stores = {}
 _tag_autocomplete_stores = {}
+_example_thumbnail_stores = {}
 _tag_source_manifest_path = Path(__file__).resolve().parent / "data" / "tag_sources.json"
 _LOCAL_ONLY_ERROR = (
     "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. "
@@ -158,6 +165,22 @@ def _tag_autocomplete_store(request):
     if store is None:
         store = TagAutocompleteStore(path, _tag_source_manifest_path)
         _tag_autocomplete_stores[path] = store
+    return store
+
+
+def _example_thumbnail_store(request):
+    path = PromptServer.instance.user_manager.get_request_user_filepath(
+        request,
+        "ComfyUI-Prompt-Weaver/example-thumbnails/.cache",
+        create_dir=False,
+    )
+    if not path:
+        raise ThumbnailValidationError("unable to resolve the ComfyUI user data directory")
+    directory = Path(path).parent
+    store = _example_thumbnail_stores.get(directory)
+    if store is None:
+        store = ExampleThumbnailStore(directory)
+        _example_thumbnail_stores[directory] = store
     return store
 
 
@@ -851,6 +874,8 @@ async def update_prompt_card_library_card(request):
             request.match_info["card_id"],
             category_id=payload.get("category_id"),
             snapshot=payload.get("snapshot"),
+            example_image_id=payload.get("example_image_id"),
+            update_example_image="example_image_id" in payload,
         )
         return web.json_response(
             {"card": card, "revision": revision, "library": store.list_library()}
@@ -913,3 +938,42 @@ async def delete_prompt_card_library_card(request):
         PromptCardLibraryCorruptError,
     ) as error:
         return _prompt_card_library_error_response(error)
+
+
+@PromptServer.instance.routes.post("/prompt-weaver/example-thumbnails")
+@_local_only
+async def upload_example_thumbnail(request):
+    if request.content_type != "image/webp":
+        return web.json_response({"error": "thumbnail must be a WebP image"}, status=400)
+    if request.content_length is not None and request.content_length > MAX_THUMBNAIL_BYTES:
+        return web.json_response({"error": "thumbnail exceeds 512 KiB"}, status=413)
+    chunks = []
+    size = 0
+    async for chunk in request.content.iter_chunked(64 * 1024):
+        size += len(chunk)
+        if size > MAX_THUMBNAIL_BYTES:
+            return web.json_response({"error": "thumbnail exceeds 512 KiB"}, status=413)
+        chunks.append(chunk)
+    try:
+        image_id = await asyncio.to_thread(_example_thumbnail_store(request).save, b"".join(chunks))
+        return web.json_response({"id": image_id})
+    except ThumbnailCapacityError as error:
+        return web.json_response({"error": str(error)}, status=413)
+    except ThumbnailValidationError as error:
+        return web.json_response({"error": str(error)}, status=400)
+
+
+@PromptServer.instance.routes.get("/prompt-weaver/example-thumbnails/{image_id}")
+@_local_only
+async def get_example_thumbnail(request):
+    try:
+        path = _example_thumbnail_store(request).path_for(request.match_info["image_id"])
+    except ThumbnailValidationError:
+        path = None
+    if path is None:
+        return web.json_response({"error": "example thumbnail not found"}, status=404)
+    return web.FileResponse(path, headers={
+        "Content-Type": "image/webp",
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
