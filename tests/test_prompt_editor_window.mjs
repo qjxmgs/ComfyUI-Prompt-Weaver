@@ -80,6 +80,10 @@ test("prompt editor UI wires active count, drag, resize, and size persistence", 
     assert.match(uiSource, /toolbar\.append\(titleControls, historyActions, fontSizeControl\)/);
     assert.match(uiSource, /modeActions\.append\(retainUnselectedLabel, freeModeLabel\)/);
     assert.match(uiSource, /const favoriteUpdateMode = options\.mode === "favorite-update"/);
+    assert.match(uiSource, /let freeMode = currentItem\?\.text_mode === true/);
+    assert.match(uiSource, /freeModeInput\.checked = freeMode/);
+    assert.match(uiSource, /updatePromptEditorItem\(itemId, \{[\s\S]*textMode: freeMode/);
+    assert.match(uiSource, /text_mode: freeMode,[\s\S]*retain_unselected: retainUnselected/);
     assert.match(uiSource, /t\(favoriteUpdateMode \? "Update" : "Confirm"\)/);
     assert.match(uiSource, /if \(!favoriteUpdateMode\) footer\.append\(favoriteActions\)/);
     assert.match(uiSource, /client\.updateCard\(favorite\.id, \{ snapshot \}\)/);

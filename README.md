@@ -131,7 +131,7 @@ The editor uses a two-level header: the primary title bar contains only the acti
 
 The bulk button reports **All Enabled**, **All Disabled**, **Partially Enabled**, or disabled **No Prompts**. Activating All Enabled disables every tag; activating All Disabled or Partially Enabled enables every tag. The button stays visible but disabled in Text Mode, and each activation creates one history step.
 
-The title draft is saved with the prompt only after Confirm, and favorite actions opened from the editor use the current title draft. **Retain Unselected** and **Text Mode** are kept in that order at the left of the footer; hovering either option describes the action represented by its current checked state.
+The title draft and Text Mode choice are saved with the prompt only after Confirm; reopening that card restores its chosen mode. Favorite actions opened from the editor use the current title draft. **Retain Unselected** and **Text Mode** are kept in that order at the left of the footer; hovering either option describes the action represented by its current checked state.
 
 Plain Tab and Shift+Tab are reserved throughout the editor for switching between Text Mode and tag mode; they never move focus or accept an autocomplete result.
 

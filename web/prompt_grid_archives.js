@@ -70,6 +70,7 @@ function archiveItem(item) {
         ...(favoriteId ? { favorite_id: favoriteId } : {}),
         ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
         ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
+        ...(item?.text_mode === true ? { text_mode: true } : {}),
         ...(!retainUnselected ? { retain_unselected: false } : {}),
         ...(hasInactiveTokens ? { prompt_tokens: promptTokens } : {}),
     };
@@ -125,6 +126,7 @@ export function isPristineDefaultSnapshot(snapshot) {
                 && !Array.isArray(item.prompt_tokens)
                 && !normalizePromptGridItemColor(item.color)
                 && !item.example_image_id
+                && item.text_mode !== true
                 && (
                     item.title === `Card ${String(number).padStart(2, "0")}`
                     || item.title === `\u5361\u7247 ${String(number).padStart(2, "0")}`
@@ -163,6 +165,7 @@ function gridSemantics(snapshot) {
                 ...(favoriteId ? { favorite_id: favoriteId } : {}),
                 ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
                 ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
+                ...(item.text_mode === true ? { text_mode: true } : {}),
                 ...(item.retain_unselected === false ? { retain_unselected: false } : {}),
                 ...(Array.isArray(item.prompt_tokens) && item.prompt_tokens.some((entry) => !entry.selected)
                     ? {

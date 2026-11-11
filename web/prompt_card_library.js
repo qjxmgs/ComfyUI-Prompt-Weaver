@@ -2,7 +2,7 @@ import {
     normalizePromptCardFavoriteId,
     normalizePromptGridItemColor,
     normalizeRandomFavoriteCategory,
-} from "./prompt_grid_archives.js?v=20261105-example-thumbnail-v1";
+} from "./prompt_grid_archives.js?v=20261111-editor-text-mode";
 import { splitPromptTokens } from "./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1";
 import { promptWeaverHttpError, t } from "./prompt_weaver_i18n.js?v=20261020-loopback-help-v1";
 
@@ -261,6 +261,7 @@ export function promptCardFavoriteSnapshot(value) {
         prompt: typeof value?.prompt === "string" ? value.prompt : "",
         ...(color ? { color } : {}),
         ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
+        ...(value?.text_mode === true ? { text_mode: true } : {}),
         ...(!retainUnselected ? { retain_unselected: false } : {}),
         ...(promptTokens.some((entry) => !entry.selected) ? { prompt_tokens: promptTokens } : {}),
     };
@@ -347,6 +348,7 @@ export function replacePromptGridItemWithFavorite(item, favorite) {
         color: currentColorValue,
         retain_unselected: _discardedRetainUnselected,
         prompt_tokens: _discardedPromptTokens,
+        text_mode: _discardedTextMode,
         favorite_id: _discardedFavoriteId,
         random_favorite_category: _discardedRandomCategory,
         example_image_id: _discardedExampleImageId,

@@ -97,6 +97,18 @@ class ArchiveStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ArchiveValidationError, "example_image_id"):
             validate_snapshot(linked)
 
+    def test_text_mode_survives_archive_roundtrip(self):
+        source = snapshot("text")
+        source["items"][0]["text_mode"] = True
+        self.assertEqual(validate_snapshot(source), source)
+        created = self.store.create("text mode", source)
+        self.assertIs(created["snapshot"]["items"][0]["text_mode"], True)
+        source["items"][0]["text_mode"] = False
+        self.assertNotIn("text_mode", validate_snapshot(source)["items"][0])
+        source["items"][0]["text_mode"] = "true"
+        with self.assertRaisesRegex(ArchiveValidationError, "text_mode"):
+            validate_snapshot(source)
+
     def test_creation_order_is_stable_and_manual_order_is_persisted(self):
         first = self.store.create("最早", snapshot("first"))
         second = self.store.create("中间", snapshot("second"))

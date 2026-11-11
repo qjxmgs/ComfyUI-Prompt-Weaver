@@ -23,7 +23,7 @@ import {
     resolveArchiveStatus,
     snapshotFromState,
     validateImportBundlePreview,
-} from "./prompt_grid_archives.js?v=20261105-example-thumbnail-v1";
+} from "./prompt_grid_archives.js?v=20261111-editor-text-mode";
 import {
     getPromptCardLibraryService,
     favoriteCardBilingualPrompt,
@@ -32,7 +32,7 @@ import {
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
     materializeRandomFavoriteExecution,
-} from "./prompt_card_library.js?v=20261105-card-bound-image-v2";
+} from "./prompt_card_library.js?v=20261111-editor-text-mode";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
@@ -357,6 +357,10 @@ function normalizeConfigValue(value) {
         if (hasEnabled && typeof item.enabled !== "boolean") {
             throw configError(t("items[{index}].enabled must be a boolean", { index }));
         }
+        if (Object.hasOwn(item, "text_mode") && typeof item.text_mode !== "boolean") {
+            throw configError(t("{field} must be a boolean", { field: `items[${index}].text_mode` }));
+        }
+        if (item.text_mode === false) normalized = true;
         const hasPrompt = Object.prototype.hasOwnProperty.call(item, "prompt");
         if (hasPrompt && typeof item.prompt !== "string") {
             throw configError(t("items[{index}].prompt must be a string", { index }));
@@ -431,6 +435,7 @@ function normalizeConfigValue(value) {
             favorite_id: _discardedFavoriteId,
             random_favorite_category: _discardedRandomCategory,
             example_image_id: _discardedExampleImageId,
+            text_mode: _discardedTextMode,
             retain_unselected: _discardedRetainUnselected,
             prompt_tokens: _discardedPromptTokens,
             ...itemWithoutEditorState
@@ -464,6 +469,7 @@ function normalizeConfigValue(value) {
             ...(favoriteId ? { favorite_id: favoriteId } : {}),
             ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
             ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
+            ...(item.text_mode === true ? { text_mode: true } : {}),
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && normalizedTokenStates
                 ? { prompt_tokens: normalizedTokenStates }
@@ -3172,6 +3178,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         prompt,
         retainUnselected,
         promptTokens,
+        textMode,
         favoriteId,
         variables,
     }) {
@@ -3191,12 +3198,14 @@ function createPromptGridWidget(node, inputName, inputData) {
             && currentItem.prompt === prompt
             && currentRetainUnselected === retainUnselected
             && JSON.stringify(currentPromptTokens) === JSON.stringify(promptTokens)
+            && (currentItem.text_mode === true) === textMode
             && currentFavoriteId === nextFavoriteId
             && JSON.stringify(nextVariables) === JSON.stringify(state.variables)
         ) return false;
         const {
             retain_unselected: _discardedRetainUnselected,
             prompt_tokens: _discardedPromptTokens,
+            text_mode: _discardedTextMode,
             favorite_id: _discardedFavoriteId,
             ...baseItem
         } = currentItem;
@@ -3206,6 +3215,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             prompt,
             ...(!retainUnselected ? { retain_unselected: false } : {}),
             ...(retainUnselected && promptTokens?.length ? { prompt_tokens: promptTokens } : {}),
+            ...(textMode ? { text_mode: true } : {}),
             ...(nextFavoriteId ? { favorite_id: nextFavoriteId } : {}),
         };
         state.items[index] = nextItem;
@@ -3904,8 +3914,8 @@ function createPromptGridWidget(node, inputName, inputData) {
         let tokenToggleGesture = null;
         let suppressTokenClick = false;
         let suppressTokenClickTimer = 0;
-        let freeMode = false;
-        let freePromptText = "";
+        let freeMode = currentItem?.text_mode === true;
+        let freePromptText = freeMode ? originalPrompt : "";
         let freeTextArea = null;
         let copyFeedbackTimer = 0;
         let copyFeedbackState = "";
@@ -3958,7 +3968,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const freeModeLabel = element("label", "cpw-prompt-editor__free-mode");
         const freeModeInput = element("input", "cpw-prompt-editor__free-mode-input");
         freeModeInput.type = "checkbox";
-        freeModeInput.checked = false;
+        freeModeInput.checked = freeMode;
         freeModeInput.setAttribute("aria-label", t("Text Mode"));
         const freeModeIndicator = element("span", "cpw-prompt-editor__free-mode-indicator");
         const freeModeText = element("span", "cpw-prompt-editor__free-mode-text", t("Text Mode"));
@@ -5118,6 +5128,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             return promptCardFavoriteSnapshot({
                 title: cardTitleInput.value,
                 prompt: currentPromptDraft(),
+                text_mode: freeMode,
                 color: currentItem?.color,
                 example_image_id: effectiveExampleImageId(currentItem, promptCardLibraryService.library),
                 retain_unselected: retainUnselected,
@@ -5382,6 +5393,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     await options.onSubmit?.(promptCardFavoriteSnapshot({
                         title: nextTitle,
                         prompt: nextPrompt,
+                        text_mode: freeMode,
                         color: currentItem?.color,
                         example_image_id: effectiveExampleImageId(currentItem, promptCardLibraryService.library),
                         retain_unselected: retainUnselected,
@@ -5413,6 +5425,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             updatePromptEditorItem(itemId, {
                 title: nextTitle,
                 prompt: nextPrompt,
+                textMode: freeMode,
                 retainUnselected,
                 promptTokens,
                 favoriteId: editorFavoriteId,

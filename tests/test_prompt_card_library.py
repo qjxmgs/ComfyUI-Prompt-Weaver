@@ -110,6 +110,16 @@ class PromptCardLibraryStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(PromptCardLibraryValidationError, "example_image_id"):
             self.store.create_card(secondary["id"], {**snapshot(), "example_image_id": "bad"})
 
+    def test_text_mode_survives_create_update_and_legacy_snapshots(self):
+        _primary, secondary = self.create_branch()
+        card, _ = self.store.create_card(secondary["id"], {**snapshot(), "text_mode": True})
+        self.assertIs(card["text_mode"], True)
+        self.assertIs(self.store.list_library()["cards"][0]["text_mode"], True)
+        updated, _ = self.store.update_card(card["id"], snapshot=snapshot("updated"))
+        self.assertNotIn("text_mode", updated)
+        with self.assertRaisesRegex(PromptCardLibraryValidationError, "text_mode"):
+            self.store.update_card(card["id"], snapshot={**snapshot(), "text_mode": "true"})
+
     def test_batch_import_skips_invalid_cards_and_writes_once_in_input_order(self):
         _primary, secondary = self.create_branch()
         before_revision = self.store.list_library()["revision"]

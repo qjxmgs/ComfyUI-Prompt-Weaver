@@ -193,6 +193,7 @@ def validate_snapshot(value):
         example_image_id = item.get("example_image_id")
         has_retain_unselected = "retain_unselected" in item
         retain_unselected = item.get("retain_unselected", True)
+        text_mode = item.get("text_mode", False)
         has_prompt_tokens = "prompt_tokens" in item
         prompt_tokens = item.get("prompt_tokens")
         if not isinstance(enabled, bool):
@@ -240,6 +241,10 @@ def validate_snapshot(value):
             raise ArchiveValidationError(
                 f"snapshot items[{index}].retain_unselected must be a boolean"
             )
+        if not isinstance(text_mode, bool):
+            raise ArchiveValidationError(
+                f"snapshot items[{index}].text_mode must be a boolean"
+            )
         normalized_prompt_tokens = []
         if has_prompt_tokens:
             if not isinstance(prompt_tokens, list):
@@ -283,6 +288,8 @@ def validate_snapshot(value):
             normalized_item["random_favorite_category"] = random_category
         if has_example_image:
             normalized_item["example_image_id"] = example_image_id
+        if text_mode:
+            normalized_item["text_mode"] = True
         if retain_unselected is False:
             normalized_item["retain_unselected"] = False
         elif any(not token["selected"] for token in normalized_prompt_tokens):

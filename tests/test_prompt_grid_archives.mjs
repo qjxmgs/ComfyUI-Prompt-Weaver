@@ -638,6 +638,17 @@ test("retained prompt token state survives archive round trips and participates 
     assert.equal(disabled.items[0].prompt_tokens, undefined);
 });
 
+test("Text Mode survives archive restore and changes the archive dirty state", () => {
+    const textState = structuredClone(state);
+    textState.items[0].text_mode = true;
+    const saved = snapshotFromState(textState);
+    assert.equal(saved.items[0].text_mode, true);
+    assert.equal(configFromArchiveSnapshot(saved).items[0].text_mode, true);
+    assert.notEqual(semanticFingerprint(saved), semanticFingerprint(snapshotFromState(state)));
+    textState.items[0].text_mode = false;
+    assert.equal(snapshotFromState(textState).items[0].text_mode, undefined);
+});
+
 test("new and legacy pristine default snapshots localize without becoming dirty", () => {
     const english = {
         version: 1,
@@ -676,6 +687,9 @@ test("new and legacy pristine default snapshots localize without becoming dirty"
     retentionDisabled.items[0].retain_unselected = false;
     assert.equal(isPristineDefaultSnapshot(retentionDisabled), false);
     assert.notEqual(semanticFingerprint(english), semanticFingerprint(retentionDisabled));
+    const textModeEnabled = structuredClone(english);
+    textModeEnabled.items[0].text_mode = true;
+    assert.equal(isPristineDefaultSnapshot(textModeEnabled), false);
 });
 
 test("API client preserves paths, methods, payloads, and server errors", async () => {

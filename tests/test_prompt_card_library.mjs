@@ -22,7 +22,7 @@ const favoriteSource = (await readFile(
     new URL("../web/prompt_card_library.js", import.meta.url),
     "utf8",
 ))
-    .replace("./prompt_grid_archives.js?v=20261105-example-thumbnail-v1", archiveUrl)
+    .replace("./prompt_grid_archives.js?v=20261111-editor-text-mode", archiveUrl)
     .replace("./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1", tokenUrl)
     .replace("./prompt_weaver_i18n.js?v=20261020-loopback-help-v1", i18nUrl);
 const favoriteUrl = asDataUrl(favoriteSource);
@@ -233,6 +233,15 @@ test("favorite snapshots are independent from ids and timestamps", () => {
     const library = libraryPayload();
     library.cards[0].example_image_id = "a".repeat(64);
     assert.equal(normalizePromptCardLibrary(library).cards[0].example_image_id, "a".repeat(64));
+});
+
+test("favorite cards retain Text Mode across saves and card switches", () => {
+    const source = { ...libraryPayload().cards[0], text_mode: true };
+    assert.equal(promptCardFavoriteSnapshot(source).text_mode, true);
+    assert.equal(normalizePromptCardLibrary({ ...libraryPayload(), cards: [source] }).cards[0].text_mode, true);
+    assert.equal(replacePromptGridItemWithFavorite({ id: "grid", text_mode: true }, source).text_mode, true);
+    assert.equal(replacePromptGridItemWithFavorite({ id: "grid", text_mode: true }, libraryPayload().cards[0]).text_mode, undefined);
+    assert.notEqual(promptCardFavoriteFingerprint(source), promptCardFavoriteFingerprint(libraryPayload().cards[0]));
 });
 
 test("favorite switching takes the destination image and preserves grid identity, state, and color", () => {
@@ -628,7 +637,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20261105-card-bound-image-v2/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20261111-editor-text-mode/);
     assert.match(gridSource, /prompt_toggle_grid\.css\?v=20261105-card-bound-image-v2/);
     assert.match(gridSource, /promptNeedsFullPreview\(rawPrompt, input\.value, textWidth, contentWidth\)/);
     assert.match(gridSource, /promptTooltip\.textContent = exampleImageId \? t\("Loading example image…"\) : rawPrompt/);

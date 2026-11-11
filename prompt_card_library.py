@@ -137,6 +137,11 @@ def normalize_card_snapshot(value):
         if not isinstance(image_id, str) or EXAMPLE_IMAGE_ID_RE.fullmatch(image_id) is None:
             raise PromptCardLibraryValidationError("example_image_id must be a thumbnail ID")
         normalized["example_image_id"] = image_id
+    text_mode = value.get("text_mode", False)
+    if not isinstance(text_mode, bool):
+        raise PromptCardLibraryValidationError("text_mode must be a boolean")
+    if text_mode:
+        normalized["text_mode"] = True
     retain_unselected = value.get("retain_unselected", True)
     if not isinstance(retain_unselected, bool):
         raise PromptCardLibraryValidationError("retain_unselected must be a boolean")
@@ -576,7 +581,7 @@ class PromptCardLibraryStore:
                 insert_at = target_indexes[-1] + 1 if target_indexes else len(data["cards"])
                 data["cards"].insert(insert_at, card)
             if normalized_snapshot is not None:
-                for field in ("title", "prompt", "color", "retain_unselected", "prompt_tokens", "example_image_id"):
+                for field in ("title", "prompt", "color", "retain_unselected", "prompt_tokens", "example_image_id", "text_mode"):
                     card.pop(field, None)
                 card.update(normalized_snapshot)
             if update_example_image:

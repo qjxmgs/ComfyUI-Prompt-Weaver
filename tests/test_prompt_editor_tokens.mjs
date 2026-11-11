@@ -245,7 +245,7 @@ test("prompt editor UI exposes bulk controls and pointer toggle painting", async
     assert.match(styleSource, /\.cpw-prompt-editor__tokens--toggling/);
 });
 
-test("prompt editor UI exposes non-persistent text mode with raw confirmation", async () => {
+test("prompt editor UI restores card Text Mode and confirms raw prompt content", async () => {
     const uiSource = await readFile(
         new URL("../web/prompt_toggle_grid.js", import.meta.url),
         "utf8",
@@ -254,7 +254,9 @@ test("prompt editor UI exposes non-persistent text mode with raw confirmation", 
         new URL("../web/prompt_toggle_grid.css", import.meta.url),
         "utf8",
     );
-    assert.match(uiSource, /freeModeInput\.checked = false/);
+    assert.match(uiSource, /let freeMode = currentItem\?\.text_mode === true/);
+    assert.match(uiSource, /freePromptText = freeMode \? originalPrompt : ""/);
+    assert.match(uiSource, /freeModeInput\.checked = freeMode/);
     assert.match(uiSource, /cpw-prompt-editor__free-mode-text", t\("Text Mode"\)/);
     assert.match(uiSource, /cpw-prompt-editor__free-text/);
     assert.match(
