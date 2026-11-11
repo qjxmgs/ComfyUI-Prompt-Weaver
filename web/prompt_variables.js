@@ -47,6 +47,14 @@ function escapedAt(text, index) {
     return slashes % 2 === 1;
 }
 
+export function literalPromptText(text) {
+    return text.replace(REFERENCE_PATTERN, (match, name, offset) => {
+        const normalized = name.normalize("NFC");
+        return [...normalized].length <= MAX_VARIABLE_NAME_LENGTH && NAME_PATTERN.test(normalized)
+            && !escapedAt(text, offset) ? "\\" + match : match;
+    });
+}
+
 // Match Python's one-pass expansion without modifying the editor's source tokens.
 export function previewVariableReferences(text, variables) {
     const source = typeof text === "string" ? text : "";

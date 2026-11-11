@@ -432,8 +432,9 @@ test("archive toolbar keeps icon actions ordered and the archive group on one li
     );
     assert.match(
         toolbarSource,
-        /archiveGroup\.append\(\s*archiveSelect,\s*quickSaveArchiveButton,\s*restoreArchiveButton,\s*manageArchivesButton,\s*manageFavoritesButton,/,
+        /archiveActions\.append\(\s*quickSaveArchiveButton,\s*restoreArchiveButton,\s*manageArchivesButton,\s*manageFavoritesButton,\s*manageVariablesButton,\s*clearPromptsButton,/,
     );
+    assert.match(toolbarSource, /archiveGroup\.append\(archiveSelect, archiveActions\)/);
     assert.match(
         styleSource,
         /\.cpw-prompt-grid__archive-select\s*\{[^}]*max-width:\s*180px;/s,

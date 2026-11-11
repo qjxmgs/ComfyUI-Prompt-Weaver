@@ -638,9 +638,9 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
     assert.match(gridSource, /prompt_card_library\.js\?v=20261111-editor-text-mode/);
-    assert.match(gridSource, /prompt_toggle_grid\.css\?v=20261105-card-bound-image-v2/);
-    assert.match(gridSource, /promptNeedsFullPreview\(rawPrompt, input\.value, textWidth, contentWidth\)/);
-    assert.match(gridSource, /promptTooltip\.textContent = exampleImageId \? t\("Loading example image…"\) : rawPrompt/);
+    assert.match(gridSource, /prompt_toggle_grid\.css\?v=[\w-]+/);
+    assert.match(gridSource, /promptNeedsFullPreview\(shownPrompt, input\.value, textWidth, contentWidth\)/);
+    assert.match(gridSource, /promptTooltip\.textContent = exampleImageId \? t\("Loading example image…"\) : shownPrompt/);
     assert.match(gridSource, /document\.body\.append\(promptTooltip\)/);
     assert.match(gridSource, /prompt\.addEventListener\("pointerenter", \(\) => showPromptTooltip\(prompt, item\.id\)\)/);
     assert.match(gridSource, /prompt\.addEventListener\("focus", hidePromptTooltip\)/);
@@ -649,7 +649,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.doesNotMatch(gridSource, /const favoriteButton = element\("button", "cpw-prompt-grid__favorite"\)/);
     assert.match(gridSource, /sameFavorite && sameSnapshot[\s\S]*playFavoriteRefreshAnimation\(itemId\)/);
     assert.match(gridSource, /queueMicrotask\(\(\) => playFavoriteRefreshAnimation\(item\.id, card, refreshDirection\)\)/);
-    assert.match(gridSource, /footer\.append\(modeActions\);[\s\S]*if \(!favoriteUpdateMode\) footer\.append\(favoriteActions\);[\s\S]*footer\.append\(commitActions\)/);
+    assert.match(gridSource, /footer\.append\(modeActions\);[\s\S]*if \(hasFavorites\) footer\.append\(favoriteActions\);[\s\S]*footer\.append\(commitActions\)/);
     assert.doesNotMatch(gridSource, /const selectionActions = element/);
     assert.match(gridSource, /const currentEditorFavoriteSnapshot = \(\) => \{/);
     assert.match(gridSource, /mode: "assign",[\s\S]*getSnapshot: currentEditorFavoriteSnapshot,[\s\S]*resolvePromptTip: resolveFavoriteCardPromptTip/);

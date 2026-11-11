@@ -24,66 +24,62 @@ function isTopLevelSeparator(character) {
     return character === "," || character === "，" || character === "\n" || character === "\r";
 }
 
-export function splitPromptTokens(value) {
-    const text = typeof value === "string" ? value : "";
-    const tokens = [];
-    let current = "";
-    let parenthesisDepth = 0;
-    let bracketDepth = 0;
-    let braceDepth = 0;
+export function walkPromptSyntax(text, visit) {
     let quoteEnd = null;
     let escaped = false;
-
-    const flush = () => {
-        const token = current.trim();
-        if (token) tokens.push(token);
-        current = "";
-    };
-
     for (let index = 0; index < text.length; index += 1) {
         const character = text[index];
         if (escaped) {
-            current += character;
             escaped = false;
             continue;
         }
         if (character === "\\") {
-            current += character;
             escaped = true;
             continue;
         }
         if (quoteEnd) {
-            current += character;
             if (character === quoteEnd && !isContractionApostrophe(text, index)) quoteEnd = null;
             continue;
         }
 
-        const nextQuoteEnd = quoteEndAt(text, index);
-        if (nextQuoteEnd) {
-            quoteEnd = nextQuoteEnd;
-            current += character;
-            continue;
-        }
+        quoteEnd = quoteEndAt(text, index);
+        if (!quoteEnd) visit(character, index);
+    }
+}
 
+export function splitPromptTokens(value) {
+    const text = typeof value === "string" ? value : "";
+    const tokens = [];
+    let start = 0;
+    let parenthesisDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+
+    const flush = (end) => {
+        const token = text.slice(start, end).trim();
+        if (token) tokens.push(token);
+        start = end + 1;
+    };
+
+    walkPromptSyntax(text, (character, index) => {
         if (
             isTopLevelSeparator(character)
             && parenthesisDepth === 0
             && bracketDepth === 0
             && braceDepth === 0
         ) {
-            flush();
-            continue;
+            flush(index);
+            return;
         }
 
-        current += character;
         if (character === "(") parenthesisDepth += 1;
         else if (character === ")" && parenthesisDepth > 0) parenthesisDepth -= 1;
         else if (character === "[") bracketDepth += 1;
         else if (character === "]" && bracketDepth > 0) bracketDepth -= 1;
         else if (character === "{") braceDepth += 1;
         else if (character === "}" && braceDepth > 0) braceDepth -= 1;
-    }
-    flush();
+    });
+    flush(text.length);
     return tokens;
 }
 

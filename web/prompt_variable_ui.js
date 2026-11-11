@@ -371,7 +371,7 @@ export function openPromptVariableManager({
             remove.addEventListener("click", async () => {
                 if (getReferenceCount(variable.name) > 0 && pendingDeleteId !== variable.id) {
                     pendingDeleteId = variable.id;
-                    setMessage("This variable is referenced by {count} cards. Click Delete again to confirm.", false, { count: getReferenceCount(variable.name) });
+                    setMessage("This variable is referenced in {count} places. Click Delete again to confirm.", false, { count: getReferenceCount(variable.name) });
                     remove.textContent = t("Delete");
                     remove.focus();
                     return;

@@ -52,7 +52,7 @@ const node = {
     },
 };
 const { widget } = fixtureExtension.getCustomWidgets().PROMPT_WEAVER_PROMPT_GRID(node, "config", {});
-widget.setValue(JSON.stringify({ version: 1, columns: 2, variables: [], items: [
+widget.setValue(JSON.stringify({ version: 1, columns: 2, variables: [], clear_prompts: { prompt: "red hair" }, items: [
     { id: "card", enabled: true, title: "Original", prompt: "fallback", color: "green" },
 ] }));
 const tick = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
@@ -161,6 +161,7 @@ document.querySelector("#run").onclick = async () => {
                     await fixtureApi.queuePrompt(0, payload);
                     const fixed = JSON.parse(payload.output["7"].inputs.config);
                     assert(fixed.items[0].prompt === expected, "wrong random choice");
+                    assert(fixed.clear_prompts?.prompt === "red hair", "queue dropped the clear list");
                     assert(!fixed.items[0].random_favorite_category, "execution is still random");
                     assert(payload.output["7"].inputs.config === payload.workflow.nodes[0].widgets_values[0],
                         "API Prompt and Workflow differ");
@@ -236,7 +237,8 @@ document.querySelector("#run").onclick = async () => {
             document.querySelector(".cpw-prompt-card-cascade__item--favorite").click();
             await tick();
             assert(!document.querySelector(".cpw-prompt-grid__random-mode"), "single favorite did not exit random mode");
-            assert(document.querySelector(".cpw-prompt-grid__prompt").value === "red hair", "favorite snapshot not loaded");
+            assert(JSON.parse(widget.getValue()).items[0].prompt === "red hair", "favorite snapshot not loaded");
+            assert(document.querySelector(".cpw-prompt-grid__prompt").value === "", "cleared favorite prompt was displayed");
             assert(document.querySelector(".cpw-prompt-grid__title").value === "Red", "favorite title not shown after random mode");
             assert(document.querySelector(".cpw-prompt-grid__card--favorite-refreshed"), "favorite switch has no shine effect");
             assert(document.querySelector(".cpw-prompt-grid__card--favorite-refreshed-reverse"),

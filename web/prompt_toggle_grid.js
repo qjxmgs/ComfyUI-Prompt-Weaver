@@ -56,7 +56,12 @@ import {
     setAllPromptTokenSelection,
     splitPromptTokens,
     togglePromptTokenOnce,
-} from "./prompt_editor_tokens.js?v=20261101-apostrophe-token-v1";
+} from "./prompt_editor_tokens.js?v=20261106-clear-prompt-tags";
+import {
+    clearPromptKeys,
+    createFilteredPromptEdit,
+    filteredCardPrompt,
+} from "./prompt_clear_rules.js?v=20261106-editable-filtered-prompt";
 import {
     clampPromptEditorPosition,
     countActivePromptTokens,
@@ -91,11 +96,11 @@ import {
     variableReferenceCount,
     mergeVariableClipboard,
     previewVariableReferences,
-} from "./prompt_variables.js?v=20260926-variable-token-preview-v1";
+} from "./prompt_variables.js?v=20261106-editable-filtered-prompt";
 import {
     openPromptVariableManager,
     VariableSuggestionController,
-} from "./prompt_variable_ui.js?v=20261020-loopback-help-v1";
+} from "./prompt_variable_ui.js?v=20261106-clear-prompts";
 import {
     calculateFittedNodeHeight,
     clientPointToContent,
@@ -303,6 +308,47 @@ function configError(message) {
     return new Error(t("Prompt grid configuration error: {message}", { message }));
 }
 
+function promptFieldsForStorage(prompt, retainUnselected, promptTokens) {
+    return {
+        prompt,
+        ...(!retainUnselected ? { retain_unselected: false } : {}),
+        ...(retainUnselected && promptTokens?.length ? { prompt_tokens: promptTokens } : {}),
+    };
+}
+
+function normalizePromptFields(value, field) {
+    const { prompt = "", retain_unselected: retainUnselected = true, prompt_tokens: tokens } = value;
+    if (typeof prompt !== "string") {
+        throw configError(t("{field} must be a string", { field: field + ".prompt" }));
+    }
+    if (typeof retainUnselected !== "boolean") {
+        throw configError(t("{field} must be a boolean", { field: field + ".retain_unselected" }));
+    }
+    if (tokens !== undefined && !Array.isArray(tokens)) {
+        throw configError(t("{field} must be an array", { field: field + ".prompt_tokens" }));
+    }
+    for (const [index, token] of (tokens ?? []).entries()) {
+        const tokenField = field + ".prompt_tokens[" + index + "]";
+        if (!token || typeof token !== "object" || Array.isArray(token)) {
+            throw configError(t("{field} must be an object", { field: tokenField }));
+        }
+        if (typeof token.text !== "string" || !token.text.trim()) {
+            throw configError(t("{field} must be a non-empty string", { field: tokenField + ".text" }));
+        }
+        if (typeof token.selected !== "boolean") {
+            throw configError(t("{field} must be a boolean", { field: tokenField + ".selected" }));
+        }
+    }
+
+    const reconciled = tokens && reconcilePromptTokenStates(prompt, tokens);
+    const promptTokens = reconciled && promptTokenStatesForStorage(reconciled.tokens, reconciled.selected);
+    return {
+        fields: promptFieldsForStorage(prompt, retainUnselected, promptTokens),
+        normalized: (tokens !== undefined && JSON.stringify(promptTokens ?? []) !== JSON.stringify(tokens))
+            || value.retain_unselected === true || (!retainUnselected && Boolean(promptTokens)),
+    };
+}
+
 function normalizeConfigValue(value) {
     if (value === undefined) {
         const state = createDefaultConfig();
@@ -348,6 +394,14 @@ function normalizeConfigValue(value) {
         : DEFAULT_COLUMNS;
     let normalized = columns !== raw.columns || (raw.variables !== undefined
         && JSON.stringify(variables) !== JSON.stringify(raw.variables));
+    let clearPrompts;
+    if (raw.clear_prompts !== undefined) {
+        if (!raw.clear_prompts || typeof raw.clear_prompts !== "object" || Array.isArray(raw.clear_prompts)) {
+            throw configError(t("{field} must be an object", { field: "clear_prompts" }));
+        }
+        clearPrompts = normalizePromptFields(raw.clear_prompts, "clear_prompts").fields;
+        if (JSON.stringify(clearPrompts) !== JSON.stringify(raw.clear_prompts)) normalized = true;
+    }
     const usedIds = new Set();
     const items = raw.items.map((item, index) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -357,45 +411,12 @@ function normalizeConfigValue(value) {
         if (hasEnabled && typeof item.enabled !== "boolean") {
             throw configError(t("items[{index}].enabled must be a boolean", { index }));
         }
+        const editorFields = normalizePromptFields(item, "items[" + index + "]");
+        if (editorFields.normalized) normalized = true;
         if (Object.hasOwn(item, "text_mode") && typeof item.text_mode !== "boolean") {
             throw configError(t("{field} must be a boolean", { field: `items[${index}].text_mode` }));
         }
         if (item.text_mode === false) normalized = true;
-        const hasPrompt = Object.prototype.hasOwnProperty.call(item, "prompt");
-        if (hasPrompt && typeof item.prompt !== "string") {
-            throw configError(t("items[{index}].prompt must be a string", { index }));
-        }
-        const hasRetainUnselected = Object.prototype.hasOwnProperty.call(item, "retain_unselected");
-        if (hasRetainUnselected && typeof item.retain_unselected !== "boolean") {
-            throw configError(t("items[{index}].retain_unselected must be a boolean", { index }));
-        }
-        const hasPromptTokens = Object.prototype.hasOwnProperty.call(item, "prompt_tokens");
-        if (hasPromptTokens && !Array.isArray(item.prompt_tokens)) {
-            throw configError(t("items[{index}].prompt_tokens must be an array", { index }));
-        }
-        if (hasPromptTokens) {
-            for (let tokenIndex = 0; tokenIndex < item.prompt_tokens.length; tokenIndex += 1) {
-                const entry = item.prompt_tokens[tokenIndex];
-                if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-                    throw configError(t(
-                        "items[{index}].prompt_tokens[{tokenIndex}] must be an object",
-                        { index, tokenIndex },
-                    ));
-                }
-                if (typeof entry.text !== "string" || !entry.text.trim()) {
-                    throw configError(t(
-                        "items[{index}].prompt_tokens[{tokenIndex}].text must be a non-empty string",
-                        { index, tokenIndex },
-                    ));
-                }
-                if (typeof entry.selected !== "boolean") {
-                    throw configError(t(
-                        "items[{index}].prompt_tokens[{tokenIndex}].selected must be a boolean",
-                        { index, tokenIndex },
-                    ));
-                }
-            }
-        }
 
         if (Object.prototype.hasOwnProperty.call(item, "id") && typeof item.id !== "string") {
             throw configError(t("items[{index}].id must be a string", { index }));
@@ -440,23 +461,6 @@ function normalizeConfigValue(value) {
             prompt_tokens: _discardedPromptTokens,
             ...itemWithoutEditorState
         } = item;
-        const prompt = hasPrompt ? item.prompt : "";
-        const retainUnselected = hasRetainUnselected ? item.retain_unselected : true;
-        const reconciledTokenState = hasPromptTokens
-            ? reconcilePromptTokenStates(prompt, item.prompt_tokens)
-            : null;
-        const normalizedTokenStates = reconciledTokenState
-            ? promptTokenStatesForStorage(
-                reconciledTokenState.tokens,
-                reconciledTokenState.selected,
-            )
-            : null;
-        if (
-            hasPromptTokens
-            && JSON.stringify(normalizedTokenStates ?? []) !== JSON.stringify(item.prompt_tokens)
-        ) normalized = true;
-        if (hasRetainUnselected && retainUnselected) normalized = true;
-        if (!retainUnselected && normalizedTokenStates) normalized = true;
         return {
             ...itemWithoutEditorState,
             id,
@@ -464,19 +468,18 @@ function normalizeConfigValue(value) {
             title: typeof item.title === "string"
                 ? item.title
                 : cardTitle(index + 1),
-            prompt,
+            ...editorFields.fields,
             ...(color ? { color } : {}),
             ...(favoriteId ? { favorite_id: favoriteId } : {}),
             ...(randomCategory ? { random_favorite_category: randomCategory } : {}),
             ...(exampleImageId ? { example_image_id: exampleImageId } : {}),
             ...(item.text_mode === true ? { text_mode: true } : {}),
-            ...(!retainUnselected ? { retain_unselected: false } : {}),
-            ...(retainUnselected && normalizedTokenStates
-                ? { prompt_tokens: normalizedTokenStates }
-                : {}),
         };
     });
-    const state = { ...raw, version: CONFIG_VERSION, columns, variables, items };
+    const state = {
+        ...raw, version: CONFIG_VERSION, columns, variables, items,
+        ...(clearPrompts ? { clear_prompts: clearPrompts } : {}),
+    };
     const serialized = typeof value === "string" && !normalized
         ? value
         : JSON.stringify(state);
@@ -769,7 +772,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20261105-card-bound-image-v2", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20261106-clear-prompt-tags", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -879,6 +882,17 @@ function createPromptGridWidget(node, inputName, inputData) {
         "span",
         "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--variable-manage",
     ));
+    const clearPromptsButton = element(
+        "button",
+        "cpw-prompt-grid__button cpw-prompt-grid__archive-action cpw-prompt-grid__clear-prompts",
+    );
+    clearPromptsButton.type = "button";
+    clearPromptsButton.setAttribute("aria-haspopup", "dialog");
+    clearPromptsButton.setAttribute("aria-expanded", "false");
+    clearPromptsButton.append(element(
+        "span",
+        "cpw-prompt-grid__archive-action-icon cpw-prompt-grid__archive-action-icon--clear-prompts",
+    ));
     quickSaveArchiveButton.type = "button";
     restoreArchiveButton.type = "button";
     manageArchivesButton.type = "button";
@@ -894,14 +908,17 @@ function createPromptGridWidget(node, inputName, inputData) {
     setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
     setArchiveActionLabel(manageFavoritesButton, t("Favorite Cards Manager"));
     setArchiveActionLabel(manageVariablesButton, t("Variable Manager"));
-    archiveGroup.append(
-        archiveSelect,
+    setArchiveActionLabel(clearPromptsButton, t("Clear Prompts"));
+    const archiveActions = element("div", "cpw-prompt-grid__archive-actions");
+    archiveActions.append(
         quickSaveArchiveButton,
         restoreArchiveButton,
         manageArchivesButton,
         manageFavoritesButton,
         manageVariablesButton,
+        clearPromptsButton,
     );
+    archiveGroup.append(archiveSelect, archiveActions);
 
     const leadingControls = element("div", "cpw-prompt-grid__leading-controls");
     const actions = element("div", "cpw-prompt-grid__actions");
@@ -970,6 +987,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let widget;
     const cardElements = new Map();
     const cardAutocompleteControllers = new Set();
+    let cardClearKeys = new Set();
     const reorderAnimations = new WeakMap();
     const archiveReorderAnimations = new WeakMap();
     const pendingFavoriteRefreshDirections = new Map();
@@ -1099,6 +1117,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
         const item = state?.items.find((entry) => entry.id === itemId);
         const rawPrompt = item?.prompt ?? input.value;
+        const shownPrompt = filteredCardPrompt(rawPrompt, state?.variables ?? [], cardClearKeys) ?? rawPrompt;
         const exampleImageId = effectiveExampleImageId(item, promptCardLibraryService.library);
         const style = getComputedStyle(input);
         const contentWidth = input.clientWidth
@@ -1107,7 +1126,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const letterSpacing = parseFloat(style.letterSpacing);
         const textWidth = (promptMeasure?.measureText(input.value).width ?? input.scrollWidth)
             + (Number.isFinite(letterSpacing) ? letterSpacing * Math.max(0, input.value.length - 1) : 0);
-        if (!exampleImageId && !promptNeedsFullPreview(rawPrompt, input.value, textWidth, contentWidth)) {
+        if (!exampleImageId && !promptNeedsFullPreview(shownPrompt, input.value, textWidth, contentWidth)) {
             hidePromptTooltip();
             return;
         }
@@ -1121,7 +1140,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const describedBy = input.getAttribute("aria-describedby");
         input.setAttribute("aria-describedby", [describedBy, promptTooltip.id].filter(Boolean).join(" "));
         promptTooltip.classList.toggle("cpw-prompt-grid__prompt-tooltip--image", Boolean(exampleImageId));
-        promptTooltip.textContent = exampleImageId ? t("Loading example image…") : rawPrompt;
+        promptTooltip.textContent = exampleImageId ? t("Loading example image…") : shownPrompt;
         document.body.append(promptTooltip);
         if (!positionPromptTooltip(input)) return;
         document.addEventListener("scroll", onPromptTooltipScroll, true);
@@ -1204,6 +1223,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         setArchiveActionLabel(manageArchivesButton, t("Archive Manager"));
         setArchiveActionLabel(manageFavoritesButton, t("Favorite Cards Manager"));
         setArchiveActionLabel(manageVariablesButton, t("Variable Manager"));
+        setArchiveActionLabel(clearPromptsButton, t("Clear Prompts"));
         addButton.textContent = t("+ Add Card");
         syncMasterToggle();
         errorTitle.textContent = t("Configuration could not be read");
@@ -1219,11 +1239,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 titleInput.setAttribute("aria-label", t("Card title"));
             }
             const promptInput = card.querySelector(".cpw-prompt-grid__prompt");
-            if (promptInput) {
-                promptInput.placeholder = t("Enter a prompt…");
-                promptInput.setAttribute("aria-label", t("Prompt content"));
-                if (promptInput.readOnly) promptInput.title = t("Random mode: prompt editing is disabled");
-            }
+            if (promptInput) refreshCardPromptInputLabels(promptInput);
             const editButton = card.querySelector(".cpw-prompt-grid__prompt-edit");
             if (editButton) {
                 editButton.title = t(editButton.disabled
@@ -1313,7 +1329,10 @@ function createPromptGridWidget(node, inputName, inputData) {
             opener: manageVariablesButton,
             getVariables: () => state?.variables ?? [],
             getRevision: () => variableRevision,
-            getReferenceCount: (name) => variableReferenceCount(state.items, name),
+            getReferenceCount: (name) => variableReferenceCount(
+                state.clear_prompts ? [...state.items, state.clear_prompts] : state.items,
+                name,
+            ),
             createValueAutocomplete(input, { popupParent }) {
                 return new PromptAutocompleteController(input, promptTagAutocompleteProvider, {
                     popupParent,
@@ -1342,7 +1361,12 @@ function createPromptGridWidget(node, inputName, inputData) {
                 if (current[field] === nextValue) return;
                 commitVariableMutation(() => {
                     state.variables = variables;
-                    if (field === "name") state.items = renameVariableReferences(state.items, current.name, nextValue);
+                    if (field === "name") {
+                        state.items = renameVariableReferences(state.items, current.name, nextValue);
+                        if (state.clear_prompts) {
+                            [state.clear_prompts] = renameVariableReferences([state.clear_prompts], current.name, nextValue);
+                        }
+                    }
                 }, true);
             },
             onDelete(id, revision) {
@@ -1759,6 +1783,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const normalized = normalizeConfigValue(JSON.stringify({
             ...configFromArchiveSnapshot(snapshot),
             variables: state?.variables ?? [],
+            ...(state?.clear_prompts ? { clear_prompts: state.clear_prompts } : {}),
         }));
         state = normalized.state;
         parseError = null;
@@ -3212,9 +3237,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const nextItem = {
             ...baseItem,
             title,
-            prompt,
-            ...(!retainUnselected ? { retain_unselected: false } : {}),
-            ...(retainUnselected && promptTokens?.length ? { prompt_tokens: promptTokens } : {}),
+            ...promptFieldsForStorage(prompt, retainUnselected, promptTokens),
             ...(textMode ? { text_mode: true } : {}),
             ...(nextFavoriteId ? { favorite_id: nextFavoriteId } : {}),
         };
@@ -3879,15 +3902,36 @@ function createPromptGridWidget(node, inputName, inputData) {
         }
     }
 
+    function openClearPromptsEditor() {
+        if (!state || activeVariableManager || activeArchiveManager || activeArchiveConfirmation) return;
+        hidePromptTooltip();
+        closeItemContextMenu();
+        closePromptCardLibraryMenu(false);
+        const previous = state.clear_prompts;
+        openPromptEditor(null, null, clearPromptsButton, {
+            mode: "clear-prompts",
+            item: previous,
+            onSubmit(next) {
+                if (JSON.stringify(previous ?? { prompt: "" }) === JSON.stringify(next)) return;
+                state.clear_prompts = next;
+                commit(true);
+            },
+            onClose() {
+                clearPromptsButton.setAttribute("aria-expanded", "false");
+            },
+        });
+        clearPromptsButton.setAttribute("aria-expanded", "true");
+    }
+
     function openPromptEditor(promptInput, itemId, opener, options = {}) {
         closePromptEditor(false);
         const favoriteUpdateMode = options.mode === "favorite-update";
-        const currentItem = favoriteUpdateMode
+        const clearPromptsMode = options.mode === "clear-prompts";
+        const hasFavorites = !favoriteUpdateMode && !clearPromptsMode;
+        const currentItem = favoriteUpdateMode || clearPromptsMode
             ? options.item ?? null
             : state?.items.find((item) => item.id === itemId) ?? null;
-        const originalPrompt = favoriteUpdateMode
-            ? currentItem?.prompt ?? ""
-            : promptInput.value;
+        const originalPrompt = currentItem?.prompt ?? promptInput?.value ?? "";
         const parsedTokens = splitPromptTokens(originalPrompt);
         const initialTokenState = reconcilePromptTokenStates(
             originalPrompt,
@@ -3946,9 +3990,15 @@ function createPromptGridWidget(node, inputName, inputData) {
         dialog.setAttribute("aria-labelledby", title.id);
         const cardTitleInput = element("input", "cpw-prompt-editor__card-title");
         cardTitleInput.type = "text";
+        cardTitleInput.readOnly = clearPromptsMode;
+        const refreshTitleInput = () => {
+            const label = t(clearPromptsMode ? "Automatically clear the following prompts" : "Card title");
+            if (clearPromptsMode) cardTitleInput.value = label;
+            cardTitleInput.placeholder = label;
+            cardTitleInput.setAttribute("aria-label", label);
+        };
         cardTitleInput.value = currentItem?.title ?? "";
-        cardTitleInput.placeholder = t("Card title");
-        cardTitleInput.setAttribute("aria-label", t("Card title"));
+        refreshTitleInput();
         const bulkSelectionButton = element(
             "button",
             "cpw-prompt-editor__action cpw-prompt-editor__bulk-selection",
@@ -4097,7 +4147,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         const commitActions = element("div", "cpw-prompt-editor__commit-actions");
         commitActions.append(copyButton, confirmButton);
         footer.append(modeActions);
-        if (!favoriteUpdateMode) footer.append(favoriteActions);
+        if (hasFavorites) footer.append(favoriteActions);
         footer.append(commitActions);
         const resizeHandle = element("div", "cpw-prompt-editor__resize-handle");
         resizeHandle.setAttribute("role", "separator");
@@ -4623,6 +4673,16 @@ function createPromptGridWidget(node, inputName, inputData) {
                 freeMode ? t("Text-mode prompt text") : t("Prompt tags"),
             );
 
+            const clearKeys = promptInput
+                ? clearPromptKeys(state?.clear_prompts?.prompt, editorVariableDraft) : null;
+            const createTagLabel = (className, token) => {
+                const label = element("span", className, token);
+                if (clearKeys && filteredCardPrompt(token, editorVariableDraft, clearKeys) !== null) {
+                    label.classList.add("cpw-prompt-editor__tag--cleared");
+                }
+                return label;
+            };
+
             if (freeMode) {
                 const freeModeContent = element("div", "cpw-prompt-editor__free-content");
                 freeTextArea = element("textarea", "cpw-prompt-editor__free-text");
@@ -4662,8 +4722,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                             "cpw-prompt-editor__retained-token",
                         );
                         retainedTag.dataset.promptToken = token;
-                        retainedTag.append(element(
-                            "span",
+                        retainedTag.append(createTagLabel(
                             "cpw-prompt-editor__retained-token-text",
                             token,
                         ));
@@ -4773,8 +4832,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     button.dataset.promptTokenIndex = String(index);
                     button.setAttribute("aria-pressed", String(selected[index]));
                     button.classList.toggle("cpw-prompt-editor__token--inactive", !selected[index]);
-                    button.append(element(
-                        "span",
+                    button.append(createTagLabel(
                         "cpw-prompt-editor__token-prompt",
                         token,
                     ));
@@ -5099,7 +5157,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             return restorePromptContentSnapshot(snapshot, { focusContent });
         };
         const cancelPromptEditorTransientAction = () => {
-            if (activePromptCardLibraryMenu && !favoriteUpdateMode) {
+            if (activePromptCardLibraryMenu && hasFavorites) {
                 closePromptCardLibraryMenu(true);
                 return true;
             }
@@ -5263,8 +5321,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             title.childNodes[0].textContent = t("Edit Card (");
             title.childNodes[2].textContent = t(")");
             renderActivePromptCount();
-            cardTitleInput.placeholder = t("Card title");
-            cardTitleInput.setAttribute("aria-label", t("Card title"));
+            refreshTitleInput();
             clearPromptButton.textContent = t("Clear");
             clearPromptButton.title = t("Clear all prompts");
             clearPromptButton.setAttribute("aria-label", t("Clear all prompts"));
@@ -5279,7 +5336,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             fontSizeInput.setAttribute("aria-valuetext", t("{size} pixels", { size: promptFontSize }));
             closeButton.title = t("Close without saving");
             closeButton.setAttribute("aria-label", t("Close the prompt editor without saving"));
-            if (!favoriteUpdateMode) {
+            if (hasFavorites) {
                 favoriteCardsText.textContent = t("Favorites");
                 favoriteCardsButton.title = t("Save or manage this card's favorite");
                 favoriteCardsButton.setAttribute("aria-label", t("Save or manage this card's favorite"));
@@ -5361,7 +5418,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         retainUnselectedInput.addEventListener("change", () => (
             setRetainUnselectedEnabled(retainUnselectedInput.checked)
         ));
-        if (!favoriteUpdateMode) {
+        if (hasFavorites) {
             favoriteCardsButton.addEventListener("click", openEditorFavoriteMenu);
         }
         copyButton.addEventListener("click", async () => {
@@ -5381,6 +5438,11 @@ function createPromptGridWidget(node, inputName, inputData) {
             const promptTokens = retainUnselected
                 ? promptTokenStatesForStorage(storedDraft.tokens, storedDraft.selected)
                 : null;
+            if (clearPromptsMode) {
+                closePromptEditor();
+                options.onSubmit(promptFieldsForStorage(nextPrompt, retainUnselected, promptTokens));
+                return;
+            }
             if (favoriteUpdateMode) {
                 if (submitting) return;
                 submitting = true;
@@ -5421,7 +5483,6 @@ function createPromptGridWidget(node, inputName, inputData) {
                 .closest(".cpw-prompt-grid__card")
                 ?.querySelector(".cpw-prompt-grid__title");
             if (gridTitleInput) gridTitleInput.value = nextTitle;
-            promptInput.value = nextPrompt;
             updatePromptEditorItem(itemId, {
                 title: nextTitle,
                 prompt: nextPrompt,
@@ -5431,6 +5492,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                 favoriteId: editorFavoriteId,
                 variables: nextVariables,
             });
+            syncCardPromptInput(promptInput, nextPrompt);
         });
         const handlePromptEditorKeyDown = (event) => {
             if (activePromptEditor?.overlay !== overlay) return;
@@ -5467,7 +5529,7 @@ function createPromptGridWidget(node, inputName, inputData) {
                     || (!event.metaKey && !event.shiftKey && shortcutKey === "y")
                 );
             if ((undoShortcut || redoShortcut) && !event.isComposing) {
-                const nativeTextHistory = event.target === cardTitleInput
+                const nativeTextHistory = (event.target === cardTitleInput && !cardTitleInput.readOnly)
                     || (
                         pendingTextHistory?.dirty === true
                         && pendingTextHistory.element === event.target
@@ -5496,6 +5558,16 @@ function createPromptGridWidget(node, inputName, inputData) {
             ?? addButton
             ?? confirmButton
         ).focus());
+    }
+
+    function refreshCardPromptInputLabels(input) {
+        input.placeholder = t("Enter a prompt…");
+        input.setAttribute("aria-label", t("Prompt content"));
+        if (input.readOnly) input.title = t("Random mode: prompt editing is disabled");
+    }
+
+    function syncCardPromptInput(input, rawPrompt) {
+        input.value = filteredCardPrompt(rawPrompt, state?.variables ?? [], cardClearKeys) ?? rawPrompt;
     }
 
     function createCard(item) {
@@ -5558,14 +5630,10 @@ function createPromptGridWidget(node, inputName, inputData) {
 
         const prompt = element("input", "cpw-prompt-grid__prompt");
         prompt.type = "text";
-        prompt.value = item.prompt;
         prompt.readOnly = Boolean(randomCategory);
-        if (randomCategory) {
-            prompt.setAttribute("aria-readonly", "true");
-            prompt.title = t("Random mode: prompt editing is disabled");
-        }
-        prompt.placeholder = t("Enter a prompt…");
-        prompt.setAttribute("aria-label", t("Prompt content"));
+        if (randomCategory) prompt.setAttribute("aria-readonly", "true");
+        refreshCardPromptInputLabels(prompt);
+        let mergeInlineEdit;
         const promptEditButton = element("button", "cpw-prompt-grid__prompt-edit", "✎");
         promptEditButton.type = "button";
         promptEditButton.title = t("Split and select prompts");
@@ -5588,14 +5656,28 @@ function createPromptGridWidget(node, inputName, inputData) {
         });
         prompt.addEventListener("input", () => {
             hidePromptTooltip();
-            updateItem(item.id, { prompt: prompt.value }, false);
+            if (prompt.readOnly) return;
+            const current = state?.items.find((entry) => entry.id === item.id);
+            if (!current) return;
+            if (mergeInlineEdit === undefined) {
+                mergeInlineEdit = createFilteredPromptEdit(current.prompt, state.variables, cardClearKeys);
+            }
+            const nextPrompt = mergeInlineEdit ? mergeInlineEdit(prompt.value) : prompt.value;
+            if (nextPrompt !== current.prompt) updateItem(item.id, { prompt: nextPrompt }, false);
         });
         prompt.addEventListener("pointerenter", () => showPromptTooltip(prompt, item.id));
         prompt.addEventListener("pointerleave", schedulePromptTooltipHide);
         prompt.addEventListener("pointerdown", hidePromptTooltip);
         prompt.addEventListener("focus", hidePromptTooltip);
+        prompt.addEventListener("blur", () => {
+            mergeInlineEdit = undefined;
+            if (prompt.readOnly || !prompt.isConnected) return;
+            const currentItem = state?.items.find((entry) => entry.id === item.id);
+            if (currentItem) syncCardPromptInput(prompt, currentItem.prompt);
+        });
         title.addEventListener("change", captureCanvasState);
         prompt.addEventListener("change", captureCanvasState);
+        syncCardPromptInput(prompt, item.prompt);
         if (!randomCategory) {
             cardAutocompleteControllers.add(new PromptAutocompleteController(
                 prompt,
@@ -5655,6 +5737,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
         columnSelect.value = String(state.columns);
         applyGridColumns();
+        cardClearKeys = clearPromptKeys(state.clear_prompts?.prompt, state.variables);
         cardElements.clear();
         const cards = state.items.map(createCard);
         if (cards.length) {
@@ -5708,6 +5791,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     manageArchivesButton.addEventListener("click", openArchiveManager);
     manageFavoritesButton.addEventListener("click", openFavoriteManager);
     manageVariablesButton.addEventListener("click", openVariableManager);
+    clearPromptsButton.addEventListener("click", openClearPromptsEditor);
     resetButton.addEventListener("click", () => {
         state = createDefaultConfig();
         parseError = null;

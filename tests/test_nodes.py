@@ -18,6 +18,25 @@ class PromptWeaverPromptToggleGridTests(unittest.TestCase):
     def combine(self, config, prefix_prompt=""):
         return NODES.PromptWeaverPromptToggleGrid().combine(config, prefix_prompt)[0]
 
+    def test_clear_prompts_shared_with_frontend(self):
+        cases = json.loads((PLUGIN_ROOT / "tests" / "clear_prompt_cases.json").read_text(encoding="utf-8"))
+        for fixture in cases:
+            with self.subTest(name=fixture["name"]):
+                config = {
+                    "items": [{"enabled": True, **card} for card in fixture["cards"]],
+                    "variables": fixture.get("variables", []),
+                }
+                if "clear_prompts" in fixture:
+                    config["clear_prompts"] = fixture["clear_prompts"]
+                self.assertEqual(self.combine(json.dumps(config), fixture.get("prefix", "")), fixture["output"])
+
+    def test_clear_prompt_validation_and_missing_variable(self):
+        for fields in (None, {"prompt": []}, {"retain_unselected": 1}, {"prompt_tokens": [{}]}):
+            with self.subTest(fields=fields), self.assertRaisesRegex(ValueError, "clear_prompts"):
+                self.combine(json.dumps({"items": [], "clear_prompts": fields}))
+        with self.assertRaisesRegex(ValueError, r"undefined variable \{missing\}"):
+            self.combine(json.dumps({"items": [], "clear_prompts": {"prompt": "{missing}"}}))
+
     def test_random_category_without_browser_uses_original_prompt_only(self):
         config = json.dumps({"version": 1, "items": [
             {"enabled": True, "prompt": "original {color}",

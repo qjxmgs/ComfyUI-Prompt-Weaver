@@ -254,7 +254,98 @@ document.querySelector("#run").onclick=async ()=>{
             assert(tokenButtons[1].textContent.includes("red shirt")&&state(1).items[0].prompt===prompt,"locale keeps previews and prompt");
             document.querySelector('#language').click();await tick();
         });
-        result.textContent+="ALL 20 CASES PASSED\n";
+        await runCase("clear rules filter card previews and strike the original editor tags", async () => {
+            const node = nodes[1];
+            const surviving = "smile, uncensored, bright sunlight falling across the floor";
+            const prompt = "censored, (CENSORED:1.25), {tags}, uncensored, bright sunlight falling across the floor";
+            node.widget.setValue(JSON.stringify({
+                version: 1, columns: 3,
+                variables: [{ id: "tag-value", name: "tags", value: "censored, smile" }],
+                clear_prompts: { prompt: "censored" },
+                items: [{ id: "clear-test", title: "Clear test", enabled: true, prompt }],
+            }));
+
+            const gridInput = node.container.querySelector(".cpw-prompt-grid__prompt");
+            const openCard = node.container.querySelector(".cpw-prompt-grid__prompt-edit");
+            const decoration = (element) => getComputedStyle(element).textDecorationLine;
+            const labels = () => [...document.querySelectorAll(".cpw-prompt-editor__token-prompt")];
+            const expected = "censored|(CENSORED:1.25)|{tags}";
+            const marked = () => labels().filter((label) => decoration(label) === "line-through")
+                .map((label) => label.textContent).join("|");
+            const switchMode = () => document.activeElement.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+            );
+
+            assert(gridInput.value === surviving && !gridInput.readOnly && decoration(gridInput) === "none",
+                "grid displays surviving prompts");
+            gridInput.dispatchEvent(new PointerEvent("pointerenter"));
+            const tooltip = document.querySelector(".cpw-prompt-grid__prompt-tooltip");
+            assert(tooltip?.textContent === surviving && tooltip.childElementCount === 0, "hover shows filtered plain text");
+            openCard.click();
+            await tick();
+            assert(marked() === expected, "exact, weighted and partially matching variable labels are struck");
+            assert(getComputedStyle(labels()[0]).textDecorationColor === "rgb(255, 59, 48)", "strike is red");
+            const translation = labels()[0].nextElementSibling;
+            assert(decoration(translation) === "none", "translation is plain text");
+
+            labels()[0].closest("button").click();
+            assert(labels()[0].closest("button").getAttribute("aria-pressed") === "false"
+                && marked() === expected, "tag selection is independent of the rule");
+            switchMode();
+            await tick();
+            const text = document.querySelector(".cpw-prompt-editor__free-text");
+            assert(text?.value.includes("(CENSORED:1.25)") && decoration(text) === "none", "text mode is plain text");
+            switchMode();
+            await tick();
+            assert(marked() === expected, "tag mode restores the same strikes");
+            document.querySelector(".cpw-prompt-editor__close").click();
+            assert(state(1).items[0].prompt === prompt, "cancel preserves the stored prompt");
+
+            node.container.querySelector(".cpw-prompt-grid__clear-prompts").click();
+            await tick();
+            assert(marked() === "" && labels()[0].textContent === "censored", "clear list editor is plain");
+            document.querySelector(".cpw-prompt-editor__close").click();
+        });
+        await runCase("an empty filtered input supports inline editing and preserves hidden tags", async () => {
+            const node = nodes[1];
+            const config = state(1);
+            config.items[0].prompt = "censored";
+            node.widget.setValue(JSON.stringify(config));
+            const input = () => node.container.querySelector(".cpw-prompt-grid__prompt");
+            assert(input().value === "" && !input().readOnly && input().getAttribute("role") === "combobox",
+                "fully filtered card has an empty editable input");
+            typeValue(input(), "s");
+            assert(state(1).items[0].prompt === "censored, s", "first keystroke preserves the hidden source");
+            typeValue(input(), "smile");
+            assert(document.activeElement === input() && input().selectionStart === 5, "inline input keeps the caret");
+            input().blur();
+            assert(input().value === "smile" && state(1).items[0].prompt === "censored, smile",
+                "sequential input shows only the new text and keeps the hidden tag once");
+
+            node.container.querySelector(".cpw-prompt-grid__prompt-edit").click();
+            await tick();
+            assert(document.querySelector(".cpw-prompt-editor__tag--cleared")?.textContent === "censored",
+                "editor still shows the original hidden tag");
+            document.querySelector(".cpw-prompt-editor__action--primary").click();
+            assert(input().value === "smile" && state(1).items[0].prompt === "censored, smile",
+                "confirming the original tag does not put it back into the preview");
+
+            node.container.querySelector(".cpw-prompt-grid__clear-prompts").click();
+            await tick();
+            document.querySelector(".cpw-prompt-editor__clear").click();
+            document.querySelector(".cpw-prompt-editor__action--primary").click();
+            await tick();
+            assert(input().value === "censored, smile" && !input().readOnly && input().getAttribute("role") === "combobox",
+                "removing the clear rule restores text and autocomplete");
+            node.widget.setValue(JSON.stringify(state(1)));
+            assert(input().value === "censored, smile", "restored prompt survives workflow reload");
+
+            node.widget.setValue(JSON.stringify({ ...config, items: [{ ...config.items[0], prompt: "censored" }] }));
+            const openCard = node.container.querySelector(".cpw-prompt-grid__prompt-edit");
+            openCard.click();
+            await tick();
+        });
+        result.textContent+="ALL 22 CASES PASSED\n";
     } catch(error) {result.textContent+="FAIL "+error.stack;console.error(error);}
     finally{document.querySelector("#run").disabled=false;}
 };

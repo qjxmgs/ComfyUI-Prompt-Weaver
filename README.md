@@ -107,6 +107,12 @@ The toggle is on when every card is enabled, off when every card is disabled, an
 
 A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
 
+### Clear Prompts
+
+Use the toolbar's **Clear Prompts** button to edit a node-local list of tags to exclude from its output. The rules apply after workflow variables expand, to both `prefix_prompt` and enabled cards (including a randomly selected favorite). Matching ignores case and the numeric weight on an enclosing pair of parentheses; it does not remove a longer tag merely because it contains the same words.
+
+Clearing affects output, not the stored card text. The grid field shows the surviving prompt, while the card editor retains the original tags and strikes through those matched by the rules. Text Mode still shows the unfiltered source. Editing the grid field preserves hidden tags; removing a rule makes them visible again. The list stays with this node when switching archives and is saved in the workflow, not in the global favorite library.
+
 ### Card editor
 
 The editor button next to a prompt splits its text at top-level English or Chinese commas and line breaks. Separators inside parentheses, square or curly brackets, quotes, and escaped content are preserved. The editor deduplicates tags case-insensitively while retaining the first spelling and original order.

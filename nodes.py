@@ -10,6 +10,7 @@ MAX_VARIABLE_NAME_LENGTH = 64
 MAX_VARIABLE_VALUE_LENGTH = 10_000
 MAX_EXPANDED_PROMPT_LENGTH = 1_048_576
 _VARIABLE_REFERENCE = re.compile(r"\{([^{}]+)\}")
+_PROMPT_WEIGHT = re.compile(r"\s*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\s*")
 
 DEFAULT_CONFIG = json.dumps(
     {
@@ -106,7 +107,7 @@ def _parse_config(config):
         raise _config_error("expected a JSON string")
 
     if not config.strip():
-        return {}, []
+        return {}, [], ""
 
     try:
         data = json.loads(config, parse_constant=_reject_nonstandard_json_constant)
@@ -132,6 +133,10 @@ def _parse_config(config):
     if not isinstance(items, list):
         raise _config_error("'items' must be an array")
     variables = _parse_variables(data.get("variables", []))
+    clear_prompts = data.get("clear_prompts", {})
+    if not isinstance(clear_prompts, dict):
+        raise _config_error("'clear_prompts' must be an object")
+    clear_prompt = _parse_prompt_fields(clear_prompts, "clear_prompts")
 
     parsed_items = []
     for index, item in enumerate(items):
@@ -142,42 +147,31 @@ def _parse_config(config):
         if not isinstance(enabled, bool):
             raise _config_error(f"'items[{index}].enabled' must be a boolean")
 
-        prompt = item.get("prompt", "")
-        if not isinstance(prompt, str):
-            raise _config_error(f"'items[{index}].prompt' must be a string")
+        parsed_items.append((enabled, _parse_prompt_fields(item, f"items[{index}]")))
 
-        retain_unselected = item.get("retain_unselected", True)
-        if not isinstance(retain_unselected, bool):
-            raise _config_error(
-                f"'items[{index}].retain_unselected' must be a boolean"
-            )
+    return variables, parsed_items, clear_prompt
 
-        if "prompt_tokens" in item:
-            prompt_tokens = item.get("prompt_tokens")
-            if not isinstance(prompt_tokens, list):
-                raise _config_error(
-                    f"'items[{index}].prompt_tokens' must be an array"
-                )
-            for token_index, token in enumerate(prompt_tokens):
-                if not isinstance(token, dict):
-                    raise _config_error(
-                        f"'items[{index}].prompt_tokens[{token_index}]' must be an object"
-                    )
-                text = token.get("text")
-                if not isinstance(text, str) or not text.strip():
-                    raise _config_error(
-                        f"'items[{index}].prompt_tokens[{token_index}].text' "
-                        "must be a non-empty string"
-                    )
-                if not isinstance(token.get("selected"), bool):
-                    raise _config_error(
-                        f"'items[{index}].prompt_tokens[{token_index}].selected' "
-                        "must be a boolean"
-                    )
 
-        parsed_items.append((enabled, prompt))
+def _parse_prompt_fields(item, field):
+    prompt = item.get("prompt", "")
+    if not isinstance(prompt, str):
+        raise _config_error(f"'{field}.prompt' must be a string")
+    if not isinstance(item.get("retain_unselected", True), bool):
+        raise _config_error(f"'{field}.retain_unselected' must be a boolean")
 
-    return variables, parsed_items
+    prompt_tokens = item.get("prompt_tokens", [])
+    if not isinstance(prompt_tokens, list):
+        raise _config_error(f"'{field}.prompt_tokens' must be an array")
+    for token_index, token in enumerate(prompt_tokens):
+        token_field = f"{field}.prompt_tokens[{token_index}]"
+        if not isinstance(token, dict):
+            raise _config_error(f"'{token_field}' must be an object")
+        text = token.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise _config_error(f"'{token_field}.text' must be a non-empty string")
+        if not isinstance(token.get("selected"), bool):
+            raise _config_error(f"'{token_field}.selected' must be a boolean")
+    return prompt
 
 
 def _clean_prompt(prompt):
@@ -216,53 +210,45 @@ def _is_contraction_apostrophe(text, index):
     )
 
 
-def _split_prompt_tokens(value):
-    text = value if isinstance(value, str) else ""
-    tokens = []
-    current = []
-    parenthesis_depth = 0
-    bracket_depth = 0
-    brace_depth = 0
+def _prompt_syntax_characters(text):
     quote_end = None
     escaped = False
-
-    def flush():
-        token = "".join(current).strip()
-        if token:
-            tokens.append(token)
-        current.clear()
-
     for index, character in enumerate(text):
         if escaped:
-            current.append(character)
             escaped = False
             continue
         if character == "\\":
-            current.append(character)
             escaped = True
             continue
         if quote_end:
-            current.append(character)
             if character == quote_end and not _is_contraction_apostrophe(text, index):
                 quote_end = None
             continue
+        quote_end = _quote_end_at(text, index)
+        if not quote_end:
+            yield index, character
 
-        next_quote_end = _quote_end_at(text, index)
-        if next_quote_end:
-            quote_end = next_quote_end
-            current.append(character)
-            continue
 
+def _split_prompt_tokens(value):
+    text = value if isinstance(value, str) else ""
+    tokens = []
+    start = 0
+    parenthesis_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    for index, character in _prompt_syntax_characters(text):
         if (
             character in (",", "，", "\n", "\r")
             and parenthesis_depth == 0
             and bracket_depth == 0
             and brace_depth == 0
         ):
-            flush()
+            token = text[start:index].strip()
+            if token:
+                tokens.append(token)
+            start = index + 1
             continue
 
-        current.append(character)
         if character == "(":
             parenthesis_depth += 1
         elif character == ")" and parenthesis_depth > 0:
@@ -276,15 +262,51 @@ def _split_prompt_tokens(value):
         elif character == "}" and brace_depth > 0:
             brace_depth -= 1
 
-    flush()
+    token = text[start:].strip()
+    if token:
+        tokens.append(token)
     return tokens
 
 
-def _deduplicated_prompt(parts):
+def _clear_prompt_key(token):
+    if not (token.startswith("(") and token.endswith(")")):
+        return token.lower()
+
+    # Index balanced wrappers once so even deeply nested weights are linear.
+    wrappers = {}
+    stack = []
+    for index, character in _prompt_syntax_characters(token):
+        if character == "(":
+            stack.append((index, None))
+        elif character == ":" and stack:
+            stack[-1] = (stack[-1][0], index)
+        elif character == ")" and stack:
+            opening, colon = stack.pop()
+            wrappers[opening] = (index, colon)
+
+    start, end = 0, len(token)
+    while start in wrappers and wrappers[start][0] == end - 1:
+        _, colon = wrappers[start]
+        inner_start, inner_end = start + 1, end - 1
+        if colon is not None and colon > inner_start and _PROMPT_WEIGHT.fullmatch(token, colon + 1, inner_end):
+            inner_end = colon
+        while inner_start < inner_end and token[inner_start].isspace():
+            inner_start += 1
+        while inner_end > inner_start and token[inner_end - 1].isspace():
+            inner_end -= 1
+        if inner_start == inner_end:
+            break
+        start, end = inner_start, inner_end
+    return token[start:end].lower()
+
+
+def _deduplicated_prompt(parts, excluded):
     result = []
     seen = set()
     for part in parts:
         for token in _split_prompt_tokens(part):
+            if excluded and _clear_prompt_key(token) in excluded:
+                continue
             key = token.casefold()
             if key in seen:
                 continue
@@ -298,21 +320,30 @@ def combine_prompt_grid_config(config, prefix_prompt=""):
         raise _config_error("'prefix_prompt' must be a string")
 
     prompts = []
-    variables, parsed_items = _parse_config(config)
+    variables, parsed_items, clear_prompt = _parse_config(config)
+    excluded = {_clear_prompt_key(token) for token in _split_prompt_tokens(
+        _expand_variables(clear_prompt, variables)
+    )}
+    has_prefix = bool(_split_prompt_tokens(prefix_prompt))
     for enabled, prompt in parsed_items:
         if not enabled:
             continue
         cleaned = _clean_prompt(_expand_variables(prompt, variables))
+        if cleaned and excluded and not has_prefix:
+            tokens = _split_prompt_tokens(cleaned)
+            remaining = [token for token in tokens if _clear_prompt_key(token) not in excluded]
+            if len(remaining) != len(tokens):
+                cleaned = ", ".join(remaining)
         if cleaned:
             prompts.append(cleaned)
 
     # Preserve the exact legacy grid-only output when no usable prefix is
     # supplied. Once a prefix participates, normalize both sources with the
     # same top-level token rules as the prompt editor and keep the first copy.
-    if not _split_prompt_tokens(prefix_prompt):
+    if not has_prefix:
         result = ", ".join(prompts)
     else:
-        result = _deduplicated_prompt([prefix_prompt, *prompts])
+        result = _deduplicated_prompt([prefix_prompt, *prompts], excluded)
     if len(result) > MAX_EXPANDED_PROMPT_LENGTH:
         raise _config_error("expanded prompt exceeds 1 MiB")
     return result

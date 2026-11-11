@@ -1,0 +1,50 @@
+[
+  {
+    "name": "weighted matches across the prefix and enabled cards",
+    "clear_prompts": {"prompt": "blue eyes, 春天", "prompt_tokens": [{"text": "smile", "selected": false}]},
+    "prefix": "((blue eyes:1.2)), Smile, (blue eyes, smile:1.4)",
+    "cards": [
+      {"prompt": "BLUE EYES, (blue eyes : +.5e1), bright blue eyes，春天, smile", "marked": ["BLUE EYES", "(blue eyes : +.5e1)", "春天"]},
+      {"prompt": "disabled text", "enabled": false, "marked": []}
+    ],
+    "output": "Smile, (blue eyes, smile:1.4), bright blue eyes"
+  },
+  {
+    "name": "variables expand once and map partial matches back to the entire reference",
+    "variables": [
+      {"id": "v1", "name": "tags", "value": "blue eyes, smile"},
+      {"id": "v2", "name": "exclude", "value": "((blue eyes)), wolf's-tail"}
+    ],
+    "clear_prompts": {"prompt": "{exclude}"},
+    "cards": [
+      {"prompt": "{tags}, wolf's-tail, smile", "marked": ["{tags}", "wolf's-tail"]},
+      {"prompt": "\"blue eyes, smile\", \\(blue eyes\\), (blue eyes) (smile)", "marked": []}
+    ],
+    "output": "smile, smile, \"blue eyes, smile\", \\(blue eyes\\), (blue eyes) (smile)"
+  },
+  {
+    "name": "expanded tokens can span raw text and variable references",
+    "variables": [{"id": "v1", "name": "color", "value": "blue"}, {"id": "v2", "name": "empty", "value": ""}],
+    "clear_prompts": {"prompt": "blue eyes, \\{literal\\}, \\{literal}"},
+    "cards": [{"prompt": "{color} {empty}eyes, \\{literal}, red", "marked": ["{color} {empty}eyes", "\\{literal}"]}],
+    "output": "red"
+  },
+  {
+    "name": "a rule without a match preserves legacy grid formatting",
+    "clear_prompts": {"prompt": "blue eyes"},
+    "cards": [{"prompt": "red hair，smile\nred hair", "marked": []}],
+    "output": "red hair，smile\nred hair"
+  },
+  {
+    "name": "a materialized random favorite is filtered like any enabled card",
+    "clear_prompts": {"prompt": "(red hair:1.4), prefix"},
+    "prefix": "prefix, natural light",
+    "cards": [{"prompt": "red hair, smile", "marked": ["red hair"]}],
+    "output": "natural light, smile"
+  },
+  {
+    "name": "empty active rules and old workflow fields use the legacy output",
+    "cards": [{"prompt": "red hair, red hair", "marked": []}],
+    "output": "red hair, red hair"
+  }
+]
