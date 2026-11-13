@@ -107,6 +107,16 @@ The toggle is on when every card is enabled, off when every card is disabled, an
 
 A new node starts with two columns and four enabled empty cards. Array/visual order is the final combination order; changing the column count never changes that order.
 
+### External card inputs
+
+Each card has a `STRING` input on its left. Drag a string output onto this port to replace that card's prompt during execution. The original prompt stays saved and returns when the wire is disconnected. Connected cards are read-only; right-click the port (or focus it and press Delete) to disconnect.
+
+The card switch also controls the external input. Disabled cards do not request their upstream value unless another node needs it. An empty external string contributes nothing; a failed upstream node does not silently fall back to old text. External text follows the grid's variable and Clear Prompts rules. External input takes priority over random favorites while connected.
+
+Wires follow card IDs through reordering. Deleting connected cards or loading an archive that removes them requires confirmation. Favorites and archives do not store wires.
+
+Saved workflows keep connections. During execution, the grid also records the actual input strings in the generated image's Workflow metadata, without replacing original card text or disconnecting wires. Reloading the image can display this snapshot, but the next run still obtains fresh upstream values. This requires a downstream image saver that preserves ComfyUI Workflow metadata; API requests without metadata do not create workflow files.
+
 ### Clear Prompts
 
 Use the toolbar's **Clear Prompts** button to edit a node-local list of tags to exclude from its output. The rules apply after workflow variables expand, to both `prefix_prompt` and enabled cards (including a randomly selected favorite). Matching ignores case and the numeric weight on an enclosing pair of parentheses; it does not remove a longer tag merely because it contains the same words.

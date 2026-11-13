@@ -9,6 +9,43 @@ MAX_VARIABLES = 100
 MAX_VARIABLE_NAME_LENGTH = 64
 MAX_VARIABLE_VALUE_LENGTH = 10_000
 MAX_EXPANDED_PROMPT_LENGTH = 1_048_576
+CARD_INPUT_PREFIX = "card_prompt_"
+
+
+class CardPromptInputs(dict):
+    """V1 dynamic inputs: only the reserved card namespace is accepted."""
+
+    def __contains__(self, key):
+        return super().__contains__(key) or (
+            isinstance(key, str) and key.startswith(CARD_INPUT_PREFIX)
+            and len(key) > len(CARD_INPUT_PREFIX)
+        )
+
+    def __getitem__(self, key):
+        if super().__contains__(key):
+            return super().__getitem__(key)
+        if key in self:
+            return ("STRING", {"forceInput": True, "lazy": True})
+        raise KeyError(key)
+
+
+def _external_card_items(config, inputs):
+    # Validate the original document too; replacing a prompt must not mask a
+    # malformed config. Old documents without IDs still work without inputs.
+    _parse_config(config)
+    data = json.loads(config) if config.strip() else {"items": []}
+    by_name = {}
+    for item in data["items"]:
+        identifier = item.get("id")
+        if isinstance(identifier, str) and identifier:
+            name = CARD_INPUT_PREFIX + identifier
+            if name in by_name:
+                raise _config_error("duplicate card ID for external inputs")
+            by_name[name] = item
+    for name in inputs:
+        if name not in by_name:
+            raise _config_error(f"unknown card input {name!r}")
+    return data, by_name
 _VARIABLE_REFERENCE = re.compile(r"\{([^{}]+)\}")
 _PROMPT_WEIGHT = re.compile(r"\s*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\s*")
 
@@ -359,7 +396,7 @@ class PromptWeaverPromptToggleGrid:
                     {"default": DEFAULT_CONFIG},
                 )
             },
-            "optional": {
+            "optional": CardPromptInputs({
                 "prefix_prompt": (
                     "STRING",
                     {
@@ -368,7 +405,8 @@ class PromptWeaverPromptToggleGrid:
                         "tooltip": "Optional text prepended to enabled prompt cards; duplicates are removed.",
                     },
                 )
-            }
+            }),
+            "hidden": {"unique_id": "UNIQUE_ID", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
     RETURN_TYPES = ("STRING",)
@@ -379,5 +417,55 @@ class PromptWeaverPromptToggleGrid:
         "Prepend optional prompt text, then combine enabled prompt cards and remove duplicates."
     )
 
-    def combine(self, config, prefix_prompt=""):
-        return (combine_prompt_grid_config(config, prefix_prompt),)
+    @classmethod
+    def VALIDATE_INPUTS(cls, config, input_types, prefix_prompt="", unique_id=None, extra_pnginfo=None, **kwargs):
+        try:
+            dynamic = {name: value for name, value in kwargs.items()}
+            _external_card_items(config, dynamic)
+            for name, value_type in input_types.items():
+                if name != "prefix_prompt" and name not in dynamic:
+                    return f"Unknown input: {name}"
+                if value_type != "STRING":
+                    return f"{name} requires STRING, received {value_type}"
+        except (ValueError, TypeError) as error:
+            return str(error)
+        return True
+
+    @classmethod
+    def IS_CHANGED(cls, config, prefix_prompt="", **kwargs):
+        # Metadata belongs to each execution, not the output cache. Only this
+        # inexpensive combiner is invalidated; upstream caching remains intact.
+        return float("nan") if any(k.startswith(CARD_INPUT_PREFIX) for k in kwargs) else config
+
+    def check_lazy_status(self, config, prefix_prompt="", **kwargs):
+        dynamic = {k: v for k, v in kwargs.items() if k.startswith(CARD_INPUT_PREFIX)}
+        _, items = _external_card_items(config, dynamic)
+        return [name for name, value in dynamic.items() if items[name].get("enabled", False) and value is None]
+
+    def combine(self, config, prefix_prompt="", unique_id=None, extra_pnginfo=None, **kwargs):
+        data, items = _external_card_items(config, kwargs)
+        snapshots = {}
+        for name, value in kwargs.items():
+            item = items[name]
+            if not item.get("enabled", False):
+                continue
+            if not isinstance(value, str):
+                raise _config_error(f"{name} must resolve to a string")
+            if len(value) > MAX_EXPANDED_PROMPT_LENGTH:
+                raise _config_error(f"{name} exceeds 1 MiB")
+            snapshots[item["id"]] = value
+            item["prompt"] = value
+        output = combine_prompt_grid_config(json.dumps(data, ensure_ascii=False), prefix_prompt)
+        # Do not modify the API inputs or the saved card's original prompt.
+        # SaveImage receives this same per-execution metadata dictionary.
+        workflow = extra_pnginfo.get("workflow") if isinstance(extra_pnginfo, dict) else None
+        if isinstance(workflow, dict):
+            for node in workflow.get("nodes", []):
+                if str(node.get("id")) != str(unique_id):
+                    continue
+                properties = node.setdefault("properties", {})
+                properties.pop("cpw_external_prompt_snapshot", None)
+                if snapshots:
+                    properties["cpw_external_prompt_snapshot"] = snapshots
+                break
+        return (output,)

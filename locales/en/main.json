@@ -12,6 +12,14 @@
   },
   "promptWeaver": {
     "ui": {
+      "External STRING input. Right-click to disconnect.": "External STRING input. Right-click to disconnect.",
+      "External prompt for {name}": "External prompt for {name}",
+      "External input — resolved when run": "External input — resolved when run",
+      "External input replaces this card's prompt. Disconnect to restore the original.": "External input replaces this card's prompt. Disconnect to restore the original.",
+      "Disconnect card inputs?": "Disconnect card inputs?",
+      "This archive removes connected cards. Their external input links will be disconnected.": "This archive removes connected cards. Their external input links will be disconnected.",
+      "Disconnect and Load": "Disconnect and Load",
+      "Delete card and disconnect its input?": "Delete card and disconnect its input?",
       "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.": "Prompt Weaver blocked this operation because ComfyUI is not listening only on loopback. Remove --listen or start ComfyUI with --listen 127.0.0.1, then restart it. Apps on this computer can use 127.0.0.1; other devices need an SSH tunnel. Changing only the browser URL will not fix the listener.",
       "Restart ComfyUI with --listen 127.0.0.1": "Restart ComfyUI with --listen 127.0.0.1",
       "Card {index}": "Card {index}",

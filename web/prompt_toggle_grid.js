@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { attachCardInputs, connectedCardIds, removedConnectedCards, rememberCardWidgetHost } from "./prompt_card_inputs.js?v=20261114-persistent-card-links";
 import {
     DEFAULT_ARCHIVE_ID,
     DEFAULT_ARCHIVE_NAME,
@@ -32,7 +33,7 @@ import {
     promptCardFavoriteSnapshot,
     replacePromptGridItemWithFavorite,
     materializeRandomFavoriteExecution,
-} from "./prompt_card_library.js?v=20261111-editor-text-mode";
+} from "./prompt_card_library.js?v=20261113-card-inputs";
 import {
     connectPromptWeaverI18n,
     formatDateTime,
@@ -772,7 +773,7 @@ function ensureStylesheet() {
     const link = document.createElement("link");
     link.id = id;
     link.rel = "stylesheet";
-    link.href = new URL("./prompt_toggle_grid.css?v=20261106-clear-prompt-tags", import.meta.url).href;
+    link.href = new URL("./prompt_toggle_grid.css?v=20261113-card-inputs", import.meta.url).href;
     document.head.append(link);
 }
 
@@ -985,6 +986,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     let sizeReconcileFrame = 0;
     let disposed = false;
     let widget;
+    let cardInputs;
     const cardElements = new Map();
     const cardAutocompleteControllers = new Set();
     let cardClearKeys = new Set();
@@ -1116,9 +1118,10 @@ function createPromptGridWidget(node, inputName, inputData) {
             return;
         }
         const item = state?.items.find((entry) => entry.id === itemId);
-        const rawPrompt = item?.prompt ?? input.value;
+        const external = connectedCardIds(node).has(itemId);
+        const rawPrompt = external ? input.value : item?.prompt ?? input.value;
         const shownPrompt = filteredCardPrompt(rawPrompt, state?.variables ?? [], cardClearKeys) ?? rawPrompt;
-        const exampleImageId = effectiveExampleImageId(item, promptCardLibraryService.library);
+        const exampleImageId = external ? null : effectiveExampleImageId(item, promptCardLibraryService.library);
         const style = getComputedStyle(input);
         const contentWidth = input.clientWidth
             - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
@@ -1229,6 +1232,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         errorTitle.textContent = t("Configuration could not be read");
         resetButton.textContent = t("Reset to Default");
         for (const card of root.querySelectorAll(".cpw-prompt-grid__card")) {
+            const external = connectedCardIds(node).has(card.dataset.itemId);
+            const port = card.querySelector(".cpw-prompt-grid__input-port");
+            if (port) {
+                port.title = t("External STRING input. Right-click to disconnect.");
+                port.setAttribute("aria-label", t("External prompt for {name}", {
+                    name: state?.items.find((item) => item.id === card.dataset.itemId)?.title ?? "",
+                }));
+            }
             card.querySelector(".cpw-prompt-grid__switch input")?.setAttribute(
                 "aria-label",
                 t("Enable this prompt"),
@@ -1242,9 +1253,10 @@ function createPromptGridWidget(node, inputName, inputData) {
             if (promptInput) refreshCardPromptInputLabels(promptInput);
             const editButton = card.querySelector(".cpw-prompt-grid__prompt-edit");
             if (editButton) {
-                editButton.title = t(editButton.disabled
+                editButton.title = external
+                    ? t("External input replaces this card's prompt. Disconnect to restore the original.") : t(editButton.disabled
                     ? "Random mode: prompt editing is disabled" : "Split and select prompts");
-                editButton.setAttribute("aria-label", t(editButton.disabled
+                editButton.setAttribute("aria-label", external ? editButton.title : t(editButton.disabled
                     ? "Random mode: prompt editing is disabled" : "Open the prompt tag editor"));
             }
         }
@@ -1281,6 +1293,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         if (!archiveAssociationInitialized) editedBeforeArchiveInitialization = true;
         const previousValue = serializedValue;
         serializedValue = JSON.stringify(state);
+        cardInputs?.sync();
         parseError = null;
         syncMasterToggle();
         if (renderAfter) render();
@@ -1772,7 +1785,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         manageArchivesButton.focus();
     }
 
-    function loadArchive(archive, { captureHistory = true, persistGlobal = true } = {}) {
+    async function loadArchive(archive, { captureHistory = true, persistGlobal = true } = {}) {
         if (!archive || disposed) return;
         const snapshot = archive.id === DEFAULT_ARCHIVE_ID || archive.is_default
             ? localizePristineDefaultSnapshot(
@@ -1785,16 +1798,27 @@ function createPromptGridWidget(node, inputName, inputData) {
             variables: state?.variables ?? [],
             ...(state?.clear_prompts ? { clear_prompts: state.clear_prompts } : {}),
         }));
+        if (removedConnectedCards(node, normalized.state.items).length) {
+            const confirmed = await askArchiveConfirmation({
+                title: t("Disconnect card inputs?"),
+                message: t("This archive removes connected cards. Their external input links will be disconnected."),
+                confirmText: t("Disconnect and Load"),
+                danger: true,
+            });
+            if (!confirmed || disposed) return false;
+        }
+        if (captureHistory) node.graph?.beforeChange?.();
         state = normalized.state;
         parseError = null;
         setActiveArchive(archive.id, { persistGlobal });
         commit(true, false);
         applyArchiveNodeSize(archive.snapshot);
         reconcileArchiveSelection();
-        if (captureHistory) captureCanvasState();
+        if (captureHistory) { node.graph?.afterChange?.(); captureCanvasState(); }
+        return true;
     }
 
-    function restoreActiveArchive() {
+    async function restoreActiveArchive() {
         const archive = archives.find((candidate) => candidate.id === activeArchiveId) ?? null;
         if (!canRestoreArchive(archive, {
             dirty: archiveDirty,
@@ -1802,7 +1826,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             loading: archivesLoading,
             saving: archiveQuickSaveBusy,
         })) return;
-        loadArchive(archive);
+        if (!await loadArchive(archive)) return;
         showArchiveToast(
             "success",
             t("Archive Restored"),
@@ -1827,8 +1851,7 @@ function createPromptGridWidget(node, inputName, inputData) {
             }
         }
         closeArchiveManager();
-        loadArchive(archive);
-        return true;
+        return await loadArchive(archive);
     }
 
     function formatArchiveTime(value) {
@@ -3304,8 +3327,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         const nextItems = state.items.filter((candidate) => candidate.id !== itemId);
         if (nextItems.length === state.items.length) return;
         closeItemContextMenu();
+        node.graph?.beforeChange?.();
         state.items = nextItems;
         commit(true);
+        node.graph?.afterChange?.();
         scheduleNodeHeightFit();
     }
 
@@ -3350,7 +3375,8 @@ function createPromptGridWidget(node, inputName, inputData) {
             const confirmation = element("div", "cpw-prompt-grid__item-menu-delete-confirm");
             confirmation.setAttribute("role", "group");
             confirmation.setAttribute("aria-label", t("Confirm?"));
-            const question = element("span", "cpw-prompt-grid__item-menu-delete-question", t("Confirm?"));
+            const question = element("span", "cpw-prompt-grid__item-menu-delete-question",
+                t(connectedCardIds(node).has(item.id) ? "Delete card and disconnect its input?" : "Confirm?"));
             const confirm = element(
                 "button",
                 "cpw-prompt-grid__item-menu-delete-choice cpw-prompt-grid__item-menu-delete-choice--confirm",
@@ -3924,6 +3950,7 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function openPromptEditor(promptInput, itemId, opener, options = {}) {
+        if (!options.mode && connectedCardIds(node).has(itemId)) return;
         closePromptEditor(false);
         const favoriteUpdateMode = options.mode === "favorite-update";
         const clearPromptsMode = options.mode === "clear-prompts";
@@ -5561,6 +5588,13 @@ function createPromptGridWidget(node, inputName, inputData) {
     }
 
     function refreshCardPromptInputLabels(input) {
+        const id = input.closest(".cpw-prompt-grid__card")?.dataset.itemId;
+        if (id && connectedCardIds(node).has(id)) {
+            input.placeholder = t("External input — resolved when run");
+            input.title = t("External input replaces this card's prompt. Disconnect to restore the original.");
+            input.setAttribute("aria-label", t("Prompt content"));
+            return;
+        }
         input.placeholder = t("Enter a prompt…");
         input.setAttribute("aria-label", t("Prompt content"));
         if (input.readOnly) input.title = t("Random mode: prompt editing is disabled");
@@ -5575,7 +5609,9 @@ function createPromptGridWidget(node, inputName, inputData) {
         card.dataset.itemId = item.id;
         cardElements.set(item.id, card);
         card.classList.toggle("cpw-prompt-grid__card--disabled", !item.enabled);
-        const randomCategory = normalizeRandomFavoriteCategory(item.random_favorite_category);
+        const external = connectedCardIds(node).has(item.id);
+        const randomCategory = external ? null : normalizeRandomFavoriteCategory(item.random_favorite_category);
+        card.classList.toggle("cpw-prompt-grid__card--external", external);
         card.classList.toggle("cpw-prompt-grid__card--random", Boolean(randomCategory));
         applyCardColor(card, item.color);
         const refreshDirection = pendingFavoriteRefreshDirections.get(item.id);
@@ -5630,7 +5666,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
         const prompt = element("input", "cpw-prompt-grid__prompt");
         prompt.type = "text";
-        prompt.readOnly = Boolean(randomCategory);
+        prompt.readOnly = external || Boolean(randomCategory);
         if (randomCategory) prompt.setAttribute("aria-readonly", "true");
         refreshCardPromptInputLabels(prompt);
         let mergeInlineEdit;
@@ -5638,14 +5674,14 @@ function createPromptGridWidget(node, inputName, inputData) {
         promptEditButton.type = "button";
         promptEditButton.title = t("Split and select prompts");
         promptEditButton.setAttribute("aria-label", t("Open the prompt tag editor"));
-        promptEditButton.disabled = Boolean(randomCategory);
+        promptEditButton.disabled = external || Boolean(randomCategory);
         if (randomCategory) {
             promptEditButton.title = t("Random mode: prompt editing is disabled");
             promptEditButton.setAttribute("aria-label", promptEditButton.title);
         }
         const promptRow = element("div", "cpw-prompt-grid__prompt-row");
         promptRow.append(prompt, promptEditButton);
-        card.append(header, promptRow);
+        card.append(cardInputs.makePort(item), header, promptRow);
 
         toggle.addEventListener("change", () => {
             card.classList.toggle("cpw-prompt-grid__card--disabled", !toggle.checked);
@@ -5673,12 +5709,21 @@ function createPromptGridWidget(node, inputName, inputData) {
             mergeInlineEdit = undefined;
             if (prompt.readOnly || !prompt.isConnected) return;
             const currentItem = state?.items.find((entry) => entry.id === item.id);
-            if (currentItem) syncCardPromptInput(prompt, currentItem.prompt);
+            if (currentItem && !external) syncCardPromptInput(prompt, currentItem.prompt);
         });
         title.addEventListener("change", captureCanvasState);
         prompt.addEventListener("change", captureCanvasState);
         syncCardPromptInput(prompt, item.prompt);
-        if (!randomCategory) {
+        if (external) {
+            const snapshot = node.properties?.cpw_external_prompt_snapshot?.[item.id];
+            prompt.value = typeof snapshot === "string" ? snapshot : "";
+            prompt.placeholder = t("External input — resolved when run");
+            prompt.title = t("External input replaces this card's prompt. Disconnect to restore the original.");
+            prompt.setAttribute("aria-readonly", "true");
+            promptEditButton.title = prompt.title;
+            promptEditButton.setAttribute("aria-label", prompt.title);
+        }
+        if (!randomCategory && !external) {
             cardAutocompleteControllers.add(new PromptAutocompleteController(
                 prompt,
                 promptTagAutocompleteProvider,
@@ -5714,6 +5759,7 @@ function createPromptGridWidget(node, inputName, inputData) {
 
     function render() {
         if (disposed) return;
+        cardInputs?.sync();
         hidePromptTooltip();
         closePromptCardLibraryMenu(false);
         closeItemContextMenu();
@@ -5855,6 +5901,10 @@ function createPromptGridWidget(node, inputName, inputData) {
         return result;
     };
     node.onResize = promptGridOnResize;
+    cardInputs = attachCardInputs({
+        node, app, root, scroll, getItems: () => state?.items ?? null, t,
+        onChange: () => { if (!disposed && widget) render(); },
+    });
     readValue(JSON.stringify(createDefaultConfig()));
     widget = node.addDOMWidget(inputName, WIDGET_TYPE, root, {
         serialize: true,
@@ -5877,6 +5927,8 @@ function createPromptGridWidget(node, inputName, inputData) {
     widget.inputSpec = inputData;
     const previousOnRemove = widget.onRemove;
     widget.onRemove = function (...args) {
+        rememberCardWidgetHost(node, root);
+        cardInputs.dispose();
         hidePromptTooltip();
         closePromptCardLibraryMenu(false);
         closeItemContextMenu();
@@ -5901,6 +5953,7 @@ function createPromptGridWidget(node, inputName, inputData) {
         previousOnRemove?.apply(this, args);
         if (dragSession) endPointerDrag(true, false);
         disposed = true;
+        root.dataset.cpwDisposed = "true";
         root.replaceChildren();
     };
     render();
@@ -5927,11 +5980,14 @@ app.registerExtension({
         // one fixed draw; widget.serializeValue cannot access the Workflow copy.
         const originalQueuePrompt = api.queuePrompt;
         api.queuePrompt = async function (number, payload, ...rest) {
-            const hasRandomCards = Object.values(payload?.output ?? {}).some((entry) => (
-                entry?.class_type === "PromptWeaverPromptToggleGrid"
-                && typeof entry.inputs?.config === "string"
-                && entry.inputs.config.includes('"random_favorite_category"')
-            ));
+            const hasRandomCards = Object.values(payload?.output ?? {}).some((entry) => {
+                if (entry?.class_type !== "PromptWeaverPromptToggleGrid" || typeof entry.inputs?.config !== "string") return false;
+                try {
+                    return JSON.parse(entry.inputs.config).items?.some((item) => (
+                        item.random_favorite_category && !Object.hasOwn(entry.inputs, `card_prompt_${item.id}`)
+                    ));
+                } catch { return false; }
+            });
             if (hasRandomCards) {
                 let library = null;
                 let loadFailed = false;

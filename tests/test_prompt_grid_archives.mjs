@@ -571,7 +571,7 @@ test("prompt grid cards expose the item context menu while text inputs keep nati
     assert.match(widgetSource, /makeAction\(t\("Move to Top"\)/);
     assert.match(widgetSource, /t\("Move to Bottom"\),/);
     assert.match(widgetSource, /makeAction\(t\("Delete"\), false, renderDeleteConfirmation\)/);
-    assert.match(widgetSource, /cpw-prompt-grid__item-menu-delete-question", t\("Confirm\?"\)/);
+    assert.match(widgetSource, /Delete card and disconnect its input\?/);
     assert.match(widgetSource, /confirmation\.append\(question, confirm, cancel\)/);
     assert.match(widgetSource, /queueMicrotask\(\(\) => cancel\.focus\(\)\)/);
     assert.match(widgetSource, /if \(deleteConfirming\) \{\s*renderDeleteAction\(\{ restoreFocus: true \}\);/s);

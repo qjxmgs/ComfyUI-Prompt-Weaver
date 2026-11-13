@@ -54,6 +54,18 @@ const SECONDARY_ID = "22222222-2222-4222-8222-222222222222";
 const CARD_ID = "33333333-3333-4333-8333-333333333333";
 const CREATED_AT = "2026-08-30T00:00:00.000Z";
 
+test("external card inputs suspend random selection without discarding its saved mode", () => {
+    const config = { version: 1, items: [{ id: "connected", enabled: true, prompt: "original",
+        random_favorite_category: { id: PRIMARY_ID, level: "primary" } }] };
+    const serialized = JSON.stringify(config);
+    const payload = { output: { "7": { class_type: "PromptWeaverPromptToggleGrid", inputs: {
+        config: serialized, card_prompt_connected: ["8", 0],
+    } } }, workflow: { nodes: [{ id: 7, widgets_values: [serialized] }] } };
+    materializeRandomFavoriteExecution(payload, libraryPayload(), () => assert.fail("must not draw"));
+    assert.deepEqual(JSON.parse(payload.output["7"].inputs.config), config);
+    assert.deepEqual(JSON.parse(payload.workflow.nodes[0].widgets_values[0]), config);
+});
+
 test("random category candidates respect category levels and each draw creates a fixed execution snapshot", () => {
     const secondBranch = "44444444-4444-4444-8444-444444444444";
     const otherCard = "55555555-5555-4555-8555-555555555555";
@@ -620,7 +632,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /titleShell\.append\(title\)/);
     assert.match(gridSource, /titleShell\.append\(favoriteSwitchButton\)/);
     assert.match(gridSource, /cpw-prompt-grid__random-mode/);
-    assert.match(gridSource, /prompt\.readOnly = Boolean\(randomCategory\)/);
+    assert.match(gridSource, /prompt\.readOnly = external \|\| Boolean\(randomCategory\)/);
     assert.match(gridSource, /title\.value = randomCategory \? randomCategoryName\(randomCategory\) : item\.title/);
     assert.match(gridSource, /title\.readOnly = Boolean\(randomCategory\)/);
     assert.match(gridSource, /pendingFavoriteRefreshDirections\.set\(itemId, "forward"\);\s*commit\(true, true\)/);
@@ -637,7 +649,7 @@ test("frontend integrates compact card and editor actions with responsive cascad
     assert.match(gridSource, /header\.append\(toggleLabel, titleShell\)/);
     assert.doesNotMatch(gridSource, /cpw-prompt-grid__card-actions/);
     assert.match(gridSource, /openPromptCardFavoriteCascade\(\{/);
-    assert.match(gridSource, /prompt_card_library\.js\?v=20261111-editor-text-mode/);
+    assert.match(gridSource, /prompt_card_library\.js\?v=20261113-card-inputs/);
     assert.match(gridSource, /prompt_toggle_grid\.css\?v=[\w-]+/);
     assert.match(gridSource, /promptNeedsFullPreview\(shownPrompt, input\.value, textWidth, contentWidth\)/);
     assert.match(gridSource, /promptTooltip\.textContent = exampleImageId \? t\("Loading example image…"\) : shownPrompt/);

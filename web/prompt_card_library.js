@@ -379,9 +379,10 @@ export function favoriteCardsInRandomCategory(library, selection) {
     return library.cards.filter((card) => categoryIds.has(card.category_id));
 }
 
-export function resolveRandomFavoriteConfig(config, library, random = Math.random) {
+export function resolveRandomFavoriteConfig(config, library, random = Math.random, connectedIds = new Set()) {
     let missing = false;
     const items = config.items.map((item) => {
+        if (connectedIds.has(item.id)) return item;
         const selection = normalizeRandomFavoriteCategory(item.random_favorite_category);
         if (!selection) return item;
         const { random_favorite_category: _discarded, ...fallback } = item;
@@ -418,7 +419,10 @@ export function materializeRandomFavoriteExecution(result, library, random = Mat
             incompatible = true;
             continue;
         }
-        const selected = resolveRandomFavoriteConfig(config, library, random);
+        const connectedIds = new Set(Object.keys(outputNode.inputs)
+            .filter((name) => name.startsWith("card_prompt_"))
+            .map((name) => name.slice("card_prompt_".length)));
+        const selected = resolveRandomFavoriteConfig(config, library, random, connectedIds);
         const fixed = JSON.stringify(selected.config);
         values[index] = fixed;
         outputNode.inputs.config = fixed;

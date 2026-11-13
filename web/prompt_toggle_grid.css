@@ -21,6 +21,7 @@
 }
 
 .cpw-prompt-grid {
+    position: relative;
     width: 100%;
     height: 100%;
     container-type: inline-size;
@@ -1297,13 +1298,60 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 7px;
+    padding: 7px 7px 7px 20px;
     border: 1px solid var(--border-color, #4b4d52);
     border-radius: 7px;
     background: color-mix(in srgb, var(--comfy-menu-bg, #202124) 92%, var(--p-primary-color, #7c6df2) 8%);
     box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
     cursor: grab;
     transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.cpw-prompt-grid__input-port {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    display: grid;
+    place-items: center;
+    touch-action: none;
+}
+
+.cpw-prompt-grid__input-wires {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+    fill: none;
+    stroke: #7fbd78;
+    stroke-width: 1.5px;
+    opacity: .65;
+}
+
+.cpw-prompt-grid__input-port > span {
+    width: 9px;
+    height: 9px;
+    border: 1px solid var(--input-text, #ddd);
+    border-radius: 50%;
+    background: var(--comfy-input-bg, #222);
+}
+
+.cpw-prompt-grid__input-port:is(:hover, :focus-visible) > span,
+.cpw-prompt-grid__input-port.is-connected > span {
+    background: #7fbd78;
+    border-color: #7fbd78;
+}
+
+.cpw-prompt-grid__input-port:focus-visible {
+    outline: 1px solid var(--p-primary-color, #65a8ff);
+    outline-offset: -1px;
 }
 
 .cpw-prompt-grid__card :is(input, textarea, [contenteditable="true"]) {
